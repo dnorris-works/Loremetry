@@ -10,7 +10,6 @@ use manuscript_intel_core::db;
 use manuscript_intel_core::documents::{self, UpsertDocumentRequest};
 use manuscript_intel_core::series::{self, CreateSeriesRequest, UpdateSeriesRequest};
 use manuscript_intel_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
-use manuscript_intel_core::winningcat;
 use manuscript_intel_core::{cancel_operation, Config};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -18,6 +17,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
+use crate::admin;
 use crate::error::{json_error, ok_json, result_to_response};
 use crate::invoke;
 use crate::sse;
@@ -78,8 +78,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/models", get(list_models))
         .route("/settings/test-canopy", post(test_canopy))
         .route("/settings/test-dataforseo", post(test_dataforseo))
-        .route("/settings/import-winningcat", post(import_winningcat))
-        .route("/settings/remove-stale-kdp", post(remove_stale_kdp))
+        // Admin (operator only — requires ADMIN_TOKEN)
+        .route("/admin/status", get(admin::admin_status))
+        .route("/admin/winningcat/import", post(admin::winningcat_import_json))
+        .route("/admin/winningcat/upload", post(admin::winningcat_import_upload))
+        .route("/admin/winningcat/remove-stale", post(admin::winningcat_remove_stale))
         // Chat / costs / suggests
         .route("/chat", post(chat))
         .route("/costs/estimate", post(estimate_costs))
@@ -505,36 +508,6 @@ async fn test_dataforseo(
     let (login, password) = state.config.resolve_dataforseo(&body.login, &body.password);
     ok_json(
         serde_json::to_value(dataforseo::test_dataforseo_connection(login, password).await)
-            .unwrap_or(json!(null)),
-    )
-}
-
-#[derive(Deserialize)]
-struct WinningCatBody {
-    csv_text: String,
-}
-
-async fn import_winningcat(
-    State(state): State<AppState>,
-    Json(body): Json<WinningCatBody>,
-) -> impl IntoResponse {
-    ok_json(
-        serde_json::to_value(winningcat::import_winningcat_csv(state.ctx, body.csv_text).await)
-            .unwrap_or(json!(null)),
-    )
-}
-
-#[derive(Deserialize)]
-struct StaleBody {
-    since: String,
-}
-
-async fn remove_stale_kdp(
-    State(state): State<AppState>,
-    Json(body): Json<StaleBody>,
-) -> impl IntoResponse {
-    ok_json(
-        serde_json::to_value(winningcat::remove_stale_kdp_categories(state.ctx, body.since).await)
             .unwrap_or(json!(null)),
     )
 }

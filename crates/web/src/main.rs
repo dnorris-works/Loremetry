@@ -1,3 +1,4 @@
+mod admin;
 mod error;
 mod invoke;
 mod routes;

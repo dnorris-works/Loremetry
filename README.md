@@ -18,6 +18,7 @@ Optional env secrets (also used on Miget):
 - `ANTHROPIC_API_KEY` / `TOKENMIX_API_KEY`
 - `CANOPY_API_KEY`
 - `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`
+- `ADMIN_TOKEN` — required for the Admin panel and `/api/admin/*` (WinningCat catalog import)
 
 ## Production (Miget via GitHub)
 
@@ -32,7 +33,8 @@ This repo is ready for **GitHub → Miget** deploy (same flow as other web apps)
    - If you only see buildpacks, set **Settings → Variables** → `LANGUAGE` = `dockerfile` and redeploy.
 4. **Storage:** attach a persistent volume mounted at **`/data`** (SQLite lives here).
 5. **Variables** (Settings → Variables):
-   - `ANTHROPIC_API_KEY`, `CANOPY_API_KEY`, etc. (optional BYOK overrides in the UI still work)
+   - `ANTHROPIC_API_KEY`, `CANOPY_API_KEY`, etc.
+   - `ADMIN_TOKEN` — a long random string; you use this in the **Admin** panel (sidebar) to import WinningCat CSV. End users never see this.
    - Miget sets `PORT` automatically; the app already listens on it.
 6. Enable **Auto-deploy** so pushes to your branch redeploy.
 

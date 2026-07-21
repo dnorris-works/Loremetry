@@ -354,6 +354,9 @@ function formatTimestamp(ts: string): string {
       <button class="nav-item" @click="showPanel('settings')">
         Settings
       </button>
+      <button class="nav-item nav-item-muted" @click="showPanel('admin')">
+        Admin
+      </button>
     </div>
   </aside>
 </template>
@@ -440,6 +443,11 @@ function formatTimestamp(ts: string): string {
 .nav-item:hover {
   background: var(--surface2);
   color: var(--text);
+}
+
+.nav-item-muted {
+  font-size: 12px;
+  opacity: 0.75;
 }
 
 .btn-new-story {

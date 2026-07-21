@@ -17,6 +17,7 @@ import Sidebar from './components/Sidebar.vue';
 import AnalyzerPanel from './components/AnalyzerPanel.vue';
 import ReportsViewer from './components/ReportsViewer.vue';
 import SettingsPanel from './components/SettingsPanel.vue';
+import AdminPanel from './components/AdminPanel.vue';
 import StoryForm from './components/StoryForm.vue';
 import SeriesForm from './components/SeriesForm.vue';
 import NewDocumentForm from './components/NewDocumentForm.vue';
@@ -49,7 +50,7 @@ provide('setAppMode', (mode: AppMode) => { appMode.value = mode; });
 
 // ── Panel state (within Analyzer mode) ────────────────────────────────────────
 
-type Panel = 'analyzer' | 'reports' | 'settings' | 'story-form' | 'series' | 'manuscript' | 'new-document';
+type Panel = 'analyzer' | 'reports' | 'settings' | 'admin' | 'story-form' | 'series' | 'manuscript' | 'new-document';
 const activePanel = ref<Panel>('analyzer');
 const prevPanel = ref<Panel>('analyzer');
 /** Panel to restore after cancelling New Document (works across writing/analyzer). */
@@ -245,6 +246,7 @@ onMounted(() => {
         <AnalyzerPanel v-if="activePanel === 'analyzer'" />
         <ReportsViewer v-if="activePanel === 'reports'" />
         <SettingsPanel v-if="activePanel === 'settings'" />
+        <AdminPanel v-if="activePanel === 'admin'" />
         <StoryForm v-if="activePanel === 'story-form'" :story="editingStory" />
         <SeriesForm v-if="activePanel === 'series'" :series="editingSeries" />
         <ManuscriptViewer

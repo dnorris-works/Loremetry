@@ -14,6 +14,8 @@ pub struct Config {
     pub dataforseo_password: String,
     pub default_provider: String,
     pub static_dir: PathBuf,
+    /// Shared secret for `/api/admin/*`. Empty disables admin endpoints.
+    pub admin_token: String,
 }
 
 impl Config {
@@ -39,6 +41,7 @@ impl Config {
             dataforseo_password: env::var("DATAFORSEO_PASSWORD").unwrap_or_default(),
             default_provider: env::var("DEFAULT_PROVIDER").unwrap_or_else(|_| "claude".into()),
             static_dir,
+            admin_token: env::var("ADMIN_TOKEN").unwrap_or_default(),
         }
     }
 

@@ -11,6 +11,14 @@ pub fn json_error(msg: impl Into<String>) -> Response {
         .into_response()
 }
 
+pub fn json_error_status(status: StatusCode, msg: impl Into<String>) -> Response {
+    (
+        status,
+        Json(json!({ "error": msg.into() })),
+    )
+        .into_response()
+}
+
 pub fn ok_json(value: Value) -> Response {
     Json(value).into_response()
 }

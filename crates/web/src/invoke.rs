@@ -13,7 +13,6 @@ use manuscript_intel_core::db;
 use manuscript_intel_core::documents::{self, UpsertDocumentRequest};
 use manuscript_intel_core::series::{self, CreateSeriesRequest, UpdateSeriesRequest};
 use manuscript_intel_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
-use manuscript_intel_core::winningcat;
 use manuscript_intel_core::{cancel_operation, Config};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -189,13 +188,8 @@ async fn dispatch(state: &AppState, cmd: &str, mut args: Value) -> Result<Value,
             let (login, password) = state.config.resolve_dataforseo(&login, &password);
             to_val(dataforseo::test_dataforseo_connection(login, password).await)
         }
-        "import_winningcat_csv" => {
-            let csv_text = take_string(&args, &["csv_text", "csv"])?;
-            to_val(winningcat::import_winningcat_csv(app, csv_text).await)
-        }
-        "remove_stale_kdp_categories" => {
-            let since = take_string(&args, &["since"])?;
-            to_val(winningcat::remove_stale_kdp_categories(app, since).await)
+        "import_winningcat_csv" | "remove_stale_kdp_categories" => {
+            Err("WinningCat import is admin-only. Use /api/admin/winningcat or the Admin panel.".into())
         }
         "get_folder_structure" => Ok(default_folder_structure()),
         "save_folder_structure" => {

@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { inject, ref, computed } from 'vue';
-import { invoke } from '../api';
 import { settingsKey, showPanelKey } from '../injectionKeys';
-import type { ModelInfo, WinningCatImportResult, StaleCleanupResult } from '../types';
+import type { ModelInfo } from '../types';
 import { useReportTypes } from '../composables/useReportTypes';
 
 const settingsCtx = inject(settingsKey)!;
@@ -66,12 +65,6 @@ function fnOptionLabel(m: ModelInfo, fnKey: string): string {
   return m.id + modelFitLabel(m, fnKey);
 }
 
-const winningcatStatus = ref('');
-const staleStatus = ref('');
-const showStaleRow = ref(false);
-const importDisabled = ref(false);
-let lastImportedAt = '';
-
 function modelLabel(m: ModelInfo): string {
   let label = m.id;
   if (m.owned_by) label += ` (${m.owned_by})`;
@@ -111,53 +104,6 @@ async function onTestDataforseo(): Promise<void> {
   dataforseoTestStatus.value = 'Testing...';
   const result = await settingsCtx.testDataforseo();
   dataforseoTestStatus.value = result.success ? '✓ Connected' : '✗ ' + result.error;
-}
-
-async function onWinningCatFile(ev: Event): Promise<void> {
-  const input = ev.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = '';
-  if (!file) return;
-
-  winningcatStatus.value = 'Importing...';
-  importDisabled.value = true;
-  showStaleRow.value = false;
-  try {
-    const csvText = await file.text();
-    const result = await invoke<WinningCatImportResult>('import_winningcat_csv', { csv_text: csvText });
-    if (result.success) {
-      winningcatStatus.value = `✓ Imported ${result.imported} categories. Skipped ${result.skipped_other_department} (other department), ${result.skipped_unparseable} (unparseable).`;
-      lastImportedAt = result.imported_at;
-      if (result.stale_count > 0) {
-        showStaleRow.value = true;
-        const word = result.stale_count === 1 ? 'y was' : 'ies were';
-        staleStatus.value = `${result.stale_count} categor${word} in the catalog from a previous import but missing from this one — possibly retired or renamed by Amazon.`;
-      }
-    } else {
-      winningcatStatus.value = result.error || 'Import failed.';
-    }
-  } catch (e) {
-    winningcatStatus.value = 'Error: ' + String(e);
-  } finally {
-    importDisabled.value = false;
-  }
-}
-
-async function onRemoveStale(): Promise<void> {
-  if (!lastImportedAt) return;
-  if (!confirm('Remove these stale categories from the catalog? This only affects reference data — no story data is touched.')) return;
-  try {
-    const result = await invoke<StaleCleanupResult>('remove_stale_kdp_categories', { since: lastImportedAt });
-    if (result.success) {
-      const word = result.removed === 1 ? 'y' : 'ies';
-      staleStatus.value = `✓ Removed ${result.removed} stale categor${word}.`;
-      showStaleRow.value = false;
-    } else {
-      staleStatus.value = result.error || 'Cleanup failed.';
-    }
-  } catch (e) {
-    staleStatus.value = 'Error: ' + String(e);
-  }
 }
 </script>
 
@@ -360,22 +306,6 @@ async function onRemoveStale(): Promise<void> {
       <button class="btn btn-sm" @click="onTestDataforseo">Test Connection</button>
       <div class="canopy-test-status">{{ dataforseoTestStatus }}</div>
     </div>
-
-    <!-- WinningCat section -->
-    <div class="settings-section-divider"></div>
-    <h3 class="section-title">WinningCat Import</h3>
-    <div class="settings-form">
-      <p class="panel-desc">Import the WinningCat category catalog CSV to enable category matching.</p>
-      <label class="btn file-btn" :class="{ disabled: importDisabled }">
-        Import CSV
-        <input type="file" accept=".csv,text/csv" :disabled="importDisabled" hidden @change="onWinningCatFile" />
-      </label>
-      <div class="winningcat-status">{{ winningcatStatus }}</div>
-      <div v-if="showStaleRow" class="stale-row">
-        <div class="stale-status">{{ staleStatus }}</div>
-        <button class="btn btn-sm btn-danger" @click="onRemoveStale">Remove Stale</button>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -476,8 +406,7 @@ async function onRemoveStale(): Promise<void> {
 }
 
 .model-fetch-status,
-.canopy-test-status,
-.winningcat-status {
+.canopy-test-status {
   font-size: 12px;
   color: var(--text-muted);
   min-height: 16px;
@@ -599,38 +528,5 @@ async function onRemoveStale(): Promise<void> {
   padding: 6px 12px;
   font-size: 12px;
   white-space: nowrap;
-}
-
-.file-btn {
-  display: inline-block;
-  cursor: pointer;
-  align-self: flex-start;
-}
-.file-btn.disabled {
-  background: var(--surface2);
-  color: var(--text-muted);
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-.btn-danger {
-  background: #c0392b;
-  color: #fff;
-}
-.btn-danger:hover { background: #a93226; }
-
-.stale-row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.stale-status {
-  font-size: 12px;
-  color: var(--text-muted);
 }
 </style>
