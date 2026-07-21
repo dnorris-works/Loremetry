@@ -27,7 +27,9 @@ This repo is ready for **GitHub → Miget** deploy (same flow as other web apps)
 
 1. **Miget:** Workspace Settings → **Git Credentials** → **Connect GitHub** → install the Miget app on this repo.
 2. **New application** → source **GitHub** → select the `Loremetry` repo and branch (e.g. `main`).
-3. **Builder:** **Docker Engine** (uses the repo `Dockerfile`; do not use auto-detect buildpacks — this app is Vue + Rust).
+3. **Builder:** choose **Docker Engine** (not “Auto detection / Buildpacks”).
+   - Miget will build from the root **`Dockerfile`** (Vue + Rust in one image).
+   - If you only see buildpacks, set **Settings → Variables** → `LANGUAGE` = `dockerfile` and redeploy.
 4. **Storage:** attach a persistent volume mounted at **`/data`** (SQLite lives here).
 5. **Variables** (Settings → Variables):
    - `ANTHROPIC_API_KEY`, `CANOPY_API_KEY`, etc. (optional BYOK overrides in the UI still work)
@@ -35,6 +37,17 @@ This repo is ready for **GitHub → Miget** deploy (same flow as other web apps)
 6. Enable **Auto-deploy** so pushes to your branch redeploy.
 
 After the first deploy, Miget gives you a public URL. No `git push miget` remote required.
+
+### “Unable to detect language” on deploy
+
+You’re on **Buildpacks** instead of Docker. Fix one of these:
+
+| Fix | What to do |
+|-----|------------|
+| **Recommended** | App **Settings → Deployment** → change builder to **Docker Engine** → redeploy |
+| **Stay on buildpacks** | **Settings → Variables** → add `LANGUAGE` = `dockerfile` → redeploy |
+
+Do **not** set `LANGUAGE=rust` or `nodejs` alone — this app needs both the Vue build and the Rust binary; only the `Dockerfile` does that.
 
 ### Manual Docker (optional)
 
