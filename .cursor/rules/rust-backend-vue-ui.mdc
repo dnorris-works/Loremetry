@@ -1,6 +1,6 @@
 # Architecture Split
 
-Manuscript Intel is a **Vue + Rust/Axum** web app: **Rust owns behavior**, **Vue owns presentation**.
+Loremetry is a **Vue + Rust/Axum** web app: **Rust owns behavior**, **Vue owns presentation**.
 
 ## Rust (`crates/core`, `crates/web`)
 

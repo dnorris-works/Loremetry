@@ -1,4 +1,4 @@
-// ── Shared types for Manuscript Intel UI ──────────────────────────────────────
+// ── Shared types for Loremetry UI ───────────────────────────────────────────
 
 export interface Story {
   id: string;

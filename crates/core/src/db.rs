@@ -352,7 +352,12 @@ pub struct Db(pub Mutex<Connection>);
 pub fn init(data_dir: &Path) -> Result<Db, String> {
     std::fs::create_dir_all(data_dir).map_err(|e| format!("Cannot create data dir: {}", e))?;
 
-    let db_path = data_dir.join("manuscript-intel.db");
+    let db_path = data_dir.join("loremetry.db");
+    let legacy_path = data_dir.join("manuscript-intel.db");
+    if !db_path.exists() && legacy_path.exists() {
+        std::fs::rename(&legacy_path, &db_path)
+            .map_err(|e| format!("Cannot migrate database: {}", e))?;
+    }
     let conn = Connection::open(&db_path).map_err(|e| format!("Cannot open database: {}", e))?;
     conn.execute_batch(SCHEMA).map_err(|e| format!("Schema error: {}", e))?;
     crate::stories::ensure_stories_table(&conn)?;

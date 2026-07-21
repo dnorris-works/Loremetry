@@ -1,1 +1,1 @@
-web: ./manuscript-intel-web
+web: ./loremetry-web

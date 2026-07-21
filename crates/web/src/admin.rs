@@ -5,7 +5,7 @@ use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use manuscript_intel_core::winningcat;
+use loremetry_core::winningcat;
 use serde::Deserialize;
 use serde_json::json;
 

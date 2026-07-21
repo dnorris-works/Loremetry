@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use manuscript_intel_core::{AppCtx, Config};
+use loremetry_core::{AppCtx, Config};
 
 #[derive(Clone)]
 pub struct AppState {

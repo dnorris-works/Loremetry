@@ -9,7 +9,7 @@ mod upload;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use manuscript_intel_core::{db, AppCtx, Config};
+use loremetry_core::{db, AppCtx, Config};
 use tracing_subscriber::EnvFilter;
 
 use crate::state::AppState;
@@ -45,7 +45,7 @@ async fn main() {
 
     let app = routes::build_router(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    tracing::info!("Manuscript Intel web listening on http://{addr}");
+    tracing::info!("Loremetry listening on http://{addr}");
 
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,

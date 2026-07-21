@@ -13,14 +13,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libs
     && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-RUN cargo build --release -p manuscript-intel-web \
-    && cp target/release/manuscript-intel-web /build/manuscript-intel-web
+RUN cargo build --release -p loremetry-web \
+    && cp target/release/loremetry-web /build/loremetry-web
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --from=rust /build/manuscript-intel-web /app/manuscript-intel-web
+COPY --from=rust /build/loremetry-web /app/loremetry-web
 COPY --from=ui /ui/dist /app/ui/dist
 ENV PORT=8080
 ENV DATA_DIR=/data
@@ -28,4 +28,4 @@ ENV STATIC_DIR=/app/ui/dist
 ENV RUST_LOG=info
 EXPOSE 8080
 VOLUME ["/data"]
-CMD ["/app/manuscript-intel-web"]
+CMD ["/app/loremetry-web"]

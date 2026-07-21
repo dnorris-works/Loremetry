@@ -3,17 +3,17 @@
 use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::Json;
-use manuscript_intel_core::analysis::{
+use loremetry_core::analysis::{
     ai_isms, continuity, pipeline, show_dont_tell, AnalyzeStoryRequest, FolderRequest,
 };
-use manuscript_intel_core::canopy::{self, MarketIntelRequest};
-use manuscript_intel_core::commands::{self, ChatRequest, CostEstimateRequest};
-use manuscript_intel_core::dataforseo;
-use manuscript_intel_core::db;
-use manuscript_intel_core::documents::{self, UpsertDocumentRequest};
-use manuscript_intel_core::series::{self, CreateSeriesRequest, UpdateSeriesRequest};
-use manuscript_intel_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
-use manuscript_intel_core::{cancel_operation, Config};
+use loremetry_core::canopy::{self, MarketIntelRequest};
+use loremetry_core::commands::{self, ChatRequest, CostEstimateRequest};
+use loremetry_core::dataforseo;
+use loremetry_core::db;
+use loremetry_core::documents::{self, UpsertDocumentRequest};
+use loremetry_core::series::{self, CreateSeriesRequest, UpdateSeriesRequest};
+use loremetry_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
+use loremetry_core::{cancel_operation, Config};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -225,7 +225,7 @@ async fn dispatch(state: &AppState, cmd: &str, mut args: Value) -> Result<Value,
             let request: commands::CsvRequest = take_request(&args)?;
             to_val(commands::analyze_csv(app, request).await)
         }
-        "get_genre_taxonomy" => to_val(manuscript_intel_core::genre_taxonomy::get_genre_taxonomy(&db).await?),
+        "get_genre_taxonomy" => to_val(loremetry_core::genre_taxonomy::get_genre_taxonomy(&db).await?),
         "list_genres_cmd" => to_val(db::list_genres_cmd(&db).await?),
 
         other => Err(format!("Unknown command: {other}")),

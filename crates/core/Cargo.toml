@@ -1,9 +1,9 @@
 [package]
-name = "manuscript-intel-core"
+name = "loremetry-core"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.77.2"
-description = "Manuscript Intel — core analysis, DB, and market intel"
+description = "Loremetry — core analysis, DB, and market intel"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

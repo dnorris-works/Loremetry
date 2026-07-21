@@ -4,8 +4,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 UI="$ROOT/ui"
-LOG=/tmp/manuscript-intel-vite.log
-PIDFILE=/tmp/manuscript-intel-vite.pid
+LOG=/tmp/loremetry-vite.log
+PIDFILE=/tmp/loremetry-vite.pid
 
 vite_up() {
   curl -sf --max-time 1 "http://127.0.0.1:5173/" >/dev/null 2>&1

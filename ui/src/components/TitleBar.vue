@@ -3,7 +3,7 @@
 
 <template>
   <header id="titlebar">
-    <span class="titlebar-label">Manuscript Intel</span>
+    <span class="titlebar-label">Loremetry</span>
   </header>
 </template>
 

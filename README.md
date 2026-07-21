@@ -1,4 +1,4 @@
-# Manuscript Intel (web)
+# Loremetry
 
 Single-user Vue + Rust (Axum) app for fiction market/craft analysis. Deployed on Miget.
 
@@ -7,7 +7,7 @@ Single-user Vue + Rust (Axum) app for fiction market/craft analysis. Deployed on
 ```bash
 # Terminal 1 — API (SQLite in ./data)
 export DATA_DIR=./data STATIC_DIR=./ui/dist PORT=8080
-cargo run -p manuscript-intel-web
+cargo run -p loremetry-web
 
 # Terminal 2 — Vue (proxies /api → :8080)
 cd ui && npm install && npm run dev
@@ -54,10 +54,10 @@ Do **not** set `LANGUAGE=rust` or `nodejs` alone — this app needs both the Vue
 ### Manual Docker (optional)
 
 ```bash
-docker build -t manuscript-intel .
-docker run -p 8080:8080 -v mi-data:/data \
+docker build -t loremetry .
+docker run -p 8080:8080 -v loremetry-data:/data \
   -e ANTHROPIC_API_KEY=... \
-  manuscript-intel
+  loremetry
 ```
 
 Mount a persistent volume at `/data` for SQLite.

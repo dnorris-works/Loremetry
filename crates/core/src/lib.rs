@@ -1,4 +1,4 @@
-//! Manuscript Intel core library — analysis, DB, market intel (no Tauri).
+//! Loremetry core library — analysis, DB, market intel.
 
 pub mod analysis;
 pub mod app_ctx;

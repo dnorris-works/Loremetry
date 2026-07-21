@@ -4,11 +4,11 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug manuscript-intel-web",
+      "name": "Debug loremetry-web",
       "cargo": {
-        "args": ["build", "-p", "manuscript-intel-web"],
+        "args": ["build", "-p", "loremetry-web"],
         "filter": {
-          "name": "manuscript-intel-web",
+          "name": "loremetry-web",
           "kind": "bin"
         }
       },

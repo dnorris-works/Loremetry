@@ -1,14 +1,14 @@
 [package]
-name = "manuscript-intel-web"
+name = "loremetry-web"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "manuscript-intel-web"
+name = "loremetry-web"
 path = "src/main.rs"
 
 [dependencies]
-manuscript-intel-core = { path = "../core" }
+loremetry-core = { path = "../core" }
 axum = { version = "0.8", features = ["multipart"] }
 tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
 tower = "0.5"

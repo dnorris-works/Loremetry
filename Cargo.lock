@@ -792,7 +792,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
-name = "manuscript-intel-core"
+name = "loremetry-core"
 version = "0.1.0"
 dependencies = [
  "base64 0.21.7",
@@ -809,13 +809,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "manuscript-intel-web"
+name = "loremetry-web"
 version = "0.1.0"
 dependencies = [
  "axum",
  "chrono",
  "futures",
- "manuscript-intel-core",
+ "loremetry-core",
  "serde",
  "serde_json",
  "tokio",

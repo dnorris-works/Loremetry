@@ -3,15 +3,15 @@ use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use manuscript_intel_core::analysis::pipeline;
-use manuscript_intel_core::canopy::{self, MarketIntelRequest};
-use manuscript_intel_core::commands;
-use manuscript_intel_core::dataforseo;
-use manuscript_intel_core::db;
-use manuscript_intel_core::documents::{self, UpsertDocumentRequest};
-use manuscript_intel_core::series::{self, CreateSeriesRequest, UpdateSeriesRequest};
-use manuscript_intel_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
-use manuscript_intel_core::{cancel_operation, Config};
+use loremetry_core::analysis::pipeline;
+use loremetry_core::canopy::{self, MarketIntelRequest};
+use loremetry_core::commands;
+use loremetry_core::dataforseo;
+use loremetry_core::db;
+use loremetry_core::documents::{self, UpsertDocumentRequest};
+use loremetry_core::series::{self, CreateSeriesRequest, UpdateSeriesRequest};
+use loremetry_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
+use loremetry_core::{cancel_operation, Config};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tower_http::cors::CorsLayer;
@@ -324,7 +324,7 @@ async fn analyze_story(
     Json(mut body): Json<Value>,
 ) -> impl IntoResponse {
     fill_keys(&state.config, &mut body);
-    match serde_json::from_value::<manuscript_intel_core::analysis::AnalyzeStoryRequest>(body) {
+    match serde_json::from_value::<loremetry_core::analysis::AnalyzeStoryRequest>(body) {
         Ok(req) => ok_json(
             serde_json::to_value(pipeline::analyze_story(state.ctx, req).await).unwrap_or(json!(null)),
         ),
@@ -543,12 +543,12 @@ async fn suggest_sdt(
 ) -> impl IntoResponse {
     fill_keys(&state.config, &mut body);
     match serde_json::from_value::<
-        manuscript_intel_core::analysis::show_dont_tell::SuggestSdtFixRequest,
+        loremetry_core::analysis::show_dont_tell::SuggestSdtFixRequest,
     >(body)
     {
         Ok(req) => ok_json(
             serde_json::to_value(
-                manuscript_intel_core::analysis::show_dont_tell::suggest_sdt_fix(state.ctx, req)
+                loremetry_core::analysis::show_dont_tell::suggest_sdt_fix(state.ctx, req)
                     .await,
             )
             .unwrap_or(json!(null)),
@@ -563,12 +563,12 @@ async fn suggest_ai_isms(
 ) -> impl IntoResponse {
     fill_keys(&state.config, &mut body);
     match serde_json::from_value::<
-        manuscript_intel_core::analysis::ai_isms::SuggestAiIsmsFixRequest,
+        loremetry_core::analysis::ai_isms::SuggestAiIsmsFixRequest,
     >(body)
     {
         Ok(req) => ok_json(
             serde_json::to_value(
-                manuscript_intel_core::analysis::ai_isms::suggest_ai_isms_fix(state.ctx, req)
+                loremetry_core::analysis::ai_isms::suggest_ai_isms_fix(state.ctx, req)
                     .await,
             )
             .unwrap_or(json!(null)),
@@ -583,12 +583,12 @@ async fn suggest_continuity(
 ) -> impl IntoResponse {
     fill_keys(&state.config, &mut body);
     match serde_json::from_value::<
-        manuscript_intel_core::analysis::continuity::SuggestFixRequest,
+        loremetry_core::analysis::continuity::SuggestFixRequest,
     >(body)
     {
         Ok(req) => ok_json(
             serde_json::to_value(
-                manuscript_intel_core::analysis::continuity::suggest_continuity_fix(
+                loremetry_core::analysis::continuity::suggest_continuity_fix(
                     state.ctx, req,
                 )
                 .await,

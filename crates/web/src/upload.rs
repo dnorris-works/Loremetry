@@ -1,6 +1,6 @@
 use axum::extract::{Multipart, Path, State};
 use axum::response::IntoResponse;
-use manuscript_intel_core::documents::{self, UpsertDocumentRequest};
+use loremetry_core::documents::{self, UpsertDocumentRequest};
 use serde_json::json;
 
 use crate::error::{json_error, ok_json};
@@ -12,7 +12,7 @@ pub async fn upload_chapters(
     Path(story_id): Path<String>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
-    if !manuscript_intel_core::stories::story_exists(&state.ctx.db, &story_id) {
+    if !loremetry_core::stories::story_exists(&state.ctx.db, &story_id) {
         return json_error(format!("Story not found: {story_id}"));
     }
 
