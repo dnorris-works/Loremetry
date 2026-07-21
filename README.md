@@ -46,7 +46,7 @@ cd ui && npm install && npm run dev
 
 Optional env secrets (also used on Miget):
 
-- `DATABASE_URL` — PostgreSQL connection string (required)
+- `DATABASE_URL` — PostgreSQL connection string (required; Miget may inject `POSTGRES_<addon>_URL` instead, e.g. `POSTGRES_DBWEI_URL`)
 - `ANTHROPIC_API_KEY` / `TOKENMIX_API_KEY`
 - `CANOPY_API_KEY`
 - `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`
