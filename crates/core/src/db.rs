@@ -15,6 +15,9 @@
 
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
+use std::time::Duration;
+
+use crate::config::{database_url_host, normalize_database_url};
 
 const SEED_GENRE_LIST_JSON:    &str = include_str!("../data/genre-list.json");
 const SEED_GENRE_KDP_MAP_JSON: &str = include_str!("../data/genre-kdp-map.json");
@@ -26,31 +29,84 @@ const SEED_LOOKUP_CONFIG_JSON: &str = include_str!("../data/lookup-config.json")
 
 pub struct Db(pub PgPool);
 
+fn pool_options() -> PgPoolOptions {
+    PgPoolOptions::new()
+        .max_connections(10)
+        .acquire_timeout(Duration::from_secs(60))
+        .idle_timeout(Duration::from_secs(600))
+}
+
+async fn connect_with_retry(database_url: &str, label: &str) -> Result<PgPool, String> {
+    let mut last_err = String::new();
+    for attempt in 1..=30 {
+        match pool_options().connect(database_url).await {
+            Ok(pool) => {
+                if attempt > 1 {
+                    log::info!("{label}: connected on attempt {attempt}");
+                }
+                return Ok(pool);
+            }
+            Err(e) => {
+                last_err = e.to_string();
+                log::warn!("{label}: attempt {attempt}/30 failed: {last_err}");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }
+    }
+    Err(format!("{label}: failed after 30 attempts: {last_err}"))
+}
+
+async fn connect_app_pool(database_url: &str) -> Result<PgPool, String> {
+    let mut last_err = String::new();
+    for attempt in 1..=30 {
+        match pool_options()
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    sqlx::query("SET search_path TO lore, public")
+                        .execute(conn)
+                        .await?;
+                    Ok(())
+                })
+            })
+            .connect(database_url)
+            .await
+        {
+            Ok(pool) => {
+                if attempt > 1 {
+                    log::info!("app pool: connected on attempt {attempt}");
+                }
+                return Ok(pool);
+            }
+            Err(e) => {
+                last_err = e.to_string();
+                log::warn!("app pool: attempt {attempt}/30 failed: {last_err}");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }
+    }
+    Err(format!("app pool: failed after 30 attempts: {last_err}"))
+}
+
 /// Connect to PostgreSQL, apply migrations, seed on first run.
 pub async fn init(database_url: &str) -> Result<Db, String> {
+    let database_url = normalize_database_url(database_url);
+    log::info!(
+        "Database target: {}",
+        database_url_host(&database_url)
+    );
+    log::info!("Connecting to database and running migrations…");
+
     // Migrations must run with default search_path so sqlx can manage public._sqlx_migrations.
-    let migrate_pool = PgPoolOptions::new()
-        .connect(database_url)
-        .await
-        .map_err(|e| e.to_string())?;
+    let migrate_pool = connect_with_retry(&database_url, "migrate pool").await?;
     sqlx::migrate!("./migrations")
         .run(&migrate_pool)
         .await
         .map_err(|e| format!("while executing migrations: {e}"))?;
     migrate_pool.close().await;
 
-    let pool = PgPoolOptions::new()
-        .after_connect(|conn, _meta| {
-            Box::pin(async move {
-                sqlx::query("SET search_path TO lore, public")
-                    .execute(conn)
-                    .await?;
-                Ok(())
-            })
-        })
-        .connect(database_url)
-        .await
-        .map_err(|e| e.to_string())?;
+    log::info!("Migrations complete; opening application pool…");
+
+    let pool = connect_app_pool(&database_url).await?;
 
     seed_if_empty(&pool).await?;
     seed_bisac_if_empty(&pool).await?;

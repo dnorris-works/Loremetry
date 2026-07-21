@@ -50,7 +50,6 @@ Optional env secrets (also used on Miget):
 - `ANTHROPIC_API_KEY` / `TOKENMIX_API_KEY`
 - `CANOPY_API_KEY`
 - `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`
-- `ADMIN_TOKEN` — required for the Admin panel and `/api/admin/*` (WinningCat catalog import)
 
 ## Production (Miget via GitHub)
 
@@ -64,14 +63,41 @@ This repo is ready for **GitHub → Miget** deploy (same flow as other web apps)
    - Miget will build from the root **`Dockerfile`** (Vue + Rust in one image).
    - If you only see buildpacks, set **Settings → Variables** → `LANGUAGE` = `dockerfile` and redeploy.
 4. **Database:** provision **PostgreSQL** on Miget and set **`DATABASE_URL`** in app variables. All tables live in the `lore` schema (migrations run automatically on startup).
+   - You do **not** need a `/data` volume anymore (that was only for the old SQLite file).
 5. **Variables** (Settings → Variables):
    - `DATABASE_URL` — from Miget Postgres
    - `ANTHROPIC_API_KEY`, `CANOPY_API_KEY`, etc.
-   - `ADMIN_TOKEN` — a long random string; you use this in the **Admin** panel (sidebar) to import WinningCat CSV. End users never see this.
    - Miget sets `PORT` automatically; the app already listens on it.
 6. Enable **Auto-deploy** so pushes to your branch redeploy.
 
 After the first deploy, Miget gives you a public URL. No `git push miget` remote required.
+
+### Inspecting the database (SQL, schema)
+
+**In the app:** open **Admin** (sidebar) → **SQL console**. Run queries, browse `lore` tables, and see results without leaving the UI.
+
+Loremetry tables are in the **`lore`** schema (not `public`). Migration metadata is in `public._sqlx_migrations`.
+
+**From your Mac** (TablePlus, DBeaver, or `psql`):
+
+1. Open the **PostgreSQL addon** (or standalone Postgres service) in Miget.
+2. Enable **Public Access** on the database if you need to connect from outside Miget.
+3. Copy the **External Connection** details or the ready-made `psql` command from the Connection Information panel.
+4. Connect, then run:
+
+```sql
+-- List all Loremetry tables
+\dt lore.*
+
+-- Example queries
+SELECT * FROM lore.stories;
+SELECT COUNT(*) FROM lore.kdp_categories;
+SELECT * FROM lore.genres LIMIT 10;
+```
+
+In GUI tools, set the schema to `lore` or qualify tables as `lore.stories`, etc.
+
+**Local dev:** `psql $DATABASE_URL` then `\dt lore.*`
 
 ### “Unable to detect language” on deploy
 

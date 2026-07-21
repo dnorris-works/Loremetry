@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref } from 'vue';
-import { adminFetch, adminUploadFile, getAdminToken, setAdminToken } from '../api';
+import { adminFetch, adminUploadFile } from '../api';
 import { settingsKey, showPanelKey } from '../injectionKeys';
 import type { ModelInfo, StaleCleanupResult, WinningCatImportResult } from '../types';
 import { useReportTypes } from '../composables/useReportTypes';
@@ -9,11 +9,6 @@ const showPanel = inject(showPanelKey)!;
 const settingsCtx = inject(settingsKey)!;
 const { reportTypes, loadReportTypes } = useReportTypes();
 loadReportTypes();
-
-const adminConfigured = ref(false);
-const tokenInput = ref('');
-const authenticated = ref(false);
-const statusMsg = ref('');
 
 const savedMsg = ref('');
 const modelFetchStatus = ref('');
@@ -25,6 +20,15 @@ const staleStatus = ref('');
 const showStaleRow = ref(false);
 const importDisabled = ref(false);
 let lastImportedAt = '';
+
+type DbTable = { schema: string; name: string; qualified: string };
+const dbTables = ref<DbTable[]>([]);
+const sqlQuery = ref('SELECT * FROM lore.stories LIMIT 50');
+const sqlRunning = ref(false);
+const sqlError = ref('');
+const sqlMeta = ref('');
+const sqlColumns = ref<string[]>([]);
+const sqlRows = ref<unknown[][]>([]);
 
 type ModelSort = 'price' | 'provider';
 const modelSort = ref<ModelSort>('price');
@@ -81,34 +85,64 @@ function modelLabel(m: ModelInfo): string {
   return label;
 }
 
-onMounted(async () => {
-  try {
-    const res = await fetch('/api/admin/status');
-    const data = await res.json() as { configured?: boolean };
-    adminConfigured.value = !!data.configured;
-  } catch {
-    adminConfigured.value = false;
-  }
-  const saved = getAdminToken();
-  if (saved) {
-    tokenInput.value = saved;
-    authenticated.value = true;
-  }
+onMounted(() => {
+  loadDbTables();
 });
 
-function onSaveToken(): void {
-  const t = tokenInput.value.trim();
-  if (!t) return;
-  setAdminToken(t);
-  authenticated.value = true;
-  statusMsg.value = 'Token saved for this browser session.';
+async function loadDbTables(): Promise<void> {
+  try {
+    const data = await adminFetch<{ success?: boolean; tables?: DbTable[] }>('/tables');
+    dbTables.value = data.tables ?? [];
+  } catch {
+    dbTables.value = [];
+  }
 }
 
-function onClearToken(): void {
-  setAdminToken('');
-  tokenInput.value = '';
-  authenticated.value = false;
-  statusMsg.value = 'Signed out of admin.';
+function insertTableQuery(table: DbTable): void {
+  sqlQuery.value = `SELECT * FROM ${table.qualified} LIMIT 50`;
+}
+
+async function onRunSql(): Promise<void> {
+  const sql = sqlQuery.value.trim();
+  if (!sql) return;
+  sqlRunning.value = true;
+  sqlError.value = '';
+  sqlMeta.value = '';
+  sqlColumns.value = [];
+  sqlRows.value = [];
+  try {
+    const result = await adminFetch<{
+      success: boolean;
+      error?: string;
+      columns?: string[];
+      rows?: unknown[][];
+      rows_affected?: number;
+      duration_ms?: number;
+    }>('/sql', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql }),
+    });
+    if (!result.success) {
+      sqlError.value = result.error || 'Query failed';
+      return;
+    }
+    sqlColumns.value = result.columns ?? [];
+    sqlRows.value = result.rows ?? [];
+    const affected = result.rows_affected ?? 0;
+    const ms = result.duration_ms ?? 0;
+    sqlMeta.value = `${affected} row${affected === 1 ? '' : 's'} · ${ms} ms`;
+  } catch (e) {
+    sqlError.value = String(e);
+  } finally {
+    sqlRunning.value = false;
+  }
+}
+
+function formatCell(value: unknown): string {
+  if (value === null || value === undefined) return 'NULL';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
 }
 
 async function onFetchModels(): Promise<void> {
@@ -199,36 +233,64 @@ async function onRemoveStale(): Promise<void> {
     </div>
 
     <p class="panel-desc">
-      Operator configuration — API keys, models, and catalog import. Saved in this browser; leave keys blank to use server env vars on Miget.
+      Operator configuration — API keys, models, catalog import, and SQL console. Settings are saved in this browser; leave keys blank to use server env vars on Miget.
     </p>
 
-    <div v-if="!adminConfigured" class="admin-notice">
-      Set <code>ADMIN_TOKEN</code> in Miget environment variables, then redeploy.
+    <!-- SQL console -->
+    <h3 class="section-title">SQL console</h3>
+    <div class="settings-form sql-section">
+      <p class="panel-desc">Run queries against the Postgres database. App data lives in the <code>lore</code> schema.</p>
+      <div v-if="dbTables.length > 0" class="table-picker">
+        <span class="table-picker-label">Tables</span>
+        <div class="table-chips">
+          <button
+            v-for="t in dbTables"
+            :key="t.qualified"
+            type="button"
+            class="table-chip"
+            :title="t.qualified"
+            @click="insertTableQuery(t)"
+          >
+            {{ t.qualified }}
+          </button>
+        </div>
+      </div>
+      <textarea
+        v-model="sqlQuery"
+        class="sql-input"
+        rows="6"
+        spellcheck="false"
+        placeholder="SELECT * FROM lore.stories LIMIT 50"
+        @keydown.meta.enter.prevent="onRunSql"
+        @keydown.ctrl.enter.prevent="onRunSql"
+      />
+      <div class="sql-actions">
+        <button type="button" class="btn btn-sm" :disabled="sqlRunning" @click="onRunSql">
+          {{ sqlRunning ? 'Running…' : 'Run (⌘↵)' }}
+        </button>
+        <span v-if="sqlMeta" class="status-msg">{{ sqlMeta }}</span>
+      </div>
+      <div v-if="sqlError" class="sql-error">{{ sqlError }}</div>
+      <div v-if="sqlColumns.length > 0" class="sql-results-wrap">
+        <table class="sql-results">
+          <thead>
+            <tr>
+              <th v-for="col in sqlColumns" :key="col">{{ col }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, ri) in sqlRows" :key="ri">
+              <td v-for="(cell, ci) in row" :key="ci">{{ formatCell(cell) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
-    <template v-else>
-      <div v-if="!authenticated" class="settings-form">
-        <h3 class="section-title">Sign in</h3>
-        <label class="field-label">Admin token</label>
-        <input
-          v-model="tokenInput"
-          type="password"
-          placeholder="Same value as ADMIN_TOKEN on the server"
-          autocomplete="off"
-        />
-        <button type="button" class="btn btn-sm" @click="onSaveToken">Continue</button>
-        <div class="status-msg">{{ statusMsg }}</div>
-      </div>
+    <div class="settings-section-divider"></div>
 
-      <template v-else>
-        <div class="token-row">
-          <span class="token-ok">✓ Admin signed in</span>
-          <button type="button" class="btn btn-sm" @click="onClearToken">Sign out</button>
-        </div>
-
-        <!-- Appearance -->
-        <div class="settings-section-divider"></div>
-        <h3 class="section-title">Appearance</h3>
+    <!-- Appearance -->
+    <h3 class="section-title">Appearance</h3>
         <div class="settings-form">
           <label class="field-label">Theme</label>
           <div class="provider-options">
@@ -392,8 +454,6 @@ async function onRemoveStale(): Promise<void> {
             <button type="button" class="btn btn-sm btn-danger" @click="onRemoveStale">Remove stale</button>
           </div>
         </div>
-      </template>
-    </template>
   </div>
 </template>
 
@@ -401,7 +461,7 @@ async function onRemoveStale(): Promise<void> {
 .admin-panel {
   padding: 20px;
   overflow-y: auto;
-  max-width: 560px;
+  max-width: 960px;
 }
 
 .panel-header {
@@ -423,18 +483,113 @@ async function onRemoveStale(): Promise<void> {
   line-height: 1.5;
 }
 
-.admin-notice {
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface2);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.admin-notice code {
+.panel-desc code {
   font-family: var(--mono);
   font-size: 12px;
+}
+
+.sql-section {
+  margin-bottom: 4px;
+}
+
+.sql-input {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px;
+  resize: vertical;
+  width: 100%;
+  min-height: 120px;
+}
+
+.sql-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sql-error {
+  color: var(--danger);
+  font-size: 12px;
+  font-family: var(--mono);
+  white-space: pre-wrap;
+}
+
+.sql-results-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.sql-results {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: max-content;
+  min-width: 100%;
+}
+
+.sql-results th,
+.sql-results td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sql-results th {
+  background: var(--surface2);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+.sql-results td {
+  font-family: var(--mono);
+}
+
+.table-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.table-picker-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.table-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.table-chip {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.table-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 .section-title {
@@ -588,17 +743,6 @@ async function onRemoveStale(): Promise<void> {
 .model-assign-label strong {
   font-size: 13px;
   color: var(--text);
-}
-
-.token-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-}
-
-.token-ok {
-  color: var(--success);
 }
 
 .file-btn {

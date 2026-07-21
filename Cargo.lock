@@ -1056,6 +1056,7 @@ dependencies = [
  "loremetry-core",
  "serde",
  "serde_json",
+ "sqlx",
  "tokio",
  "tower",
  "tower-http",

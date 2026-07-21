@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use loremetry_core::{db, AppCtx, Config};
+use loremetry_core::config::{database_url_host, resolve_database_url};
 use tracing_subscriber::EnvFilter;
 
 use crate::state::AppState;
@@ -24,9 +25,24 @@ async fn main() {
 
     let config = Config::from_env();
 
-    let database = match db::init(&config.database_url).await {
+    let Some(database_url) = resolve_database_url() else {
+        tracing::error!(
+            "DATABASE_URL is not set. On Miget: open this app → Addons → PostgreSQL → Add, then redeploy."
+        );
+        eprintln!("FATAL: DATABASE_URL is not set. Add a PostgreSQL addon to this app in Miget.");
+        std::process::exit(1);
+    };
+
+    tracing::info!(
+        "Starting Loremetry (port={}, db={})",
+        config.port,
+        database_url_host(&database_url)
+    );
+
+    let database = match db::init(&database_url).await {
         Ok(d) => d,
         Err(e) => {
+            tracing::error!("Database init failed: {e}");
             eprintln!("Database init failed: {e}");
             std::process::exit(1);
         }

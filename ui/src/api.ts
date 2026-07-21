@@ -47,31 +47,12 @@ export async function uploadChapters(storyId: string, files: FileList | File[]):
   }
 }
 
-const ADMIN_TOKEN_KEY = 'mi_admin_token';
-
-export function getAdminToken(): string {
-  return sessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
-}
-
-export function setAdminToken(token: string): void {
-  if (token) {
-    sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
-  } else {
-    sessionStorage.removeItem(ADMIN_TOKEN_KEY);
-  }
-}
-
-/** Authenticated fetch for `/api/admin/*` routes. */
+/** Fetch for `/api/admin/*` routes. */
 export async function adminFetch<T = unknown>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const token = getAdminToken();
-  const headers = new Headers(init.headers);
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-  const res = await fetch(`/api/admin${path}`, { ...init, headers });
+  const res = await fetch(`/api/admin${path}`, init);
   const data = await res.json();
   if (!res.ok) {
     throw new Error((data as { error?: string }).error || res.statusText || 'Admin request failed');
@@ -88,14 +69,9 @@ export async function adminUploadFile<T = unknown>(
   file: File,
   fieldName = 'file',
 ): Promise<T> {
-  const token = getAdminToken();
   const fd = new FormData();
   fd.append(fieldName, file, file.name);
-  const headers: HeadersInit = {};
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  const res = await fetch(`/api/admin${path}`, { method: 'POST', headers, body: fd });
+  const res = await fetch(`/api/admin${path}`, { method: 'POST', body: fd });
   const data = await res.json();
   if (!res.ok) {
     throw new Error((data as { error?: string }).error || res.statusText || 'Upload failed');

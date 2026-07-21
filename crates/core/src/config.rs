@@ -14,16 +14,15 @@ pub struct Config {
     pub dataforseo_password: String,
     pub default_provider: String,
     pub static_dir: PathBuf,
-    /// Shared secret for `/api/admin/*`. Empty disables admin endpoints.
-    pub admin_token: String,
     /// Max HTTP request body size in bytes (WinningCat CSV can be large).
     pub max_body_bytes: usize,
 }
 
 impl Config {
     pub fn from_env() -> Self {
-        let database_url = env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://loremetry:loremetry@localhost:5432/loremetry".into());
+        let database_url = resolve_database_url().unwrap_or_else(|| {
+            normalize_database_url("postgres://loremetry:loremetry@localhost:5432/loremetry")
+        });
         let port = env::var("PORT")
             .ok()
             .and_then(|p| p.parse().ok())
@@ -42,7 +41,6 @@ impl Config {
             dataforseo_password: env::var("DATAFORSEO_PASSWORD").unwrap_or_default(),
             default_provider: env::var("DEFAULT_PROVIDER").unwrap_or_else(|_| "claude".into()),
             static_dir,
-            admin_token: env::var("ADMIN_TOKEN").unwrap_or_default(),
             max_body_bytes: env::var("MAX_BODY_MB")
                 .ok()
                 .and_then(|s| s.parse::<usize>().ok())
@@ -81,5 +79,50 @@ impl Config {
             password.to_string()
         };
         (l, p)
+    }
+}
+
+/// Read Postgres URL from env (Miget injects `DATABASE_URL` when the addon is attached).
+pub fn resolve_database_url() -> Option<String> {
+    for key in ["DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_URL"] {
+        if let Ok(url) = env::var(key) {
+            if !url.trim().is_empty() {
+                return Some(normalize_database_url(&url));
+            }
+        }
+    }
+    None
+}
+
+/// Host portion of the URL for startup logs (no credentials).
+pub fn database_url_host(url: &str) -> String {
+    url.split('@')
+        .nth(1)
+        .unwrap_or(url)
+        .split('?')
+        .next()
+        .unwrap_or(url)
+        .to_string()
+}
+
+/// Prepare a Miget/Heroku-style URL for sqlx (rustls).
+pub fn normalize_database_url(url: &str) -> String {
+    let mut out = url.trim().replace("postgres://", "postgresql://");
+    if !out.contains("sslmode=") {
+        let sep = if out.contains('?') { '&' } else { '?' };
+        out.push_str(&format!("{sep}sslmode=disable"));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_database_url;
+
+    #[test]
+    fn normalizes_scheme_and_sslmode() {
+        let u = normalize_database_url("postgres://user:pass@host:5432/db");
+        assert!(u.starts_with("postgresql://"));
+        assert!(u.contains("sslmode=disable"));
     }
 }
