@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { inject, ref, computed } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../api';
 import { settingsKey, showPanelKey } from '../injectionKeys';
 import type { ModelInfo, WinningCatImportResult, StaleCleanupResult } from '../types';
 import { useReportTypes } from '../composables/useReportTypes';
@@ -64,7 +64,9 @@ function modelFitLabel(m: ModelInfo, fnKey: string): string {
 
 function fnOptionLabel(m: ModelInfo, fnKey: string): string {
   return m.id + modelFitLabel(m, fnKey);
-}const winningcatStatus = ref('');
+}
+
+const winningcatStatus = ref('');
 const staleStatus = ref('');
 const showStaleRow = ref(false);
 const importDisabled = ref(false);
@@ -111,12 +113,18 @@ async function onTestDataforseo(): Promise<void> {
   dataforseoTestStatus.value = result.success ? '✓ Connected' : '✗ ' + result.error;
 }
 
-async function onImportWinningCat(): Promise<void> {
-  winningcatStatus.value = 'Select the CSV file...';
+async function onWinningCatFile(ev: Event): Promise<void> {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+
+  winningcatStatus.value = 'Importing...';
   importDisabled.value = true;
   showStaleRow.value = false;
   try {
-    const result = await invoke<WinningCatImportResult>('import_winningcat_csv');
+    const csvText = await file.text();
+    const result = await invoke<WinningCatImportResult>('import_winningcat_csv', { csv_text: csvText });
     if (result.success) {
       winningcatStatus.value = `✓ Imported ${result.imported} categories. Skipped ${result.skipped_other_department} (other department), ${result.skipped_unparseable} (unparseable).`;
       lastImportedAt = result.imported_at;
@@ -318,65 +326,6 @@ async function onRemoveStale(): Promise<void> {
       <div class="settings-saved">{{ savedMsg }}</div>
     </div>
 
-    <!-- Folder structure -->
-    <div class="settings-section-divider"></div>
-    <h3 class="section-title">Folder Structure</h3>
-    <div class="settings-form">
-      <p class="panel-desc">
-        Used when you choose <strong>Create empty story</strong>. The app uses these folders by purpose
-        — you can rename the paths, but not remove them.
-      </p>
-
-      <label>Manuscript <span class="form-hint">— chapter files (analysis)</span></label>
-      <input type="text" v-model="settingsCtx.folderStructure.value.manuscript" placeholder="Manuscript" />
-      <p class="panel-desc manuscript-acts-hint">
-        Always created under Manuscript:
-        <template v-for="(act, i) in (settingsCtx.folderStructure.value.acts || [])" :key="act">
-          <strong>{{ settingsCtx.folderStructure.value.manuscript || 'Manuscript' }}/{{ act }}</strong><span v-if="i < (settingsCtx.folderStructure.value.acts.length - 1)">, </span>
-        </template>
-        — not optional.
-      </p>
-
-      <label>Bible <span class="form-hint">— story bible docs</span></label>
-      <input type="text" v-model="settingsCtx.folderStructure.value.bible" placeholder="Bible" />
-
-      <label>Characters <span class="form-hint">— character docs</span></label>
-      <input type="text" v-model="settingsCtx.folderStructure.value.characters" placeholder="Characters" />
-
-      <label>Locations <span class="form-hint">— location docs</span></label>
-      <input type="text" v-model="settingsCtx.folderStructure.value.locations" placeholder="Locations" />
-
-      <label class="extra-folders-label">Additional folders</label>
-      <p class="panel-desc extra-folders-desc">
-        Created with new stories for your own use. The app does not read these specially — add or delete freely.
-      </p>
-      <div
-        v-for="(_path, index) in settingsCtx.folderStructure.value.extra"
-        :key="index"
-        class="folder-entry-row"
-      >
-        <input
-          type="text"
-          v-model="settingsCtx.folderStructure.value.extra[index]"
-          placeholder="Extra/Folder"
-          class="folder-path-input"
-        />
-        <button
-          type="button"
-          class="btn btn-sm btn-danger"
-          title="Remove folder"
-          @click="settingsCtx.removeFolderEntry(index)"
-        >Delete</button>
-      </div>
-      <div class="folder-entry-actions">
-        <button type="button" class="btn btn-sm btn-secondary" @click="settingsCtx.addFolderEntry()">
-          Add Folder
-        </button>
-        <button class="btn" @click="onSave">Save Settings</button>
-      </div>
-      <div class="settings-saved">{{ savedMsg }}</div>
-    </div>
-
     <!-- Canopy section -->
     <div class="settings-section-divider"></div>
     <h3 class="section-title">Canopy API</h3>
@@ -417,7 +366,10 @@ async function onRemoveStale(): Promise<void> {
     <h3 class="section-title">WinningCat Import</h3>
     <div class="settings-form">
       <p class="panel-desc">Import the WinningCat category catalog CSV to enable category matching.</p>
-      <button class="btn" :disabled="importDisabled" @click="onImportWinningCat">Import CSV</button>
+      <label class="btn file-btn" :class="{ disabled: importDisabled }">
+        Import CSV
+        <input type="file" accept=".csv,text/csv" :disabled="importDisabled" hidden @change="onWinningCatFile" />
+      </label>
       <div class="winningcat-status">{{ winningcatStatus }}</div>
       <div v-if="showStaleRow" class="stale-row">
         <div class="stale-status">{{ staleStatus }}</div>
@@ -649,57 +601,23 @@ async function onRemoveStale(): Promise<void> {
   white-space: nowrap;
 }
 
+.file-btn {
+  display: inline-block;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.file-btn.disabled {
+  background: var(--surface2);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .btn-danger {
   background: #c0392b;
   color: #fff;
 }
 .btn-danger:hover { background: #a93226; }
-
-.btn-secondary {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-}
-.btn-secondary:hover {
-  color: var(--text);
-  border-color: var(--accent);
-}
-
-.folder-entry-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.folder-path-input {
-  flex: 1;
-  min-width: 0;
-}
-
-.extra-folders-label {
-  margin-top: 12px;
-}
-
-.extra-folders-desc {
-  margin: -4px 0 8px;
-  font-size: 12px;
-}
-
-.folder-entry-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-top: 8px;
-}
-
-.form-hint {
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 400;
-  font-size: 11px;
-  color: var(--text-muted);
-}
 
 .stale-row {
   display: flex;

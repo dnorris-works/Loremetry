@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { inject, ref, watch, computed } from 'vue';
-import type { Story, Series, SeriesResult } from '../types';
+import type { Story, Series, SeriesResult, SeriesBook } from '../types';
 import { storiesKey, showPanelKey } from '../injectionKeys';
 import { useSeries } from '../composables/useSeries';
 
@@ -14,7 +14,7 @@ const props = defineProps<{
 
 const name = ref('');
 const biblePath = ref('');
-const selectedBooks = ref<{ story_folder: string; story_name: string; book_order: number }[]>([]);
+const selectedBooks = ref<SeriesBook[]>([]);
 const error = ref('');
 const isEditing = ref(false);
 const editId = ref(0);
@@ -38,19 +38,18 @@ watch(() => props.series, (s) => {
 
 const availableStories = computed(() => storiesCtx.stories.value);
 
-function isStorySelected(folder: string): boolean {
-  return selectedBooks.value.some(b => b.story_folder === folder);
+function isStorySelected(id: string): boolean {
+  return selectedBooks.value.some(b => b.story_id === id);
 }
 
 function toggleStory(story: Story): void {
-  const idx = selectedBooks.value.findIndex(b => b.story_folder === story.folder);
+  const idx = selectedBooks.value.findIndex(b => b.story_id === story.id);
   if (idx >= 0) {
     selectedBooks.value.splice(idx, 1);
-    // Re-number
     selectedBooks.value.forEach((b, i) => { b.book_order = i + 1; });
   } else {
     selectedBooks.value.push({
-      story_folder: story.folder,
+      story_id: story.id,
       story_name: story.name,
       book_order: selectedBooks.value.length + 1,
     });
@@ -116,8 +115,8 @@ async function onDelete(): Promise<void> {
     </div>
 
     <div class="form-group">
-      <label>Series Bible <span style="text-transform:none;letter-spacing:0;font-size:11px;font-weight:400">(optional — markdown file with series-wide canon)</span></label>
-      <input v-model="biblePath" type="text" placeholder="/path/to/series-bible.md" />
+      <label>Series Bible <span style="text-transform:none;letter-spacing:0;font-size:11px;font-weight:400">(optional)</span></label>
+      <input v-model="biblePath" type="text" placeholder="Optional note or reference" />
     </div>
 
     <div class="form-group">
@@ -127,19 +126,19 @@ async function onDelete(): Promise<void> {
       <div class="book-list">
         <div
           v-for="story in availableStories"
-          :key="story.folder"
+          :key="story.id"
           class="book-item"
-          :class="{ selected: isStorySelected(story.folder) }"
+          :class="{ selected: isStorySelected(story.id) }"
           @click="toggleStory(story)"
         >
-          <input type="checkbox" :checked="isStorySelected(story.folder)" @click.stop />
+          <input type="checkbox" :checked="isStorySelected(story.id)" @click.stop />
           <span class="book-name">{{ story.name }}</span>
         </div>
       </div>
 
       <div v-if="selectedBooks.length > 0" class="ordered-list">
         <div class="ordered-label">Reading order:</div>
-        <div v-for="(book, idx) in selectedBooks" :key="book.story_folder" class="ordered-item">
+        <div v-for="(book, idx) in selectedBooks" :key="book.story_id" class="ordered-item">
           <span class="order-num">{{ idx + 1 }}.</span>
           <span class="order-name">{{ book.story_name }}</span>
           <button class="order-btn" @click="moveUp(idx)" :disabled="idx === 0">&#x25B2;</button>

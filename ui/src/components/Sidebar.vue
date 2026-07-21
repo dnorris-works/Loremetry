@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { inject, ref, watch, type Ref } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, uploadChapters } from '../api';
 import { storiesKey, reportsKey, platformKey, showPanelKey, openManuscriptEditorKey, seriesKey } from '../injectionKeys';
 import type { Story, Series } from '../types';
 import FileTreeNodes, { type FileTreeEntry } from './FileTreeNodes.vue';
@@ -19,6 +19,7 @@ const setAppMode = inject<(mode: 'analyzer' | 'writing') => void>('setAppMode')!
 const openInWritingMode = inject<(filePath: string, title: string) => void>('openInWritingMode')!;
 const openNewDocumentForm = inject<(location?: string) => void>('openNewDocumentForm')!;
 const fileTreeTick = inject<Ref<number>>('fileTreeTick')!;
+const bumpFileTree = inject<() => void>('bumpFileTree')!;
 
 // ── Emits ─────────────────────────────────────────────────────────────────────
 
@@ -36,15 +37,8 @@ const sidebarMode = ref<SidebarMode>('files');
 
 const fileTree = ref<FileTreeEntry[]>([]);
 const expandedDirs = ref<Set<string>>(new Set());
-
-function relativeLocation(absolutePath: string): string {
-  const root = storiesCtx.activeFolder.value.replace(/[/\\]+$/, '');
-  const full = absolutePath.replace(/\\/g, '/');
-  const base = root.replace(/\\/g, '/');
-  if (full === base) return '';
-  if (full.startsWith(base + '/')) return full.slice(base.length + 1);
-  return absolutePath;
-}
+const uploading = ref(false);
+const uploadInput = ref<HTMLInputElement | null>(null);
 
 async function loadFileTree(): Promise<void> {
   const folder = storiesCtx.activeFolder.value;
@@ -76,12 +70,13 @@ function onFileClick(entry: FileTreeEntry): void {
     toggleDir(entry.path);
     return;
   }
+  const title = entry.name.replace(/\.md$/, '').split('/').pop() || entry.name;
   if (appMode.value === 'writing') {
-    openInWritingMode(entry.path, entry.name.replace(/\.md$/, ''));
+    openInWritingMode(entry.path, title);
   } else {
     openManuscriptEditor([{
       filePath: entry.path,
-      chapterTitle: entry.name.replace(/\.md$/, ''),
+      chapterTitle: title,
       tellingText: '',
       context: '',
       why: '',
@@ -91,12 +86,33 @@ function onFileClick(entry: FileTreeEntry): void {
   }
 }
 
-function onAddInFolder(entry: FileTreeEntry): void {
-  openNewDocumentForm(relativeLocation(entry.path));
+function onAddInFolder(_entry: FileTreeEntry): void {
+  openNewDocumentForm();
 }
 
 function onAddDocument(): void {
   openNewDocumentForm();
+}
+
+function onUploadClick(): void {
+  uploadInput.value?.click();
+}
+
+async function onUploadFiles(ev: Event): Promise<void> {
+  const input = ev.target as HTMLInputElement;
+  const files = input.files;
+  input.value = '';
+  const storyId = storiesCtx.activeFolder.value;
+  if (!files?.length || !storyId) return;
+  uploading.value = true;
+  try {
+    await uploadChapters(storyId, files);
+    bumpFileTree();
+  } catch (e) {
+    alert('Upload failed: ' + String(e));
+  } finally {
+    uploading.value = false;
+  }
 }
 
 watch(() => storiesCtx.activeFolder.value, (folder) => {
@@ -206,7 +222,7 @@ function formatTimestamp(ts: string): string {
           :key="story.id"
           class="story-item"
           :class="{ active: story.id === storiesCtx.activeStoryId.value }"
-          :title="story.folder"
+          :title="story.name"
           @click="onStoryClick(story)"
         >
           <span class="story-item-name">{{ story.name }}</span>
@@ -242,12 +258,31 @@ function formatTimestamp(ts: string): string {
         title="New document"
         @click="onAddDocument"
       >+</button>
+      <button
+        v-if="sidebarMode === 'files'"
+        class="btn-new-story"
+        title="Upload chapters"
+        :disabled="uploading"
+        @click="onUploadClick"
+      >↑</button>
     </div>
+
+    <input
+      ref="uploadInput"
+      type="file"
+      accept=".md,text/markdown"
+      multiple
+      hidden
+      @change="onUploadFiles"
+    />
 
     <div v-if="(sidebarMode === 'files' || appMode === 'writing') && storiesCtx.activeFolder.value" class="files-section">
       <div v-if="appMode === 'writing'" class="nav-label-row files-header">
         <span class="nav-label">Files</span>
-        <button class="btn-new-story" title="New document" @click="onAddDocument">+</button>
+        <div class="files-header-actions">
+          <button class="btn-new-story" title="Upload chapters" :disabled="uploading" @click="onUploadClick">↑</button>
+          <button class="btn-new-story" title="New document" @click="onAddDocument">+</button>
+        </div>
       </div>
       <div v-if="fileTree.length === 0" class="sidebar-hint">No documents yet. Click + to create one.</div>
       <FileTreeNodes
@@ -450,6 +485,11 @@ function formatTimestamp(ts: string): string {
 
 .files-header {
   padding: 4px 8px 6px;
+}
+
+.files-header-actions {
+  display: flex;
+  gap: 4px;
 }
 
 .series-section {

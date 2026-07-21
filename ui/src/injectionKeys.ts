@@ -24,9 +24,9 @@ export interface StoriesContext {
   activeFolder: ComputedRef<string>;
   loadStories: () => Promise<void>;
   setActiveStory: (id: string | null) => void;
-  addStory: (name: string, folder: string) => Promise<StoriesResult>;
-  initStory: (name: string, parentFolder: string) => Promise<StoriesResult>;
-  updateStory: (id: string, name: string, folder: string, biblePath?: string) => Promise<StoriesResult>;
+  addStory: (name: string) => Promise<StoriesResult>;
+  initStory: (name: string) => Promise<StoriesResult>;
+  updateStory: (id: string, name: string, biblePath?: string) => Promise<StoriesResult>;
   deleteStory: (id: string) => Promise<StoriesResult>;
 }
 
@@ -76,9 +76,6 @@ export interface SettingsContext {
   models: Ref<ModelInfo[]>;
   folderStructure: Ref<FolderStructure>;
   fetchModels: () => Promise<{ success: boolean; error: string }>;
-  loadFolderStructure: () => Promise<void>;
-  addFolderEntry: () => void;
-  removeFolderEntry: (index: number) => void;
   saveSettings: () => Promise<void>;
   testCanopy: () => Promise<{ success: boolean; error: string }>;
   testDataforseo: () => Promise<{ success: boolean; error: string }>;

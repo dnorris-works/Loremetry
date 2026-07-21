@@ -4,7 +4,7 @@ import { useEditor, EditorContent } from '@tiptap/vue-3';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
 import { Markdown } from 'tiptap-markdown';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../api';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 

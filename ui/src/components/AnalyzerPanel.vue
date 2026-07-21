@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { inject, ref, computed, watch, onMounted } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../api';
 import type { ContinuityScope } from '../composables/useAnalysis';
 import { useSettings } from '../composables/useSettings';
 import { storiesKey, analysisKey, seriesKey, platformKey } from '../injectionKeys';

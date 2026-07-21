@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../api';
 import type { Story, StoriesResult } from '../types';
 
 const stories = ref<Story[]>([]);
@@ -9,15 +9,15 @@ const activeStory = computed<Story | null>(() => {
   return stories.value.find(s => s.id === activeStoryId.value) || null;
 });
 
+/** Story id (kept as activeFolder for callers that pass it to analysis as `folder`). */
 const activeFolder = computed<string>(() => {
-  return activeStory.value?.folder || '';
+  return activeStory.value?.id || '';
 });
 
 async function loadStories(): Promise<void> {
   const result = await invoke<StoriesResult>('list_stories');
   stories.value = result.success ? result.stories : [];
 
-  // If the stored active story no longer exists, clear it
   if (activeStoryId.value && !stories.value.find(s => s.id === activeStoryId.value)) {
     setActiveStory(null);
   }
@@ -28,17 +28,17 @@ function setActiveStory(id: string | null): void {
   localStorage.setItem('activeStoryId', id || '');
 }
 
-async function addStory(name: string, folder: string): Promise<StoriesResult> {
-  const result = await invoke<StoriesResult>('add_story', { request: { name, folder } });
+async function addStory(name: string): Promise<StoriesResult> {
+  const result = await invoke<StoriesResult>('add_story', { request: { name } });
   if (result.success) {
     stories.value = result.stories;
   }
   return result;
 }
 
-async function initStory(name: string, parentFolder: string): Promise<StoriesResult> {
+async function initStory(name: string): Promise<StoriesResult> {
   const result = await invoke<StoriesResult>('init_story', {
-    request: { name, parent_folder: parentFolder },
+    request: { name },
   });
   if (result.success) {
     stories.value = result.stories;
@@ -46,8 +46,10 @@ async function initStory(name: string, parentFolder: string): Promise<StoriesRes
   return result;
 }
 
-async function updateStory(id: string, name: string, folder: string, biblePath: string = ''): Promise<StoriesResult> {
-  const result = await invoke<StoriesResult>('update_story', { request: { id, name, folder, bible_path: biblePath } });
+async function updateStory(id: string, name: string, biblePath: string = ''): Promise<StoriesResult> {
+  const result = await invoke<StoriesResult>('update_story', {
+    request: { id, name, bible_path: biblePath },
+  });
   if (result.success) {
     stories.value = result.stories;
   }

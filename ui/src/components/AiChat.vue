@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, watch } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../api';
 import { useSettings } from '../composables/useSettings';
 import { formatMarkdown } from '../formatMarkdown';
 

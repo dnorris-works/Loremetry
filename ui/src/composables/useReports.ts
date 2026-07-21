@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../api';
 import type { ReportEnvelope, SidebarReportGroup } from '../types';
 
 const sidebarGroups = ref<SidebarReportGroup[]>([]);

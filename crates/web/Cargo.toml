@@ -1,0 +1,21 @@
+[package]
+name = "manuscript-intel-web"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "manuscript-intel-web"
+path = "src/main.rs"
+
+[dependencies]
+manuscript-intel-core = { path = "../core" }
+axum = { version = "0.8", features = ["multipart"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+tower = "0.5"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = "0.4"

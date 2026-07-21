@@ -2,8 +2,8 @@
 </script>
 
 <template>
-  <header id="titlebar" data-tauri-drag-region>
-    <span class="titlebar-label" data-tauri-drag-region>Manuscript Intel</span>
+  <header id="titlebar">
+    <span class="titlebar-label">Manuscript Intel</span>
   </header>
 </template>
 
@@ -14,7 +14,7 @@
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  padding: 0 12px 0 80px;
+  padding: 0 12px;
   gap: 12px;
   user-select: none;
   -webkit-user-select: none;
@@ -25,6 +25,5 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--text-muted);
-  pointer-events: none;
 }
 </style>

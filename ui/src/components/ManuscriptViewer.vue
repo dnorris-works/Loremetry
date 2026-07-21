@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, inject } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../api';
 import { useSettings } from '../composables/useSettings';
 import { formatMarkdown } from '../formatMarkdown';
 import ChapterEditor from './ChapterEditor.vue';

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { inject, ref, computed, onMounted, onUnmounted } from 'vue';
-import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { renderReport } from '../reportRenderer';
 import { storiesKey, reportsKey, platformKey, showPanelKey, openManuscriptEditorKey } from '../injectionKeys';
 import type { Finding } from '../types';
@@ -39,7 +38,7 @@ const reportTitle = computed(() => {
 
 async function onCopy(): Promise<void> {
   if (!report.value) return;
-  await writeText(report.value.content);
+  await navigator.clipboard.writeText(report.value.content);
   copyLabel.value = 'Copied!';
   setTimeout(() => { copyLabel.value = 'Copy'; }, 1500);
 }

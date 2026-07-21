@@ -1,6 +1,5 @@
 import { ref } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { invoke, listen } from '../api';
 import type { AnalysisState, GenreResult, LogLine } from '../types';
 
 import { useSettings } from './useSettings';
@@ -183,9 +182,9 @@ async function saveLog(folder: string, timestamp: string): Promise<void> {
   }
 }
 
-// Set up Tauri event listeners (runs once at module load)
-listen<string>('genre:log', (event) => { appendLog(event.payload); });
-listen<string>('cdp:log', (event) => { appendLog(event.payload); });
+// SSE listeners (module scope — no unlisten needed)
+listen('genre:log', (event) => { appendLog(event.payload); });
+listen('cdp:log', (event) => { appendLog(event.payload); });
 
 export function useAnalysis() {
   return {

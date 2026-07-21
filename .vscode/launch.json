@@ -2,15 +2,22 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Tauri Dev",
-      "type": "lldb-dap",
+      "type": "lldb",
       "request": "launch",
-      "program": "${workspaceFolder}/src-tauri/target/debug/manuscript-intel",
+      "name": "Debug manuscript-intel-web",
+      "cargo": {
+        "args": ["build", "-p", "manuscript-intel-web"],
+        "filter": {
+          "name": "manuscript-intel-web",
+          "kind": "bin"
+        }
+      },
       "args": [],
       "cwd": "${workspaceFolder}",
-      "preLaunchTask": "cargo:build-debug",
       "env": {
-        "RUST_BACKTRACE": "1"
+        "DATA_DIR": "${workspaceFolder}/data",
+        "STATIC_DIR": "${workspaceFolder}/ui/dist",
+        "PORT": "8080"
       }
     }
   ]

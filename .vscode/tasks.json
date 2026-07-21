@@ -2,156 +2,38 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "tauri:dev",
+      "label": "web:dev-api",
       "type": "shell",
-      "command": "cargo",
-      "args": ["tauri", "dev"],
+      "command": "cargo run -p manuscript-intel-web",
       "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "isBackground": true,
-      "problemMatcher": [
-        {
-          "owner": "rust",
-          "fileLocation": ["relative", "${workspaceFolder}/src-tauri"],
-          "pattern": {
-            "regexp": "^(error|warning)\\[?.*\\]?:(.*)$",
-            "severity": 1,
-            "message": 2
-          },
-          "background": {
-            "activeOnStart": true,
-            "beginsPattern": "^\\s*Compiling",
-            "endsPattern": "^\\s*(Finished|Running)"
-          }
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "DATA_DIR": "${workspaceFolder}/data",
+          "STATIC_DIR": "${workspaceFolder}/ui/dist",
+          "PORT": "8080"
         }
-      ],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      }
+      },
+      "problemMatcher": ["$rustc"],
+      "isBackground": true
     },
     {
-      "label": "ui:ensure",
+      "label": "web:dev-ui",
       "type": "shell",
-      "command": "bash",
-      "args": ["${workspaceFolder}/.vscode/ensure-ui-dev.sh"],
-      "options": {
-        "cwd": "${workspaceFolder}/ui"
-      },
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared",
-        "showReuseMessage": false,
-        "clear": false
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "ui:dev",
-      "type": "shell",
-      "command": "npm",
-      "args": ["run", "dev"],
+      "command": "npm run dev",
       "options": {
         "cwd": "${workspaceFolder}/ui"
       },
       "isBackground": true,
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated",
-        "showReuseMessage": false
-      },
-      "problemMatcher": [
-        {
-          "owner": "vite",
-          "pattern": {
-            "regexp": "^$",
-            "file": 1,
-            "location": 2,
-            "message": 3
-          },
-          "background": {
-            "activeOnStart": true,
-            "beginsPattern": "VITE",
-            "endsPattern": "ready in"
-          }
-        }
-      ]
+      "problemMatcher": []
     },
     {
-      "label": "ui:build",
+      "label": "web:build-ui",
       "type": "shell",
-      "command": "npm",
-      "args": ["run", "build"],
+      "command": "npm run build",
       "options": {
         "cwd": "${workspaceFolder}/ui"
       },
       "problemMatcher": []
-    },
-    {
-      "label": "cargo:build-debug",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "cargo build && bash \"${workspaceFolder}/.vscode/ensure-ui-dev.sh\""
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}/src-tauri"
-      },
-      "problemMatcher": ["$rustc"],
-      "group": "build",
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared"
-      }
-    },
-    {
-      "label": "tauri:build-debug",
-      "type": "shell",
-      "command": "cargo",
-      "args": ["tauri", "build", "--debug"],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": ["$rustc"],
-      "group": "build"
-    },
-    {
-      "label": "tauri:build",
-      "type": "shell",
-      "command": "cargo",
-      "args": ["tauri", "build"],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": ["$rustc"],
-      "group": "build"
-    },
-    {
-      "label": "cargo:check",
-      "type": "shell",
-      "command": "cargo",
-      "args": ["check"],
-      "options": {
-        "cwd": "${workspaceFolder}/src-tauri"
-      },
-      "problemMatcher": ["$rustc"],
-      "group": "build"
-    },
-    {
-      "label": "kill:dev-servers",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "PIDFILE=/tmp/manuscript-intel-vite.pid; if [[ -f \"$PIDFILE\" ]]; then kill \"$(cat \"$PIDFILE\")\" 2>/dev/null || true; rm -f \"$PIDFILE\"; fi; pkill -f '/Manuscript Intel/ui/node_modules/.bin/vite' 2>/dev/null || true; lsof -tiTCP:5173 -sTCP:LISTEN | xargs kill -9 2>/dev/null || true; echo 'Stopped Vite / :5173 listeners.'"
-      ],
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared"
-      }
     }
   ]
 }

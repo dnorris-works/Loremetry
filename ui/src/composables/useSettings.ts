@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../api';
 import type { ModelInfo, ModelsResult } from '../types';
 
 // ── AI function model assignments ─────────────────────────────────────────────
@@ -16,18 +16,13 @@ export interface ModelAssignments {
   prose:         string;  // Creative suggestions / rewrites
 }
 
+/** Default relative paths used when creating documents (client-side hints only). */
 export interface FolderStructure {
-  /** Chapter files — analysis reads only here */
   manuscript: string;
-  /** Story bible docs */
   bible: string;
-  /** Character docs */
   characters: string;
-  /** Location docs */
   locations: string;
-  /** Act subfolders under manuscript (e.g. Act-1, Act-2, Act-3) */
   acts: string[];
-  /** Extra scaffold-only folders (app does not use these) */
   extra: string[];
 }
 
@@ -52,27 +47,6 @@ export function manuscriptActPaths(structure?: FolderStructure): string[] {
     .map(act => `${root}/${act}`);
 }
 
-function cloneStructure(s: FolderStructure): FolderStructure {
-  const manuscript = s.manuscript || DEFAULT_FOLDER_STRUCTURE.manuscript;
-  const acts = (Array.isArray(s.acts) && s.acts.length > 0)
-    ? [...s.acts]
-    : [...DEFAULT_FOLDER_STRUCTURE.acts];
-  const rawExtra = Array.isArray(s.extra) ? [...s.extra] : [...DEFAULT_FOLDER_STRUCTURE.extra];
-  // Strip Act paths if they were previously stored as extras
-  const actSet = new Set(
-    manuscriptActPaths({ ...DEFAULT_FOLDER_STRUCTURE, manuscript, acts }).map(p => p.toLowerCase())
-  );
-  const extra = rawExtra.filter(p => !actSet.has(p.replace(/\\/g, '/').toLowerCase()));
-  return {
-    manuscript,
-    bible: s.bible || DEFAULT_FOLDER_STRUCTURE.bible,
-    characters: s.characters || DEFAULT_FOLDER_STRUCTURE.characters,
-    locations: s.locations || DEFAULT_FOLDER_STRUCTURE.locations,
-    acts,
-    extra,
-  };
-}
-
 function loadAssignments(): ModelAssignments {
   const stored = localStorage.getItem('modelAssignments');
   const defaults: ModelAssignments = {
@@ -81,7 +55,6 @@ function loadAssignments(): ModelAssignments {
   if (stored) {
     try { return { ...defaults, ...JSON.parse(stored) }; } catch { /* use defaults */ }
   }
-  // Migrate from old settings
   const oldModel = localStorage.getItem('model') || '';
   const oldProse = localStorage.getItem('proseModel') || '';
   if (oldModel || oldProse) {
@@ -115,7 +88,7 @@ const canopyApiKey = ref(localStorage.getItem('canopyApiKey') || '');
 const dataforseoLogin = ref(localStorage.getItem('dataforseoLogin') || '');
 const dataforseoPassword = ref(localStorage.getItem('dataforseoPassword') || '');
 const models = ref<ModelInfo[]>(loadModelsFromStorage());
-const folderStructure = ref<FolderStructure>(cloneStructure(DEFAULT_FOLDER_STRUCTURE));
+const folderStructure = ref<FolderStructure>({ ...DEFAULT_FOLDER_STRUCTURE, acts: [...DEFAULT_FOLDER_STRUCTURE.acts], extra: [...DEFAULT_FOLDER_STRUCTURE.extra] });
 
 function loadModelsFromStorage(): ModelInfo[] {
   const stored = localStorage.getItem('cachedModels');
@@ -125,18 +98,13 @@ function loadModelsFromStorage(): ModelInfo[] {
   return [];
 }
 
-// ── Convenience getters ───────────────────────────────────────────────────────
-
 /** Resolve the model for a given function. Falls back to default if unset. */
 function modelFor(fn: keyof ModelAssignments): string {
   return modelAssignments.value[fn] || modelAssignments.value.default;
 }
 
-// Legacy compatibility: 'model' returns default, 'proseModel' returns prose
 const model = computed(() => modelAssignments.value.default);
 const proseModel = computed(() => modelAssignments.value.prose || modelAssignments.value.default);
-
-// ── Actions ──────────────────────────────────────────────────────────────────
 
 async function fetchModels(): Promise<{ success: boolean; error: string }> {
   if (!apiKey.value) {
@@ -158,39 +126,16 @@ async function fetchModels(): Promise<{ success: boolean; error: string }> {
   }
 }
 
-async function loadFolderStructure(): Promise<void> {
-  try {
-    const result = await invoke<FolderStructure>('get_folder_structure');
-    folderStructure.value = cloneStructure(result);
-  } catch {
-    folderStructure.value = cloneStructure(DEFAULT_FOLDER_STRUCTURE);
-  }
-}
-
-function addFolderEntry(): void {
-  folderStructure.value.extra.push('');
-}
-
-function removeFolderEntry(index: number): void {
-  folderStructure.value.extra.splice(index, 1);
-}
-
 async function saveSettings(): Promise<void> {
   localStorage.setItem('theme', theme.value);
   localStorage.setItem('provider', provider.value);
   localStorage.setItem('apiKey', apiKey.value.trim());
   localStorage.setItem('modelAssignments', JSON.stringify(modelAssignments.value));
-  // Keep legacy keys for backward compat
   localStorage.setItem('model', modelAssignments.value.default);
   localStorage.setItem('proseModel', modelAssignments.value.prose);
   localStorage.setItem('canopyApiKey', canopyApiKey.value.trim());
   localStorage.setItem('dataforseoLogin', dataforseoLogin.value.trim());
   localStorage.setItem('dataforseoPassword', dataforseoPassword.value.trim());
-
-  const saved = await invoke<FolderStructure>('save_folder_structure', {
-    structure: folderStructure.value,
-  });
-  folderStructure.value = cloneStructure(saved);
 }
 
 async function testCanopy(): Promise<{ success: boolean; error: string }> {
@@ -236,9 +181,6 @@ export function useSettings() {
     models,
     folderStructure,
     fetchModels,
-    loadFolderStructure,
-    addFolderEntry,
-    removeFolderEntry,
     saveSettings,
     testCanopy,
     testDataforseo,

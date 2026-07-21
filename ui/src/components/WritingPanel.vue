@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, inject } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../api';
 import ChapterEditor from './ChapterEditor.vue';
 import AiChat from './AiChat.vue';
 

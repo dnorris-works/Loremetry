@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../api';
 import { storiesKey, settingsKey } from '../injectionKeys';
 import { manuscriptActPaths } from '../composables/useSettings';
 
 const props = defineProps<{
-  /** Relative path under the story folder (e.g. from a folder + click). */
+  /** Relative path hint (e.g. Manuscript/Act-1). */
   initialLocation?: string;
 }>();
 
@@ -113,8 +113,6 @@ function onSelectType(id: string): void {
   const t = docTypes.value.find(x => x.id === id);
   if (t && !locationFromFolder.value) {
     location.value = t.path;
-  } else if (t && locationFromFolder.value) {
-    // Keep folder path; type is only a hint
   }
 }
 
@@ -123,8 +121,8 @@ function onLocationEdit(): void {
 }
 
 async function onCreate(): Promise<void> {
-  const folder = storiesCtx.activeFolder.value;
-  if (!folder) {
+  const storyId = storiesCtx.activeFolder.value;
+  if (!storyId) {
     error.value = 'Select a story first.';
     return;
   }
@@ -138,7 +136,7 @@ async function onCreate(): Promise<void> {
   try {
     const result = await invoke<{ path: string; title: string }>('create_story_document', {
       request: {
-        story_folder: folder,
+        story_id: storyId,
         name: trimName,
         location: trimLoc,
       },
@@ -185,7 +183,7 @@ function onCancel(): void {
     <div class="form-group">
       <label>
         Location
-        <span class="form-hint"> — relative to the story folder (editable)</span>
+        <span class="form-hint"> — path hint for organizing documents</span>
       </label>
       <input
         v-model="location"

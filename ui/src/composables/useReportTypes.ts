@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../api';
 import type { ReportTypeDef } from '../types';
 
 const reportTypes = ref<ReportTypeDef[]>([]);

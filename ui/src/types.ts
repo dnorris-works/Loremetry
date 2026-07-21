@@ -3,7 +3,6 @@
 export interface Story {
   id: string;
   name: string;
-  folder: string;
   created: string;
   bible_path: string;
 }
@@ -61,7 +60,7 @@ export interface SeriesRow {
 }
 
 export interface SeriesBookRow {
-  story_folder: string;
+  story_id: string;
   story_name: string;
   book_order: number;
 }
@@ -157,7 +156,7 @@ export interface ReportTypeDef {
 }
 
 export interface SeriesBook {
-  story_folder: string;
+  story_id: string;
   story_name: string;
   book_order: number;
 }

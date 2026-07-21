@@ -209,7 +209,6 @@ onMounted(() => {
     }
   });
 
-  settingsCtx.loadFolderStructure();
   storiesCtx.loadStories().then(() => {
     const folder = storiesCtx.activeFolder.value;
     if (folder) {

@@ -1,0 +1,1 @@
+web: ./manuscript-intel-web
