@@ -28,6 +28,17 @@ pub struct Db(pub PgPool);
 
 /// Connect to PostgreSQL, apply migrations, seed on first run.
 pub async fn init(database_url: &str) -> Result<Db, String> {
+    // Migrations must run with default search_path so sqlx can manage public._sqlx_migrations.
+    let migrate_pool = PgPoolOptions::new()
+        .connect(database_url)
+        .await
+        .map_err(|e| e.to_string())?;
+    sqlx::migrate!("./migrations")
+        .run(&migrate_pool)
+        .await
+        .map_err(|e| format!("while executing migrations: {e}"))?;
+    migrate_pool.close().await;
+
     let pool = PgPoolOptions::new()
         .after_connect(|conn, _meta| {
             Box::pin(async move {
@@ -38,11 +49,6 @@ pub async fn init(database_url: &str) -> Result<Db, String> {
             })
         })
         .connect(database_url)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    sqlx::migrate!("./migrations")
-        .run(&pool)
         .await
         .map_err(|e| e.to_string())?;
 

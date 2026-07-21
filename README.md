@@ -4,12 +4,39 @@ Single-user Vue + Rust (Axum) app for fiction market/craft analysis. Deployed on
 
 ## Local development
 
-```bash
-# Start Postgres (schema `lore` is created on first API boot)
-docker compose up -d db
+### Postgres (pick one)
 
-# Terminal 1 — API
+**Homebrew (no Docker)** — you already have `brew` and `psql`:
+
+```bash
+brew install postgresql@16
+
+# First-time only: initialize the data directory (if createdb says "connection refused")
+$(brew --prefix postgresql@16)/bin/initdb -D $(brew --prefix)/var/postgresql@16 --locale=en_US.UTF-8 -E UTF-8
+
+# Start the server (if `brew services` shows `error`, use pg_ctl instead):
+brew services start postgresql@16
+# fallback:
+# $(brew --prefix postgresql@16)/bin/pg_ctl -D $(brew --prefix)/var/postgresql@16 start
+
+createdb loremetry
+export DATABASE_URL=postgres://localhost:5432/loremetry
+```
+
+**Docker** — only if [Docker Desktop](https://www.docker.com/products/docker-desktop/) is installed:
+
+```bash
+docker compose up -d db
 export DATABASE_URL=postgres://loremetry:loremetry@localhost:5432/loremetry
+```
+
+The `lore` schema and tables are created automatically on first API boot.
+
+### Run the app
+
+```bash
+# Terminal 1 — API
+export DATABASE_URL=postgres://localhost:5432/loremetry   # or the Docker URL above
 export STATIC_DIR=./ui/dist PORT=8080
 cargo run -p loremetry-web
 

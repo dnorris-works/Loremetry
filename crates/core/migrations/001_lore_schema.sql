@@ -1,14 +1,12 @@
 CREATE SCHEMA IF NOT EXISTS lore;
 
-SET search_path TO lore;
-
-CREATE TABLE genres (
+CREATE TABLE lore.genres (
     id          BIGSERIAL PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
     description TEXT
 );
 
-CREATE TABLE kdp_categories (
+CREATE TABLE lore.kdp_categories (
     id             BIGSERIAL PRIMARY KEY,
     path           TEXT NOT NULL,
     store          TEXT NOT NULL DEFAULT 'Kindle',
@@ -20,25 +18,25 @@ CREATE TABLE kdp_categories (
     UNIQUE(path, store)
 );
 
-CREATE TABLE genre_kdp_links (
-    genre_id    BIGINT NOT NULL REFERENCES genres(id) ON DELETE CASCADE,
-    category_id BIGINT NOT NULL REFERENCES kdp_categories(id) ON DELETE CASCADE,
+CREATE TABLE lore.genre_kdp_links (
+    genre_id    BIGINT NOT NULL REFERENCES lore.genres(id) ON DELETE CASCADE,
+    category_id BIGINT NOT NULL REFERENCES lore.kdp_categories(id) ON DELETE CASCADE,
     PRIMARY KEY (genre_id, category_id)
 );
 
-CREATE TABLE genre_rankings (
+CREATE TABLE lore.genre_rankings (
     id           BIGSERIAL PRIMARY KEY,
     story_id     TEXT NOT NULL,
-    genre_id     BIGINT NOT NULL REFERENCES genres(id),
+    genre_id     BIGINT NOT NULL REFERENCES lore.genres(id),
     confidence   INTEGER NOT NULL,
     reason       TEXT,
     generated_at TEXT NOT NULL
 );
 
-CREATE TABLE category_results (
+CREATE TABLE lore.category_results (
     id            BIGSERIAL PRIMARY KEY,
     story_id      TEXT NOT NULL,
-    category_id   BIGINT REFERENCES kdp_categories(id),
+    category_id   BIGINT REFERENCES lore.kdp_categories(id),
     raw_path      TEXT NOT NULL,
     store         TEXT NOT NULL,
     confidence    INTEGER NOT NULL,
@@ -51,12 +49,12 @@ CREATE TABLE category_results (
     generated_at  TEXT NOT NULL
 );
 
-CREATE INDEX idx_rankings_folder ON genre_rankings(story_id);
-CREATE INDEX idx_results_folder ON category_results(story_id);
-CREATE INDEX idx_categories_path ON kdp_categories(path);
-CREATE INDEX idx_categories_store ON kdp_categories(store);
+CREATE INDEX idx_rankings_folder ON lore.genre_rankings(story_id);
+CREATE INDEX idx_results_folder ON lore.category_results(story_id);
+CREATE INDEX idx_categories_path ON lore.kdp_categories(path);
+CREATE INDEX idx_categories_store ON lore.kdp_categories(store);
 
-CREATE TABLE chapter_summaries (
+CREATE TABLE lore.chapter_summaries (
     id           BIGSERIAL PRIMARY KEY,
     story_id     TEXT NOT NULL,
     file         TEXT NOT NULL,
@@ -67,7 +65,7 @@ CREATE TABLE chapter_summaries (
     UNIQUE(story_id, file)
 );
 
-CREATE TABLE genre_data (
+CREATE TABLE lore.genre_data (
     story_id             TEXT PRIMARY KEY,
     generated_at         TEXT NOT NULL,
     industry_ebook       TEXT,
@@ -82,7 +80,7 @@ CREATE TABLE genre_data (
     marketing_notes_json TEXT NOT NULL DEFAULT '[]'
 );
 
-CREATE TABLE kdp_keywords (
+CREATE TABLE lore.kdp_keywords (
     story_id      TEXT PRIMARY KEY,
     generated_at  TEXT NOT NULL,
     keywords_json TEXT NOT NULL,
@@ -90,19 +88,19 @@ CREATE TABLE kdp_keywords (
     source_note   TEXT
 );
 
-CREATE TABLE mi_search_terms (
+CREATE TABLE lore.mi_search_terms (
     story_id      TEXT PRIMARY KEY,
     generated_at  TEXT NOT NULL,
     keywords_json TEXT NOT NULL
 );
 
-CREATE TABLE discovery_keywords (
+CREATE TABLE lore.discovery_keywords (
     story_id      TEXT PRIMARY KEY,
     generated_at  TEXT NOT NULL,
     keywords_json TEXT NOT NULL
 );
 
-CREATE TABLE keyword_search_results (
+CREATE TABLE lore.keyword_search_results (
     id           BIGSERIAL PRIMARY KEY,
     story_id     TEXT NOT NULL,
     seed         TEXT NOT NULL,
@@ -113,9 +111,9 @@ CREATE TABLE keyword_search_results (
     generated_at TEXT NOT NULL
 );
 
-CREATE INDEX idx_keyword_results_folder ON keyword_search_results(story_id);
+CREATE INDEX idx_keyword_results_folder ON lore.keyword_search_results(story_id);
 
-CREATE TABLE story_documents (
+CREATE TABLE lore.story_documents (
     id           BIGSERIAL PRIMARY KEY,
     story_id     TEXT NOT NULL,
     doc_type     TEXT NOT NULL,
@@ -123,15 +121,15 @@ CREATE TABLE story_documents (
     generated_at TEXT NOT NULL
 );
 
-CREATE INDEX idx_story_docs_folder ON story_documents(story_id, doc_type);
-CREATE INDEX idx_summaries_folder ON chapter_summaries(story_id);
+CREATE INDEX idx_story_docs_folder ON lore.story_documents(story_id, doc_type);
+CREATE INDEX idx_summaries_folder ON lore.chapter_summaries(story_id);
 
-CREATE TABLE bisac_codes (
+CREATE TABLE lore.bisac_codes (
     code    TEXT PRIMARY KEY,
     heading TEXT NOT NULL
 );
 
-CREATE TABLE bisac_classifications (
+CREATE TABLE lore.bisac_classifications (
     id           BIGSERIAL PRIMARY KEY,
     story_id     TEXT NOT NULL,
     code         TEXT NOT NULL,
@@ -142,9 +140,9 @@ CREATE TABLE bisac_classifications (
     format       TEXT NOT NULL DEFAULT 'ebook'
 );
 
-CREATE INDEX idx_bisac_folder ON bisac_classifications(story_id);
+CREATE INDEX idx_bisac_folder ON lore.bisac_classifications(story_id);
 
-CREATE TABLE saved_reports (
+CREATE TABLE lore.saved_reports (
     id       BIGSERIAL PRIMARY KEY,
     story_id TEXT NOT NULL,
     doc_type TEXT NOT NULL,
@@ -154,9 +152,9 @@ CREATE TABLE saved_reports (
     saved_at TEXT NOT NULL
 );
 
-CREATE INDEX idx_saved_reports_folder ON saved_reports(story_id, doc_type);
+CREATE INDEX idx_saved_reports_folder ON lore.saved_reports(story_id, doc_type);
 
-CREATE TABLE report_types (
+CREATE TABLE lore.report_types (
     id               TEXT PRIMARY KEY,
     label            TEXT NOT NULL,
     description      TEXT NOT NULL,
@@ -170,7 +168,7 @@ CREATE TABLE report_types (
     min_tier         TEXT NOT NULL DEFAULT 'basic'
 );
 
-CREATE TABLE provider_models (
+CREATE TABLE lore.provider_models (
     id           TEXT PRIMARY KEY,
     provider     TEXT NOT NULL,
     owned_by     TEXT NOT NULL DEFAULT '',
@@ -179,17 +177,17 @@ CREATE TABLE provider_models (
     sort_order   INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE lookup_config (
+CREATE TABLE lore.lookup_config (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
 
-CREATE TABLE zeigarnik_config (
+CREATE TABLE lore.zeigarnik_config (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
 
-CREATE TABLE zeigarnik_chapters (
+CREATE TABLE lore.zeigarnik_chapters (
     id             BIGSERIAL PRIMARY KEY,
     story_id       TEXT NOT NULL,
     chapter_index  INTEGER NOT NULL,
@@ -204,9 +202,9 @@ CREATE TABLE zeigarnik_chapters (
     generated_at   TEXT NOT NULL
 );
 
-CREATE INDEX idx_zeigarnik_chapters_folder ON zeigarnik_chapters(story_id);
+CREATE INDEX idx_zeigarnik_chapters_folder ON lore.zeigarnik_chapters(story_id);
 
-CREATE TABLE zeigarnik_threads (
+CREATE TABLE lore.zeigarnik_threads (
     id                  BIGSERIAL PRIMARY KEY,
     story_id            TEXT NOT NULL,
     term                TEXT NOT NULL,
@@ -221,26 +219,26 @@ CREATE TABLE zeigarnik_threads (
     generated_at        TEXT NOT NULL
 );
 
-CREATE INDEX idx_zeigarnik_threads_folder ON zeigarnik_threads(story_id);
+CREATE INDEX idx_zeigarnik_threads_folder ON lore.zeigarnik_threads(story_id);
 
-CREATE TABLE "series" (
+CREATE TABLE lore."series" (
     id         BIGSERIAL PRIMARY KEY,
     name       TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL,
     bible_path TEXT NOT NULL DEFAULT ''
 );
 
-CREATE TABLE series_books (
-    series_id  BIGINT NOT NULL REFERENCES "series"(id) ON DELETE CASCADE,
+CREATE TABLE lore.series_books (
+    series_id  BIGINT NOT NULL REFERENCES lore."series"(id) ON DELETE CASCADE,
     story_id   TEXT NOT NULL,
     story_name TEXT NOT NULL DEFAULT '',
     book_order INTEGER NOT NULL,
     PRIMARY KEY (series_id, story_id)
 );
 
-CREATE INDEX idx_series_books_series ON series_books(series_id);
+CREATE INDEX idx_series_books_series ON lore.series_books(series_id);
 
-CREATE TABLE continuity_facts (
+CREATE TABLE lore.continuity_facts (
     id            BIGSERIAL PRIMARY KEY,
     story_id      TEXT NOT NULL,
     chapter_index INTEGER NOT NULL,
@@ -254,9 +252,9 @@ CREATE TABLE continuity_facts (
     generated_at  TEXT NOT NULL
 );
 
-CREATE INDEX idx_continuity_facts_folder ON continuity_facts(story_id);
+CREATE INDEX idx_continuity_facts_folder ON lore.continuity_facts(story_id);
 
-CREATE TABLE continuity_findings (
+CREATE TABLE lore.continuity_findings (
     id               BIGSERIAL PRIMARY KEY,
     scope            TEXT NOT NULL,
     scope_key        TEXT NOT NULL,
@@ -269,9 +267,9 @@ CREATE TABLE continuity_findings (
     generated_at     TEXT NOT NULL
 );
 
-CREATE INDEX idx_continuity_findings_scope ON continuity_findings(scope, scope_key);
+CREATE INDEX idx_continuity_findings_scope ON lore.continuity_findings(scope, scope_key);
 
-CREATE TABLE prompt_templates (
+CREATE TABLE lore.prompt_templates (
     id            TEXT PRIMARY KEY,
     label         TEXT NOT NULL,
     system_prompt TEXT NOT NULL,
@@ -282,7 +280,7 @@ CREATE TABLE prompt_templates (
     updated_at    TEXT NOT NULL DEFAULT ''
 );
 
-CREATE TABLE preprocessed_chapters (
+CREATE TABLE lore.preprocessed_chapters (
     id                 BIGSERIAL PRIMARY KEY,
     story_id           TEXT NOT NULL,
     chapter_file       TEXT NOT NULL,
@@ -292,16 +290,16 @@ CREATE TABLE preprocessed_chapters (
     created_at         TEXT NOT NULL
 );
 
-CREATE UNIQUE INDEX idx_preproc_unique ON preprocessed_chapters(story_id, chapter_file, report_type);
+CREATE UNIQUE INDEX idx_preproc_unique ON lore.preprocessed_chapters(story_id, chapter_file, report_type);
 
-CREATE TABLE stories (
+CREATE TABLE lore.stories (
     id         TEXT PRIMARY KEY,
     name       TEXT NOT NULL,
     created    TEXT NOT NULL,
     bible_path TEXT NOT NULL DEFAULT ''
 );
 
-CREATE TABLE manuscripts (
+CREATE TABLE lore.manuscripts (
     id         BIGSERIAL PRIMARY KEY,
     story_id   TEXT NOT NULL,
     kind       TEXT NOT NULL DEFAULT 'chapter',
@@ -311,5 +309,5 @@ CREATE TABLE manuscripts (
     updated_at TEXT NOT NULL
 );
 
-CREATE INDEX idx_manuscripts_story ON manuscripts(story_id, kind);
-CREATE INDEX idx_manuscripts_path ON manuscripts(story_id, path_hint);
+CREATE INDEX idx_manuscripts_story ON lore.manuscripts(story_id, kind);
+CREATE INDEX idx_manuscripts_path ON lore.manuscripts(story_id, path_hint);
