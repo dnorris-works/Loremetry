@@ -45,8 +45,7 @@ pub async fn import_winningcat_csv(app: AppCtx, csv_text: String) -> ImportResul
     // retired/renamed the category), not something to silently ignore.
     let import_started_at = chrono::Utc::now().to_rfc3339();
 
-    let database = app.db.as_ref();
-    let conn = database.0.lock().unwrap();
+    let pool = &app.db.0;
 
     let mut imported = 0usize;
     let mut skipped_dept = 0usize;
@@ -82,13 +81,13 @@ pub async fn import_winningcat_csv(app: AppCtx, csv_text: String) -> ImportResul
         let path    = rest.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(" > ");
         let node_id = &rest.last().unwrap().1;
 
-        match db::import_kdp_category(&conn, &path, store, node_id) {
+        match db::import_kdp_category(pool, &path, store, node_id).await {
             Ok(())  => imported += 1,
             Err(_)  => skipped_bad += 1,
         }
     }
 
-    let stale = db::stale_winningcat_paths(&conn, &import_started_at);
+    let stale = db::stale_winningcat_paths(pool, &import_started_at).await;
 
     ImportResult {
         success: true,
@@ -114,9 +113,7 @@ pub struct StaleCleanupResult {
 /// category disappearing from one file could be a CSV quirk, not a real
 /// Amazon retirement.
 pub async fn remove_stale_kdp_categories(app: AppCtx, since: String) -> StaleCleanupResult {
-    let database = app.db.as_ref();
-    let conn = database.0.lock().unwrap();
-    match db::remove_stale_winningcat_paths(&conn, &since) {
+    match db::remove_stale_winningcat_paths(&app.db.0, &since).await {
         Ok(removed) => StaleCleanupResult { success: true, removed, error: String::new() },
         Err(e) => StaleCleanupResult { success: false, removed: 0, error: e },
     }

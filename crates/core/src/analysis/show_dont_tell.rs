@@ -51,7 +51,7 @@ pub async fn check_show_dont_tell(app: AppCtx, request: ShowDontTellRequest) -> 
 }
 
 async fn check_inner(app: AppCtx, request: ShowDontTellRequest) -> GenreResult {
-    if !crate::stories::story_exists(&app.db, &request.story_id) {
+    if !crate::stories::story_exists(&app.db, &request.story_id).await {
         return err("Story not found.");
     }
     if request.api_key.is_empty() || request.model.is_empty() {
@@ -62,13 +62,13 @@ async fn check_inner(app: AppCtx, request: ShowDontTellRequest) -> GenreResult {
     let database = app.db.as_ref();
     let run_ts = chrono::Utc::now().to_rfc3339();
 
-    let chapters = match documents::list_chapters_db(&app.db, &request.story_id) {
+    let chapters = match documents::list_chapters_db(&app.db, &request.story_id).await {
         Ok(c) => c,
         Err(e) => return err(&e),
     };
     if chapters.is_empty() { return err("No chapter documents found. Upload manuscript chapters first."); }
 
-    let bible = crate::prompts::load_bible_for_story(&app.db, &request.story_id, &request.bible_path);
+    let bible = crate::prompts::load_bible_for_story(&app.db, &request.story_id, &request.bible_path).await;
 
     emit(&app, &format!("Checking {} chapter(s) for show-don't-tell violations...", chapters.len()));
 
@@ -89,18 +89,20 @@ async fn check_inner(app: AppCtx, request: ShowDontTellRequest) -> GenreResult {
         };
 
         // Use preprocessed text (cached by document updated_at)
-        let processed = {
-            let conn = database.0.lock().unwrap();
-            crate::prompts::get_preprocessed(
-                &conn, &request.story_id, &filename, "sdt_check", &chapter.updated_at,
-            )
-            .unwrap_or_else(|| {
+        let processed = match crate::prompts::get_preprocessed(
+            &database.0, &request.story_id, &filename, "sdt_check", &chapter.updated_at,
+        )
+        .await
+        {
+            Some(p) => p,
+            None => {
                 let p = crate::prompts::preprocess_for_sdt(content);
-                crate::prompts::store_preprocessed(
-                    &conn, &request.story_id, &filename, "sdt_check", &p, &chapter.updated_at,
-                );
+                let _ = crate::prompts::store_preprocessed(
+                    &database.0, &request.story_id, &filename, "sdt_check", &p, &chapter.updated_at,
+                )
+                .await;
                 p
-            })
+            }
         };
 
         emit(&app, &format!("[{}/{}] {} — checking...", i + 1, chapters.len(), filename));
@@ -151,10 +153,7 @@ async fn check_inner(app: AppCtx, request: ShowDontTellRequest) -> GenreResult {
         "chapters": all_findings,
     }).to_string();
 
-    {
-        let conn = database.0.lock().unwrap();
-        let _ = db::save_document_at(&conn, &request.story_id, "show_dont_tell", &report, &run_ts);
-    }
+    let _ = db::save_document_at(&database.0, &request.story_id, "show_dont_tell", &report, &run_ts).await;
 
     GenreResult { success: true, report: String::new(), error: String::new(), run_ts }
 }
@@ -259,7 +258,7 @@ pub async fn suggest_sdt_fix(app: AppCtx, request: SuggestSdtFixRequest) -> Sugg
     use std::collections::HashMap;
 
     let database = app.db.as_ref();
-    let bible = crate::prompts::load_bible_for_story(&app.db, &request.story_id, &request.bible_path);
+    let bible = crate::prompts::load_bible_for_story(&app.db, &request.story_id, &request.bible_path).await;
 
     let mut vars = HashMap::new();
     vars.insert("chapter_title", request.chapter_title.as_str());

@@ -240,7 +240,7 @@ async fn create_story_document(state: &AppState, args: &Value) -> Result<Value, 
     let name = take_string(req_val, &["name"])?;
     let location = take_string(req_val, &["location"]).unwrap_or_default();
 
-    if !stories::story_exists(&state.ctx.db, &story_id) {
+    if !stories::story_exists(&state.ctx.db, &story_id).await {
         return Err(format!("Story not found: {story_id}"));
     }
     let title = name.trim().to_string();
@@ -272,8 +272,7 @@ async fn create_story_document(state: &AppState, args: &Value) -> Result<Value, 
         id: None,
     };
 
-    let conn = state.ctx.db.0.lock().map_err(|e| e.to_string())?;
-    let doc = documents::upsert_document(&conn, &upsert)?;
+    let doc = documents::upsert_document(&state.ctx.db.0, &upsert).await?;
     Ok(json!({
         "path": format!("doc:{}", doc.id),
         "title": doc.title,
@@ -283,8 +282,7 @@ async fn create_story_document(state: &AppState, args: &Value) -> Result<Value, 
 async fn delete_story_document(state: &AppState, args: &Value) -> Result<Value, String> {
     let story_id = take_string(args, &["story_folder", "story_id", "folder"])?;
     let doc_id = take_doc_id(args, &["file_path", "doc_id", "id", "path"])?;
-    let conn = state.ctx.db.0.lock().map_err(|e| e.to_string())?;
-    documents::delete_document(&conn, &story_id, doc_id)?;
+    documents::delete_document(&state.ctx.db.0, &story_id, doc_id).await?;
     Ok(json!(null))
 }
 

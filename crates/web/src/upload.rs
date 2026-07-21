@@ -12,7 +12,7 @@ pub async fn upload_chapters(
     Path(story_id): Path<String>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
-    if !loremetry_core::stories::story_exists(&state.ctx.db, &story_id) {
+    if !loremetry_core::stories::story_exists(&state.ctx.db, &story_id).await {
         return json_error(format!("Story not found: {story_id}"));
     }
 
@@ -52,11 +52,7 @@ pub async fn upload_chapters(
             id: None,
         };
 
-        let conn = match state.ctx.db.0.lock() {
-            Ok(c) => c,
-            Err(e) => return json_error(e.to_string()),
-        };
-        match documents::upsert_document(&conn, &req) {
+        match documents::upsert_document(&state.ctx.db.0, &req).await {
             Ok(doc) => {
                 created.push(json!({
                     "id": doc.id,

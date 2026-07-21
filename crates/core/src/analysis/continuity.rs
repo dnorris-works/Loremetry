@@ -82,29 +82,27 @@ fn default_entity_type() -> String { "other".to_string() }
 // ── Manuscript-scope command ────────────────────────────────────────────────
 
 pub async fn check_continuity_for_story(app: AppCtx, request: ContinuityRequest) -> GenreResult {
-    if !crate::stories::story_exists(&app.db, &request.story_id) {
+    if !crate::stories::story_exists(&app.db, &request.story_id).await {
         return err("Story not found.");
     }
     crate::reset_cancel();
 
     let database = app.db.as_ref();
-    let story_name = {
-        let conn = database.0.lock().unwrap();
-        conn.query_row(
-            "SELECT name FROM stories WHERE id = ?1",
-            rusqlite::params![&request.story_id],
-            |r| r.get::<_, String>(0),
-        )
-        .unwrap_or_else(|_| request.story_id.clone())
-    };
-    let bible = crate::prompts::load_bible_for_story(&app.db, &request.story_id, &request.bible_path);
+    let story_name = sqlx::query_scalar::<_, String>("SELECT name FROM stories WHERE id = $1")
+        .bind(&request.story_id)
+        .fetch_optional(&database.0)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| request.story_id.clone());
+    let bible = crate::prompts::load_bible_for_story(&app.db, &request.story_id, &request.bible_path).await;
 
     let book = match extract_book_facts(&app, &database, &request.story_id, &story_name, &request.provider, &request.api_key, &request.model, &bible).await {
         Ok(b) => b,
         Err(e) => return err(&e),
     };
 
-    { let conn = database.0.lock().unwrap(); let _ = db::replace_continuity_facts(&conn, &request.story_id, &flatten_facts(&book)); }
+    let _ = db::replace_continuity_facts(&database.0, &request.story_id, &flatten_facts(&book)).await;
 
     emit(&app, "Comparing facts across chapters for contradictions...");
     let findings = match judge_contradictions(&app, &database, &request.provider, &request.api_key, &request.model, &[book], &bible).await {
@@ -114,10 +112,10 @@ pub async fn check_continuity_for_story(app: AppCtx, request: ContinuityRequest)
     emit(&app, &format!("  {} finding(s) worth reviewing.", findings.len()));
 
     let run_ts = chrono::Utc::now().to_rfc3339();
-    { let conn = database.0.lock().unwrap(); let _ = db::replace_continuity_findings(&conn, "manuscript", &request.story_id, &findings); }
+    let _ = db::replace_continuity_findings(&database.0, "manuscript", &request.story_id, &findings).await;
 
     let content = render_findings_json(&findings, "manuscript", &request.story_id);
-    { let conn = database.0.lock().unwrap(); let _ = db::save_document_at(&conn, &request.story_id, "continuity_check", &content, &run_ts); }
+    let _ = db::save_document_at(&database.0, &request.story_id, "continuity_check", &content, &run_ts).await;
     emit(&app, "✓ Continuity check saved to database.");
 
     GenreResult { success: true, report: content, error: String::new(), run_ts }
@@ -129,7 +127,7 @@ pub async fn check_continuity_for_series(app: AppCtx, request: SeriesContinuityR
     crate::reset_cancel();
     let database = app.db.as_ref();
 
-    let books_meta = { let conn = database.0.lock().unwrap(); db::list_series_books(&conn, request.series_id) };
+    let books_meta = db::list_series_books(&database.0, request.series_id).await;
     let books_meta = match books_meta {
         Ok(b) if !b.is_empty() => b,
         Ok(_) => return err("This series has no books yet. Add stories to it first."),
@@ -141,7 +139,7 @@ pub async fn check_continuity_for_series(app: AppCtx, request: SeriesContinuityR
         crate::prompts::load_bible(&request.bible_path)
     } else {
         let first_story = &books_meta[0].story_id;
-        crate::prompts::discover_bible(&app.db, first_story)
+        crate::prompts::discover_bible(&app.db, first_story).await
     };
 
     emit(&app, &format!("Series has {} book(s) in reading order.", books_meta.len()));
@@ -153,7 +151,7 @@ pub async fn check_continuity_for_series(app: AppCtx, request: SeriesContinuityR
             Ok(b) => b,
             Err(e) => { emit(&app, &format!("  ⚠ Skipping {}: {}", meta.story_name, e)); continue; }
         };
-        { let conn = database.0.lock().unwrap(); let _ = db::replace_continuity_facts(&conn, &meta.story_id, &flatten_facts(&book)); }
+        let _ = db::replace_continuity_facts(&database.0, &meta.story_id, &flatten_facts(&book)).await;
         books.push(book);
         if crate::is_cancelled() { emit(&app, "⚠ Cancelled."); return err("Cancelled."); }
     }
@@ -169,13 +167,10 @@ pub async fn check_continuity_for_series(app: AppCtx, request: SeriesContinuityR
 
     let scope_key = format!("series:{}", request.series_id);
     let run_ts = chrono::Utc::now().to_rfc3339();
-    { let conn = database.0.lock().unwrap(); let _ = db::replace_continuity_findings(&conn, "series", &scope_key, &findings); }
+    let _ = db::replace_continuity_findings(&database.0, "series", &scope_key, &findings).await;
 
     let content = render_findings_json(&findings, "series", &scope_key);
-    {
-        let conn = database.0.lock().unwrap();
-        let _ = db::save_document_at(&conn, &scope_key, "continuity_check", &content, &run_ts);
-    }
+    let _ = db::save_document_at(&database.0, &scope_key, "continuity_check", &content, &run_ts).await;
     emit(&app, "✓ Series continuity check saved to database.");
 
     GenreResult { success: true, report: content, error: String::new(), run_ts }
@@ -193,11 +188,11 @@ async fn extract_book_facts(
     model: &str,
     bible: &str,
 ) -> Result<Book, String> {
-    if !crate::stories::story_exists(db, story_id) {
+    if !crate::stories::story_exists(db, story_id).await {
         return Err("Story not found.".to_string());
     }
 
-    let chapters_docs = documents::list_chapters_db(db, story_id)?;
+    let chapters_docs = documents::list_chapters_db(db, story_id).await?;
     if chapters_docs.is_empty() {
         return Err("No chapter documents found.".to_string());
     }
@@ -290,12 +285,8 @@ fn flatten_facts(book: &Book) -> Vec<db::ContinuityFactRow> {
 
 // ── Entity name clustering (no AI — plain heuristic coreference) ───────────
 
-fn load_honorifics(db: &crate::db::Db) -> Vec<String> {
-    let conn = match db.0.lock() {
-        Ok(c) => c,
-        Err(_) => return default_honorifics(),
-    };
-    let list = crate::db::load_lookup_string_list(&conn, "continuity.honorifics");
+async fn load_honorifics(db: &crate::db::Db) -> Vec<String> {
+    let list = crate::db::load_lookup_string_list(&db.0, "continuity.honorifics").await;
     if list.is_empty() { default_honorifics() } else { list }
 }
 
@@ -387,7 +378,7 @@ async fn judge_contradictions(
     bible: &str,
 ) -> Result<Vec<db::ContinuityFindingRow>, String> {
     let is_series = books.len() > 1;
-    let honorifics = load_honorifics(database);
+    let honorifics = load_honorifics(database).await;
 
     // Flatten every fact across every book into occurrences, tagged with
     // display-friendly source info, keyed by (raw entity text, raw attribute).
@@ -618,7 +609,7 @@ pub async fn suggest_continuity_fix(app: AppCtx, request: SuggestFixRequest) -> 
     use std::collections::HashMap;
 
     let database = app.db.as_ref();
-    let bible = crate::prompts::load_bible_for_story(&app.db, &request.story_id, &request.bible_path);
+    let bible = crate::prompts::load_bible_for_story(&app.db, &request.story_id, &request.bible_path).await;
 
     let mut occurrences_text = String::new();
     for occ in &request.occurrences {

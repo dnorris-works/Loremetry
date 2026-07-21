@@ -5,8 +5,12 @@ Single-user Vue + Rust (Axum) app for fiction market/craft analysis. Deployed on
 ## Local development
 
 ```bash
-# Terminal 1 — API (SQLite in ./data)
-export DATA_DIR=./data STATIC_DIR=./ui/dist PORT=8080
+# Start Postgres (schema `lore` is created on first API boot)
+docker compose up -d db
+
+# Terminal 1 — API
+export DATABASE_URL=postgres://loremetry:loremetry@localhost:5432/loremetry
+export STATIC_DIR=./ui/dist PORT=8080
 cargo run -p loremetry-web
 
 # Terminal 2 — Vue (proxies /api → :8080)
@@ -15,6 +19,7 @@ cd ui && npm install && npm run dev
 
 Optional env secrets (also used on Miget):
 
+- `DATABASE_URL` — PostgreSQL connection string (required)
 - `ANTHROPIC_API_KEY` / `TOKENMIX_API_KEY`
 - `CANOPY_API_KEY`
 - `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`
@@ -31,8 +36,9 @@ This repo is ready for **GitHub → Miget** deploy (same flow as other web apps)
 3. **Builder:** choose **Docker Engine** (not “Auto detection / Buildpacks”).
    - Miget will build from the root **`Dockerfile`** (Vue + Rust in one image).
    - If you only see buildpacks, set **Settings → Variables** → `LANGUAGE` = `dockerfile` and redeploy.
-4. **Storage:** attach a persistent volume mounted at **`/data`** (SQLite lives here).
+4. **Database:** provision **PostgreSQL** on Miget and set **`DATABASE_URL`** in app variables. All tables live in the `lore` schema (migrations run automatically on startup).
 5. **Variables** (Settings → Variables):
+   - `DATABASE_URL` — from Miget Postgres
    - `ANTHROPIC_API_KEY`, `CANOPY_API_KEY`, etc.
    - `ADMIN_TOKEN` — a long random string; you use this in the **Admin** panel (sidebar) to import WinningCat CSV. End users never see this.
    - Miget sets `PORT` automatically; the app already listens on it.
@@ -54,10 +60,12 @@ Do **not** set `LANGUAGE=rust` or `nodejs` alone — this app needs both the Vue
 ### Manual Docker (optional)
 
 ```bash
+docker compose up -d db
 docker build -t loremetry .
-docker run -p 8080:8080 -v loremetry-data:/data \
+docker run -p 8080:8080 \
+  -e DATABASE_URL=postgres://loremetry:loremetry@host.docker.internal:5432/loremetry \
   -e ANTHROPIC_API_KEY=... \
   loremetry
 ```
 
-Mount a persistent volume at `/data` for SQLite.
+On Linux use `--network host` or point `DATABASE_URL` at the compose Postgres service hostname.

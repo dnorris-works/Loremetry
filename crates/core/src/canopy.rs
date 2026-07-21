@@ -504,10 +504,7 @@ pub async fn analyze_categories_canopy(
         emit_canopy(&app, &format!("[{}/{}] {}", i + 1, paths.len(), path));
 
         // Look up node ID from DB
-        let node_id = {
-            let conn = database.0.lock().unwrap();
-            db::node_id_for_path(&conn, path, &store)
-        };
+        let node_id = db::node_id_for_path(&database.0, path, &store).await;
 
         let node_id = match node_id {
             Some(id) => id,
@@ -602,7 +599,7 @@ async fn run_competition_canopy(app: &AppCtx, database: &db::Db, req: &Competiti
         Err(e) => return CompetitionResult { success: false, report: String::new(), error: e },
     };
 
-    let keywords = { let conn = database.0.lock().unwrap(); db::load_mi_search_terms(&conn, &req.story_id) };
+    let keywords = db::load_mi_search_terms(&database.0, &req.story_id).await;
     if keywords.is_empty() {
         emit_canopy(app, "✗ No search terms found. Run Analyze first.");
         return CompetitionResult { success: false, report: String::new(), error: "No search terms found. Run Analyze first.".to_string() };
@@ -677,19 +674,17 @@ async fn run_competition_canopy(app: &AppCtx, database: &db::Db, req: &Competiti
         categories: Vec::new(), // No category CSV from Canopy — we already have WinningCat
     };
     if let Ok(json) = serde_json::to_string_pretty(&data) {
-        let conn = database.0.lock().unwrap();
-        match db::save_document(&conn, &req.story_id, "competition_data", &json) {
+        match db::save_document(&database.0, &req.story_id, "competition_data", &json).await {
             Ok(()) => emit_canopy(app, "  ✓ competition data saved."),
             Err(e) => emit_canopy(app, &format!("  ⚠ could not save competition data: {}", e)),
         }
     }
-
     // AI analysis
     emit_canopy(app, &format!("Running AI analysis... [{}]", req.model));
-    let genre_context = {
-        let conn = database.0.lock().unwrap();
-        db::load_genre_data(&conn, &req.story_id).map(|g| g.genre_signals).unwrap_or_default()
-    };
+    let genre_context = db::load_genre_data(&database.0, &req.story_id)
+        .await
+        .map(|g| g.genre_signals)
+        .unwrap_or_default();
 
     let books_summary: String = all_books.iter().take(20).enumerate().map(|(i, b)| {
         format!("{}. \"{}\" by {} — BSR: {}, Price: {}, Rating: {} ({} reviews), Daily sales: {}, Keyword: \"{}\"",
@@ -710,8 +705,7 @@ async fn run_competition_canopy(app: &AppCtx, database: &db::Db, req: &Competiti
                 "content_format": "markdown",
                 "content": report,
             }).to_string();
-            let conn = database.0.lock().unwrap();
-            let _ = db::save_document(&conn, &req.story_id, "competition_report", &json);
+            let _ = db::save_document(&database.0, &req.story_id, "competition_report", &json).await;
             emit_canopy(app, "✓ Competition report saved to database.");
             CompetitionResult { success: true, report: json, error: String::new() }
         }
@@ -829,11 +823,10 @@ pub async fn search_keywords_canopy(app: AppCtx, request: KeywordSearchCanopyReq
 
     // Save to database
     let database = app.db.as_ref();
-    let conn = database.0.lock().unwrap();
     let rows: Vec<(String, String, String, String)> = results.iter()
         .map(|r| (r.keyword.clone(), r.searches.clone(), r.competition.clone(), r.estimated_earnings.clone()))
         .collect();
-    let _ = db::replace_keyword_search_results(&conn, &request.story_id, &request.seed, &rows);
+    let _ = db::replace_keyword_search_results(&database.0, &request.story_id, &request.seed, &rows);
 
     KeywordSearchResponse { success: true, results, error: String::new() }
 }
@@ -870,7 +863,7 @@ pub async fn mine_competitor_reviews(app: AppCtx, request: ReviewMiningRequest) 
     };
 
     // Get search terms to find comp books
-    let keywords = { let conn = database.0.lock().unwrap(); db::load_mi_search_terms(&conn, &request.story_id) };
+    let keywords = db::load_mi_search_terms(&database.0, &request.story_id).await;
     if keywords.is_empty() {
         emit_canopy(&app, "✗ No search terms found. Run Analyze first.");
         return ReviewMiningResult { success: false, report: String::new(), error: "No search terms found. Run Analyze first.".to_string() };
@@ -943,10 +936,10 @@ pub async fn mine_competitor_reviews(app: AppCtx, request: ReviewMiningRequest) 
 
     emit_canopy(&app, "  Running AI analysis on reviews...");
 
-    let genre_context = {
-        let conn = database.0.lock().unwrap();
-        db::load_genre_data(&conn, &request.story_id).map(|g| g.genre_signals).unwrap_or_default()
-    };
+    let genre_context = db::load_genre_data(&database.0, &request.story_id)
+        .await
+        .map(|g| g.genre_signals)
+        .unwrap_or_default();
 
     let mut vars = std::collections::HashMap::new();
     vars.insert("genre_context", genre_context.as_str());
@@ -961,8 +954,7 @@ pub async fn mine_competitor_reviews(app: AppCtx, request: ReviewMiningRequest) 
                 "books_analyzed": comp_asins.iter().map(|(a, t)| serde_json::json!({"asin": a, "title": t})).collect::<Vec<_>>(),
                 "total_reviews": all_reviews.iter().map(|(_, r)| r.len()).sum::<usize>(),
             }).to_string();
-            let conn = database.0.lock().unwrap();
-            let _ = db::save_document(&conn, &request.story_id, "review_mining", &json);
+            let _ = db::save_document(&database.0, &request.story_id, "review_mining", &json).await;
             emit_canopy(&app, "✓ Review mining report saved.");
             ReviewMiningResult { success: true, report: json, error: String::new() }
         }
@@ -997,7 +989,7 @@ pub async fn analyze_comp_authors(app: AppCtx, request: AuthorAnalysisRequest) -
         Err(e) => return AuthorAnalysisResult { success: false, report: String::new(), error: e },
     };
 
-    let keywords = { let conn = database.0.lock().unwrap(); db::load_mi_search_terms(&conn, &request.story_id) };
+    let keywords = db::load_mi_search_terms(&database.0, &request.story_id).await;
     if keywords.is_empty() {
         emit_canopy(&app, "✗ No search terms found. Run Analyze first.");
         return AuthorAnalysisResult { success: false, report: String::new(), error: "No search terms found. Run Analyze first.".to_string() };
@@ -1066,10 +1058,10 @@ pub async fn analyze_comp_authors(app: AppCtx, request: AuthorAnalysisRequest) -
 
     emit_canopy(&app, "  Running AI analysis on author catalogs...");
 
-    let genre_context = {
-        let conn = database.0.lock().unwrap();
-        db::load_genre_data(&conn, &request.story_id).map(|g| g.genre_signals).unwrap_or_default()
-    };
+    let genre_context = db::load_genre_data(&database.0, &request.story_id)
+        .await
+        .map(|g| g.genre_signals)
+        .unwrap_or_default();
 
     let author_summary = serde_json::to_string_pretty(&author_data).unwrap_or_default();
     let mut vars = std::collections::HashMap::new();
@@ -1084,8 +1076,7 @@ pub async fn analyze_comp_authors(app: AppCtx, request: AuthorAnalysisRequest) -
                 "content": report,
                 "authors_analyzed": author_data,
             }).to_string();
-            let conn = database.0.lock().unwrap();
-            let _ = db::save_document(&conn, &request.story_id, "author_analysis", &json);
+            let _ = db::save_document(&database.0, &request.story_id, "author_analysis", &json).await;
             emit_canopy(&app, "✓ Author catalog analysis saved.");
             AuthorAnalysisResult { success: true, report: json, error: String::new() }
         }

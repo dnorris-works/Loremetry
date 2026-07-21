@@ -167,7 +167,7 @@ async fn list_documents(
     State(state): State<AppState>,
     Path(story_id): Path<String>,
 ) -> impl IntoResponse {
-    match documents::list_documents_db(&state.ctx.db, &story_id) {
+    match documents::list_documents_db(&state.ctx.db, &story_id).await {
         Ok(docs) => ok_json(json!({ "success": true, "documents": docs, "error": "" })),
         Err(e) => json_error(e),
     }
@@ -179,11 +179,7 @@ async fn upsert_document(
     Json(mut body): Json<UpsertDocumentRequest>,
 ) -> impl IntoResponse {
     body.story_id = story_id;
-    let conn = match state.ctx.db.0.lock() {
-        Ok(c) => c,
-        Err(e) => return json_error(e.to_string()),
-    };
-    match documents::upsert_document(&conn, &body) {
+    match documents::upsert_document(&state.ctx.db.0, &body).await {
         Ok(doc) => ok_json(json!({ "success": true, "document": doc, "error": "" })),
         Err(e) => json_error(e),
     }
@@ -200,11 +196,7 @@ async fn get_document(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    let conn = match state.ctx.db.0.lock() {
-        Ok(c) => c,
-        Err(e) => return json_error(e.to_string()),
-    };
-    match documents::get_document(&conn, id) {
+    match documents::get_document(&state.ctx.db.0, id).await {
         Ok(Some(doc)) => ok_json(json!({ "success": true, "document": doc, "error": "" })),
         Ok(None) => json_error("Document not found"),
         Err(e) => json_error(e),
@@ -216,12 +208,8 @@ async fn update_document(
     Path(id): Path<i64>,
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
-    let conn = match state.ctx.db.0.lock() {
-        Ok(c) => c,
-        Err(e) => return json_error(e.to_string()),
-    };
     if let Some(content) = body.get("content").and_then(|v| v.as_str()) {
-        let doc = match documents::get_document(&conn, id) {
+        let doc = match documents::get_document(&state.ctx.db.0, id).await {
             Ok(Some(d)) => d,
             Ok(None) => return json_error("Document not found"),
             Err(e) => return json_error(e),
@@ -234,7 +222,7 @@ async fn update_document(
             content: content.to_string(),
             id: Some(id),
         };
-        return match documents::upsert_document(&conn, &req) {
+        return match documents::upsert_document(&state.ctx.db.0, &req).await {
             Ok(doc) => ok_json(json!({ "success": true, "document": doc, "error": "" })),
             Err(e) => json_error(e),
         };
@@ -242,7 +230,7 @@ async fn update_document(
     match serde_json::from_value::<UpsertDocumentRequest>(body) {
         Ok(mut req) => {
             req.id = Some(id);
-            match documents::upsert_document(&conn, &req) {
+            match documents::upsert_document(&state.ctx.db.0, &req).await {
                 Ok(doc) => ok_json(json!({ "success": true, "document": doc, "error": "" })),
                 Err(e) => json_error(e),
             }
@@ -259,22 +247,14 @@ async fn delete_document(
     let story_id = match q.story_id {
         Some(s) => s,
         None => {
-            let conn = match state.ctx.db.0.lock() {
-                Ok(c) => c,
-                Err(e) => return json_error(e.to_string()),
-            };
-            match documents::get_document(&conn, id) {
+            match documents::get_document(&state.ctx.db.0, id).await {
                 Ok(Some(d)) => d.story_id,
                 Ok(None) => return json_error("Document not found"),
                 Err(e) => return json_error(e),
             }
         }
     };
-    let conn = match state.ctx.db.0.lock() {
-        Ok(c) => c,
-        Err(e) => return json_error(e.to_string()),
-    };
-    match documents::delete_document(&conn, &story_id, id) {
+    match documents::delete_document(&state.ctx.db.0, &story_id, id).await {
         Ok(()) => ok_json(json!({ "success": true })),
         Err(e) => json_error(e),
     }

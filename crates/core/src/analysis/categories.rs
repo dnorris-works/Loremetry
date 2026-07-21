@@ -64,7 +64,7 @@ const MAX_QUALIFYING_PER_STORE: usize = 8;
 pub async fn find_categories_for_story(app: AppCtx, request: FindCategoriesRequest) -> GenreResult {
     let database = app.db.as_ref();
 
-    let genre_data = { let conn = database.0.lock().unwrap(); db::load_genre_data(&conn, &request.story_id) };
+    let genre_data = db::load_genre_data(&database.0, &request.story_id).await;
     let genre_data = match genre_data {
         Some(d) => d,
         None    => return err("No genre data found. Run Analyze first."),
@@ -78,14 +78,12 @@ pub async fn find_categories_for_story(app: AppCtx, request: FindCategoriesReque
     emit(&app, &format!("  Store: {}", request.store));
 
     // Get ranked genres
-    let genre_terms: Vec<(String, u8)> = {
-        let conn = database.0.lock().unwrap();
-        db::get_genre_rankings(&conn, &request.story_id, &request.store)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|r| (r.genre, r.confidence as u8))
-            .collect()
-    };
+    let genre_terms: Vec<(String, u8)> = db::get_genre_rankings(&database.0, &request.story_id, &request.store)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| (r.genre, r.confidence as u8))
+        .collect();
 
     if genre_terms.is_empty() {
         return err("No genre rankings found. Run Analyze first.");
@@ -107,13 +105,8 @@ pub async fn find_categories_for_story(app: AppCtx, request: FindCategoriesReque
         return GenreResult { success: true, report: "No candidates cleared the fit bar.".to_string(), error: String::new(), run_ts: String::new() };
     }
 
-    // Store results
-    {
-        let conn = database.0.lock().unwrap();
-        let report = format!("Found {} categories for {}.", final_cats.len(), request.store);
-        let _ = db::save_document(&conn, &request.story_id, "category_finder", &report);
-    }
-
+    let report = format!("Found {} categories for {}.", final_cats.len(), request.store);
+    let _ = db::save_document(&database.0, &request.story_id, "category_finder", &report).await;
     emit(&app, &format!("✓ {} categories found and verified.", final_cats.len()));
     GenreResult { success: true, report: String::new(), error: String::new(), run_ts: String::new() }
 }
@@ -121,16 +114,15 @@ pub async fn find_categories_for_story(app: AppCtx, request: FindCategoriesReque
 pub async fn match_categories_for_story(app: AppCtx, request: FindCategoriesRequest) -> GenreResult {
     let database = app.db.as_ref();
 
-    let genre_data = { let conn = database.0.lock().unwrap(); db::load_genre_data(&conn, &request.story_id) };
+    let genre_data = db::load_genre_data(&database.0, &request.story_id).await;
     let genre_data = match genre_data {
         Some(d) => d,
         None    => return err("No genre data found. Run Analyze first."),
     };
 
-    let rankings = {
-        let conn = database.0.lock().unwrap();
-        db::get_genre_rankings(&conn, &request.story_id, "Kindle").unwrap_or_default()
-    };
+    let rankings = db::get_genre_rankings(&database.0, &request.story_id, "Kindle")
+        .await
+        .unwrap_or_default();
 
     let genre_terms: Vec<(String, u8)> = if !rankings.is_empty() {
         rankings.iter().filter(|r| r.confidence >= 30).take(6)
@@ -147,7 +139,7 @@ pub async fn match_categories_for_story(app: AppCtx, request: FindCategoriesRequ
     let mut any_data = false;
 
     for store in stores {
-        let total_catalog = { let conn = database.0.lock().unwrap(); db::kdp_category_count(&conn, store) };
+        let total_catalog = db::kdp_category_count(&database.0, store).await;
         if total_catalog < 50 {
             emit(&app, &format!("⚠ Skipping {} — catalog nearly empty for this store.", store));
             store_sections.push(format!("## {}\n\n*Catalog nearly empty for this store — import WinningCat data covering {} to enable matching here, or use Find Categories (PR) instead.*\n", store, store));
@@ -173,7 +165,7 @@ pub async fn match_categories_for_story(app: AppCtx, request: FindCategoriesRequ
         "stores": store_sections.iter().map(|s| serde_json::from_str::<serde_json::Value>(s).unwrap_or_default()).collect::<Vec<_>>(),
     }).to_string();
 
-    { let conn = database.0.lock().unwrap(); let _ = db::save_document(&conn, &request.story_id, "category_finder", &report); }
+    let _ = db::save_document(&database.0, &request.story_id, "category_finder", &report).await;
     emit(&app, "✓ Best-for-discoverability catalog match (both stores) saved to database.");
 
     GenreResult { success: true, report, error: String::new(), run_ts: String::new() }
@@ -186,12 +178,9 @@ pub async fn verify_mapped_categories(app: AppCtx, db: &db::Db, request: VerifyM
         String::new()
     };
 
-    let rankings = {
-        let conn = db.0.lock().unwrap();
-        match db::get_genre_rankings(&conn, &request.story_id, &request.store) {
-            Ok(r) => r,
-            Err(e) => return Ok(err(&format!("Could not read rankings from database: {}", e))),
-        }
+    let rankings = match db::get_genre_rankings(&db.0, &request.story_id, &request.store).await {
+        Ok(r) => r,
+        Err(e) => return Ok(err(&format!("Could not read rankings from database: {}", e))),
     };
 
     if rankings.is_empty() {
@@ -222,14 +211,11 @@ pub async fn verify_mapped_categories(app: AppCtx, db: &db::Db, request: VerifyM
         return Ok(err(&result.error));
     }
 
-    {
-        let conn = db.0.lock().unwrap();
-        let md = format!("Verified {} categories for {}.", result.rows.len(), request.store);
-        let _ = db::save_document(&conn, &request.story_id, "mapped_categories", &md);
-        for g in &rankings {
-            for p in &g.kdp_paths {
-                let _ = db::upsert_kdp_path(&conn, &g.genre, p, &request.store, "category_analyzer", true);
-            }
+    let md = format!("Verified {} categories for {}.", result.rows.len(), request.store);
+    let _ = db::save_document(&db.0, &request.story_id, "mapped_categories", &md).await;
+    for g in &rankings {
+        for p in &g.kdp_paths {
+            let _ = db::upsert_kdp_path(&db.0, &g.genre, p, &request.store, "category_analyzer", true).await;
         }
     }
 
@@ -319,10 +305,8 @@ pub(crate) async fn match_categories_by_store(
     for (genre_name, genre_conf) in genre_terms {
         emit(app, &format!("  → {} ({}%)", genre_name, genre_conf));
 
-        let candidates = {
-            let conn = database.0.lock().unwrap();
-            db::search_kdp_categories(&conn, store, std::slice::from_ref(genre_name), 100)
-        };
+        let candidates = db::search_kdp_categories(&database.0, store, std::slice::from_ref(genre_name), 100)
+            .await;
 
         if candidates.is_empty() {
             emit(app, "      no catalog matches for this genre yet.");
@@ -354,15 +338,13 @@ pub(crate) async fn match_categories_by_store(
 
     // Persist every discovered candidate
     if !ranked_paths.is_empty() {
-        let conn = database.0.lock().unwrap();
         let rows: Vec<(String, u8, String, String, String, String, String, Option<String>)> = ranked_paths.iter().map(|path| {
             let conf = path_conf[path];
             (path.clone(), conf, String::new(), String::new(), String::new(), String::new(), "matched".to_string(), None)
         }).collect();
         let top_genre = genre_terms.first().map(|(g, _)| g.clone());
-        let _ = db::replace_category_results(&conn, folder, store, top_genre.as_deref(), &rows);
+        let _ = db::replace_category_results(&database.0, folder, store, top_genre.as_deref(), &rows).await;
     }
-
     emit(app, &format!(
         "  Fit gate (confidence ≥{}%, or 2+ genres agree): {} of {} candidates qualify for a discoverability check.",
         FIT_CONFIDENCE_BAR, ranked_paths.iter().filter(|p| path_conf[*p] >= FIT_CONFIDENCE_BAR || path_genres[*p].len() >= 2).count(),

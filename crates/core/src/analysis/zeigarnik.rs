@@ -38,19 +38,19 @@ pub struct ZeigarnikRequest {
 }
 
 pub async fn analyze_zeigarnik_for_story(app: AppCtx, request: ZeigarnikRequest) -> GenreResult {
-    if !crate::stories::story_exists(&app.db, &request.story_id) {
+    if !crate::stories::story_exists(&app.db, &request.story_id).await {
         return err("Story not found.");
     }
 
     crate::reset_cancel();
-    let chapters = match documents::list_chapters_db(&app.db, &request.story_id) {
+    let chapters = match documents::list_chapters_db(&app.db, &request.story_id).await {
         Ok(c) => c,
         Err(e) => return err(&e),
     };
     if chapters.is_empty() { return err("No chapter documents found. Upload manuscript chapters first."); }
 
     let database = app.db.as_ref();
-    let config = { let conn = database.0.lock().unwrap(); db::load_zeigarnik_config(&conn) };
+    let config = db::load_zeigarnik_config(&database.0).await;
     let run_ts = chrono::Utc::now().to_rfc3339();
 
     emit(&app, &format!("Found {} chapter(s). Scanning for open loops (no AI — pattern matching only)...", chapters.len()));
@@ -100,11 +100,8 @@ pub async fn analyze_zeigarnik_for_story(app: AppCtx, request: ZeigarnikRequest)
     emit(&app, &format!("  {} candidate open thread(s) found (gap ≥ {} chapters).", threads.len(), config.min_gap_chapters_for_thread));
 
     // ── Persist ──────────────────────────────────────────────────────────
-    {
-        let conn = database.0.lock().unwrap();
-        if let Err(e) = db::replace_zeigarnik_analysis(&conn, &request.story_id, &chapter_rows, &threads) {
-            return err(&format!("Could not save analysis: {}", e));
-        }
+    if let Err(e) = db::replace_zeigarnik_analysis(&database.0, &request.story_id, &chapter_rows, &threads).await {
+        return err(&format!("Could not save analysis: {}", e));
     }
 
     // ── Summary + JSON document ─────────────────────────────────────────
@@ -169,7 +166,7 @@ pub async fn analyze_zeigarnik_for_story(app: AppCtx, request: ZeigarnikRequest)
     });
     let content = json.to_string();
 
-    { let conn = database.0.lock().unwrap(); let _ = db::save_document_at(&conn, &request.story_id, "zeigarnik_analysis", &content, &run_ts); }
+    let _ = db::save_document_at(&database.0, &request.story_id, "zeigarnik_analysis", &content, &run_ts).await;
     emit(&app, "✓ Zeigarnik analysis saved to database.");
 
     GenreResult { success: true, report: content, error: String::new(), run_ts }

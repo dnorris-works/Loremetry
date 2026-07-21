@@ -1,6 +1,5 @@
 //! Shared application context — replaces Tauri AppCtx / managed State.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -15,16 +14,14 @@ pub struct LogEvent {
 #[derive(Clone)]
 pub struct AppCtx {
     pub db: Arc<Db>,
-    pub data_dir: PathBuf,
     log_tx: broadcast::Sender<LogEvent>,
 }
 
 impl AppCtx {
-    pub fn new(db: Db, data_dir: PathBuf) -> Self {
+    pub fn new(db: Db) -> Self {
         let (log_tx, _) = broadcast::channel(512);
         Self {
             db: Arc::new(db),
-            data_dir,
             log_tx,
         }
     }

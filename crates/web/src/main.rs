@@ -23,12 +23,8 @@ async fn main() {
         .init();
 
     let config = Config::from_env();
-    if let Err(e) = std::fs::create_dir_all(&config.data_dir) {
-        eprintln!("Failed to create data_dir {:?}: {e}", config.data_dir);
-        std::process::exit(1);
-    }
 
-    let database = match db::init(&config.data_dir) {
+    let database = match db::init(&config.database_url).await {
         Ok(d) => d,
         Err(e) => {
             eprintln!("Database init failed: {e}");
@@ -36,7 +32,7 @@ async fn main() {
         }
     };
 
-    let ctx = AppCtx::new(database, config.data_dir.clone());
+    let ctx = AppCtx::new(database);
     let port = config.port;
     let state = AppState {
         ctx,

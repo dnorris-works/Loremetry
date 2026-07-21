@@ -214,7 +214,7 @@ pub async fn list_models(
 ) -> Result<ModelsResult, String> {
     Ok(match provider.as_str() {
         "tokenmix" => fetch_tokenmix_models(&api_key).await,
-        "claude" => fetch_claude_models(db),
+        "claude" => fetch_claude_models(db).await,
         _ => ModelsResult {
             success: false, models: Vec::new(),
             error: format!("Unknown provider: {}", provider),
@@ -344,18 +344,9 @@ async fn fetch_tokenmix_models_legacy(client: &reqwest::Client, api_key: &str) -
     ModelsResult { success: true, models, error: String::new() }
 }
 
-fn fetch_claude_models(db: &crate::db::Db) -> ModelsResult {
-    let conn = match db.0.lock() {
-        Ok(c) => c,
-        Err(e) => {
-            return ModelsResult {
-                success: false,
-                models: Vec::new(),
-                error: format!("Database lock error: {}", e),
-            };
-        }
-    };
-    let models = crate::db::list_provider_models(&conn, "claude")
+async fn fetch_claude_models(db: &crate::db::Db) -> ModelsResult {
+    let models = crate::db::list_provider_models(&db.0, "claude")
+        .await
         .into_iter()
         .map(|m| ModelInfo {
             id: m.id,
@@ -378,16 +369,16 @@ fn fetch_claude_models(db: &crate::db::Db) -> ModelsResult {
 
 /// Read a chapter document by id. Returns the full text content.
 pub async fn read_chapter(app: AppCtx, doc_id: i64) -> Result<String, String> {
-    let conn = app.db.0.lock().map_err(|e| e.to_string())?;
-    let doc = documents::get_document(&conn, doc_id)?
+    let doc = documents::get_document(&app.db.0, doc_id)
+        .await?
         .ok_or_else(|| format!("Document {} not found", doc_id))?;
     Ok(doc.content)
 }
 
 /// Save a chapter document (full overwrite). Used by the editor's auto-save.
 pub async fn save_chapter(app: AppCtx, doc_id: i64, content: String) -> Result<(), String> {
-    let conn = app.db.0.lock().map_err(|e| e.to_string())?;
-    let doc = documents::get_document(&conn, doc_id)?
+    let doc = documents::get_document(&app.db.0, doc_id)
+        .await?
         .ok_or_else(|| format!("Document {} not found", doc_id))?;
     let req = documents::UpsertDocumentRequest {
         story_id: doc.story_id,
@@ -397,7 +388,7 @@ pub async fn save_chapter(app: AppCtx, doc_id: i64, content: String) -> Result<(
         content,
         id: Some(doc_id),
     };
-    documents::upsert_document(&conn, &req)?;
+    documents::upsert_document(&app.db.0, &req).await?;
     Ok(())
 }
 
@@ -410,8 +401,7 @@ pub async fn write_manuscript_fix(
     old_text: String,
     new_text: String,
 ) -> Result<String, String> {
-    let conn = app.db.0.lock().map_err(|e| e.to_string())?;
-    let doc = documents::write_document_fix(&conn, doc_id, &old_text, &new_text)?;
+    let doc = documents::write_document_fix(&app.db.0, doc_id, &old_text, &new_text).await?;
     Ok(doc.content)
 }
 
@@ -428,10 +418,10 @@ pub struct FileTreeEntry {
 /// Returns manuscript documents for a story as a flat file-tree list.
 /// `path` is `doc:{id}`; name prefers path_hint then title.
 pub async fn list_manuscript_files(app: AppCtx, story_id: String) -> Result<Vec<FileTreeEntry>, String> {
-    if !crate::stories::story_exists(&app.db, &story_id) {
+    if !crate::stories::story_exists(&app.db, &story_id).await {
         return Err(format!("Story not found: {}", story_id));
     }
-    let docs = documents::list_documents_db(&app.db, &story_id)?;
+    let docs = documents::list_documents_db(&app.db, &story_id).await?;
     let mut entries: Vec<FileTreeEntry> = docs
         .into_iter()
         .filter(|d| d.kind == "chapter" || d.kind == "bible" || d.kind == "character" || d.kind == "location")
@@ -517,14 +507,14 @@ pub async fn estimate_report_costs(
     app: AppCtx,
     request: CostEstimateRequest,
 ) -> Result<CostEstimateResult, String> {
-    if !crate::stories::story_exists(&app.db, &request.story_id) {
+    if !crate::stories::story_exists(&app.db, &request.story_id).await {
         return Ok(CostEstimateResult {
             success: false, chapter_count: 0, total_words: 0,
             estimates: Vec::new(), error: "Story not found.".to_string(),
         });
     }
 
-    let chapters = documents::list_chapters_db(&app.db, &request.story_id).unwrap_or_default();
+    let chapters = documents::list_chapters_db(&app.db, &request.story_id).await.unwrap_or_default();
     let chapter_count = chapters.len();
 
     // Count words per chapter
@@ -537,13 +527,11 @@ pub async fn estimate_report_costs(
     const WORDS_TO_TOKENS: f64 = 1.3;  // average for English prose
     const SYSTEM_PROMPT_TOKENS: usize = 400;  // approximate for our prompts
 
-    let cost_params: std::collections::HashMap<String, crate::db::ReportCostParams> = {
-        let conn = app.db.0.lock().map_err(|e| e.to_string())?;
-        request.model_prices.iter().map(|rp| {
-            let p = crate::db::load_report_cost_params(&conn, &rp.report_id);
-            (rp.report_id.clone(), p)
-        }).collect()
-    };
+    let mut cost_params = std::collections::HashMap::new();
+    for rp in &request.model_prices {
+        let p = crate::db::load_report_cost_params(&app.db.0, &rp.report_id).await;
+        cost_params.insert(rp.report_id.clone(), p);
+    }
 
     let mut estimates = Vec::new();
 
@@ -637,10 +625,7 @@ pub async fn chat_with_context(
         return Ok(ChatResponse { success: false, reply: String::new(), error: "Set an API key and model in Settings.".to_string() });
     }
 
-    let template = match {
-        let conn = db.0.lock().map_err(|e| e.to_string());
-        conn.and_then(|c| crate::prompts::load_template(&c, "writing_chat"))
-    } {
+    let template = match crate::prompts::load_template(&db.0, "writing_chat").await {
         Ok(t) => t,
         Err(e) => return Ok(ChatResponse { success: false, reply: String::new(), error: e }),
     };

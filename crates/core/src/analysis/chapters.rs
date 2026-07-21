@@ -9,12 +9,12 @@ use crate::documents::{self, Document};
 use crate::prompts;
 
 pub async fn generate_summaries(app: AppCtx, request: FolderRequest) -> GenreResult {
-    if !crate::stories::story_exists(&app.db, &request.story_id) {
+    if !crate::stories::story_exists(&app.db, &request.story_id).await {
         return err("Story not found.");
     }
 
     crate::reset_cancel();
-    let chapters = match documents::list_chapters_db(&app.db, &request.story_id) {
+    let chapters = match documents::list_chapters_db(&app.db, &request.story_id).await {
         Ok(c) => c,
         Err(e) => return err(&e),
     };
@@ -62,10 +62,7 @@ pub(crate) async fn phase1_summaries(
     for (i, chapter) in chapters.iter().enumerate() {
         let fname = documents::chapter_display_name(chapter);
 
-        let already_done = {
-            let conn = database.0.lock().unwrap();
-            db::chapter_summary_exists(&conn, story_id, &fname)
-        };
+        let already_done = db::chapter_summary_exists(&database.0, story_id, &fname).await;
         if already_done {
             emit(
                 app,
@@ -106,15 +103,15 @@ pub(crate) async fn phase1_summaries(
                 } else {
                     extract_title(content).unwrap_or_else(|| fname.clone())
                 };
-                let conn = database.0.lock().unwrap();
                 let _ = db::save_chapter_summary(
-                    &conn,
+                    &database.0,
                     story_id,
                     &fname,
                     &title,
                     &signals,
                     word_count as i64,
-                );
+                )
+                .await;
                 emit(
                     app,
                     &format!("    \u{2713} Done ({} signal chars)", signals.len()),
@@ -146,10 +143,7 @@ pub(crate) async fn summarize_chapter(
     filename: &str,
     content: &str,
 ) -> Result<String, String> {
-    let bible = {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        documents::load_bible_text(&conn, story_id)
-    };
+    let bible = documents::load_bible_text(&db.0, story_id).await;
     let title = extract_title(content).unwrap_or_else(|| filename.to_string());
 
     let mut vars = HashMap::new();

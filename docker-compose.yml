@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: loremetry
+      POSTGRES_PASSWORD: loremetry
+      POSTGRES_DB: loremetry
+    ports:
+      - "5432:5432"
+    volumes:
+      - loremetry-pg:/var/lib/postgresql/data
+
+volumes:
+  loremetry-pg:

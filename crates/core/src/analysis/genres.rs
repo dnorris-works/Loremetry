@@ -37,10 +37,7 @@ pub struct RankedGenre {
 pub async fn rank_genres_for_story(app: AppCtx, request: FolderRequest) -> GenreResult {
     let database = app.db.as_ref();
 
-    let genre_data = {
-        let conn = database.0.lock().unwrap();
-        db::load_genre_data(&conn, &request.story_id)
-    };
+    let genre_data = db::load_genre_data(&database.0, &request.story_id).await;
     let genre_data = match genre_data {
         Some(d) => d,
         None    => return err("No genre data found. Run Analyze first."),
@@ -52,7 +49,7 @@ pub async fn rank_genres_for_story(app: AppCtx, request: FolderRequest) -> Genre
     );
 
     emit(&app, "Ranking manuscript against master genre list...");
-    let master_list = match crate::genre_taxonomy::master_genre_list(&database) {
+    let master_list = match crate::genre_taxonomy::master_genre_list(&database).await {
         Ok(l) => l,
         Err(e) => return err(&format!("Could not load genre list from database: {}", e)),
     };
@@ -61,11 +58,13 @@ pub async fn rank_genres_for_story(app: AppCtx, request: FolderRequest) -> Genre
     match ai_rank_genres(&database, &request.provider, &request.api_key, &request.model, &description, &master_list).await {
         Err(e) => err(&e),
         Ok(ai_ranked) => {
-            let mut ranked: Vec<RankedGenre> = ai_ranked.into_iter().map(|r| {
+            let mut ranked: Vec<RankedGenre> = Vec::new();
+            for r in ai_ranked {
                 let kdp_paths = crate::genre_taxonomy::kdp_paths_for_genre(&database, &r.genre, "Kindle")
+                    .await
                     .unwrap_or_default();
-                RankedGenre { genre: r.genre, confidence: r.confidence, reason: r.reason, kdp_paths }
-            }).collect();
+                ranked.push(RankedGenre { genre: r.genre, confidence: r.confidence, reason: r.reason, kdp_paths });
+            }
             ranked.sort_by(|a, b| b.confidence.cmp(&a.confidence));
 
             for r in &ranked {
@@ -98,14 +97,13 @@ pub async fn rank_genres_for_story(app: AppCtx, request: FolderRequest) -> Genre
             }
             let report = lines.join("\n");
 
-            let conn = database.0.lock().unwrap();
             let rows: Vec<(String, u8, String)> = ranked.iter()
                 .map(|r| (r.genre.clone(), r.confidence, r.reason.clone()))
                 .collect();
-            if let Err(e) = db::replace_genre_rankings(&conn, &request.story_id, &rows) {
+            if let Err(e) = db::replace_genre_rankings(&database.0, &request.story_id, &rows).await {
                 emit(&app, &format!("  \u{26a0} Could not save ranking to database: {}", e));
             }
-            let _ = db::save_document(&conn, &request.story_id, "genre_ranking", &report);
+            let _ = db::save_document(&database.0, &request.story_id, "genre_ranking", &report).await;
             emit(&app, &format!("\u{2713} Ranking saved to database \u{2014} {} genre(s) ranked.", ranked.len()));
 
             GenreResult { success: true, report, error: String::new(), run_ts: String::new() }
@@ -114,26 +112,22 @@ pub async fn rank_genres_for_story(app: AppCtx, request: FolderRequest) -> Genre
 }
 
 pub async fn analyze_genre(app: AppCtx, request: FolderRequest) -> GenreResult {
-    if !crate::stories::story_exists(&app.db, &request.story_id) {
+    if !crate::stories::story_exists(&app.db, &request.story_id).await {
         return err("Story not found.");
     }
 
     let database = app.db.as_ref();
-    let mut summaries = {
-        let conn = database.0.lock().unwrap();
-        db::load_chapter_summaries(&conn, &request.story_id)
-    };
+    let mut summaries = db::load_chapter_summaries(&database.0, &request.story_id).await;
 
     if summaries.is_empty() {
         emit(&app, "No summaries found \u{2014} running Phase 1 first...");
-        let chapters = match documents::list_chapters_db(&app.db, &request.story_id) {
+        let chapters = match documents::list_chapters_db(&app.db, &request.story_id).await {
             Ok(c) => c,
             Err(e) => return err(&e),
         };
         if chapters.is_empty() { return err("No chapter documents found. Upload manuscript chapters first."); }
         phase1_summaries(&app, &database, &chapters, &request.story_id, &request.provider, &request.api_key, &request.model).await;
-        let conn = database.0.lock().unwrap();
-        summaries = db::load_chapter_summaries(&conn, &request.story_id);
+        summaries = db::load_chapter_summaries(&database.0, &request.story_id).await;
     }
 
     if summaries.is_empty() { return err("Could not produce any chapter summaries."); }
@@ -163,16 +157,16 @@ pub(crate) async fn phase2_analyze(
     match call_ai_genre_analysis(database, provider, api_key, model, &combined).await {
         Err(e) => err(&format!("Phase 2 AI error: {}", e)),
         Ok(g) => {
-            let conn = database.0.lock().unwrap();
             let _ = db::save_genre_data(
-                &conn, story_id,
+                &database.0, story_id,
                 &g.industry_ebook, &g.industry_print, &g.genre_signals,
                 &g.reader_demographic, &g.bookstore_shelving,
                 &g.kdp_ebook, &g.kdp_print, &g.comps_ebook, &g.comps_print, &g.marketing_notes,
-            );
+            )
+            .await;
             emit(app, "  \u{2713} Genre data saved to database.");
             let rendered = render_genre_analysis_md(&g);
-            let _ = db::save_document(&conn, story_id, "genre_analysis", &rendered);
+            let _ = db::save_document(&database.0, story_id, "genre_analysis", &rendered).await;
             GenreResult { success: true, report: rendered, error: String::new(), run_ts: String::new() }
         }
     }

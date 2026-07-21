@@ -25,7 +25,7 @@ pub struct KeywordRequest {
 
 pub async fn generate_search_terms(app: AppCtx, request: KeywordRequest) -> GenreResult {
     let database = app.db.as_ref();
-    let genre_data = { let conn = database.0.lock().unwrap(); db::load_genre_data(&conn, &request.story_id) };
+    let genre_data = db::load_genre_data(&database.0, &request.story_id).await;
     let genre_data = match genre_data {
         Some(d) => d,
         None    => return err("No genre data found. Run Analyze first."),
@@ -41,9 +41,8 @@ pub async fn generate_search_terms(app: AppCtx, request: KeywordRequest) -> Genr
             for kw in &keywords { emit(&app, &format!("    • {}", kw)); }
 
             let rendered = render_search_terms(&keywords);
-            let conn = database.0.lock().unwrap();
-            let _ = db::save_mi_search_terms(&conn, &request.story_id, &keywords);
-            let _ = db::save_document(&conn, &request.story_id, "mi_search_terms", &rendered);
+            let _ = db::save_mi_search_terms(&database.0, &request.story_id, &keywords).await;
+            let _ = db::save_document(&database.0, &request.story_id, "mi_search_terms", &rendered).await;
 
             GenreResult { success: true, report: rendered, error: String::new(), run_ts: String::new() }
         }
@@ -52,7 +51,7 @@ pub async fn generate_search_terms(app: AppCtx, request: KeywordRequest) -> Genr
 
 pub async fn optimize_keywords(app: AppCtx, request: KeywordRequest) -> GenreResult {
     let database = app.db.as_ref();
-    let genre_data = { let conn = database.0.lock().unwrap(); db::load_genre_data(&conn, &request.story_id) };
+    let genre_data = db::load_genre_data(&database.0, &request.story_id).await;
     let genre_data = match genre_data {
         Some(d) => d,
         None    => return err("No genre data found. Run Full Analysis first."),
@@ -71,9 +70,8 @@ pub async fn optimize_keywords(app: AppCtx, request: KeywordRequest) -> GenreRes
         Err(e) => err(&format!("AI error: {}", e)),
         Ok((entries, strategy)) => {
             let rendered = render_kdp_keywords(&entries, &strategy, source_note);
-            let conn = database.0.lock().unwrap();
-            let _ = db::save_kdp_keywords(&conn, &request.story_id, &entries, &strategy, source_note);
-            let _ = db::save_document(&conn, &request.story_id, "kdp_keywords", &rendered);
+            let _ = db::save_kdp_keywords(&database.0, &request.story_id, &entries, &strategy, source_note).await;
+            let _ = db::save_document(&database.0, &request.story_id, "kdp_keywords", &rendered).await;
             emit(&app, "✓ KDP keywords saved to database.");
             GenreResult { success: true, report: rendered, error: String::new(), run_ts: String::new() }
         }
@@ -359,16 +357,11 @@ pub(crate) async fn run_keyword_searches_canopy(
             });
         }
 
-        // Persist
-        {
-            let database = app.db.as_ref();
-            let conn = database.0.lock().unwrap();
-            let rows: Vec<(String, String, String, String)> = results.iter()
-                .map(|r| (r.keyword.clone(), r.searches.clone(), r.competition.clone(), r.estimated_earnings.clone()))
-                .collect();
-            let _ = crate::db::replace_keyword_search_results(&conn, folder, seed, &rows);
-        }
-
+        let database = app.db.as_ref();
+        let rows: Vec<(String, String, String, String)> = results.iter()
+            .map(|r| (r.keyword.clone(), r.searches.clone(), r.competition.clone(), r.estimated_earnings.clone()))
+            .collect();
+        let _ = crate::db::replace_keyword_search_results(&database.0, folder, seed, &rows).await;
         let _ = app.emit("cdp:log", &format!("✓ \"{}\" → {} keyword(s).", seed, results.len()));
         all_results.extend(results);
     }
@@ -451,16 +444,13 @@ pub(crate) async fn run_keyword_searches_dataforseo(
     // Persist results to DB
     if !all_results.is_empty() {
         let database = app.db.as_ref();
-        let conn = database.0.lock().unwrap();
         let rows: Vec<(String, String, String, String)> = all_results.iter()
             .map(|r| (r.keyword.clone(), r.searches.clone(), r.competition.clone(), r.estimated_earnings.clone()))
             .collect();
-        // Save all under the first seed as the batch key
         if let Some(first_seed) = seeds.first() {
-            let _ = crate::db::replace_keyword_search_results(&conn, folder, first_seed, &rows);
+            let _ = crate::db::replace_keyword_search_results(&database.0, folder, first_seed, &rows).await;
         }
     }
-
     let _ = app.emit("cdp:log", &format!("✓ DataForSEO: {} total Amazon keywords.", all_results.len()));
     all_results
 }

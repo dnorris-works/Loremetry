@@ -22,13 +22,13 @@ struct AiBisacPick { code: String, confidence: u8, reason: String }
 pub async fn classify_bisac_for_story(app: AppCtx, request: FolderRequest) -> GenreResult {
     let database = app.db.as_ref();
 
-    let genre_data = { let conn = database.0.lock().unwrap(); db::load_genre_data(&conn, &request.story_id) };
+    let genre_data = db::load_genre_data(&database.0, &request.story_id).await;
     let genre_data = match genre_data {
         Some(d) => d,
         None    => return err("No genre data found. Run Analyze first."),
     };
 
-    let master_list = { let conn = database.0.lock().unwrap(); db::master_bisac_list(&conn) };
+    let master_list = db::master_bisac_list(&database.0).await;
     if master_list.is_empty() { return err("No BISAC codes loaded in the database."); }
 
     emit(&app, "Classifying against BISAC subject headings...");
@@ -66,14 +66,13 @@ pub async fn classify_bisac_for_story(app: AppCtx, request: FolderRequest) -> Ge
 
             let report = lines.join("\n");
 
-            let conn = database.0.lock().unwrap();
             let rows: Vec<(String, String, u8, String)> = picks.iter()
                 .map(|(code, heading, conf, reason)| (code.clone(), heading.clone(), *conf, reason.clone()))
                 .collect();
-            if let Err(e) = db::replace_bisac_classifications(&conn, &request.story_id, "ebook", &rows) {
+            if let Err(e) = db::replace_bisac_classifications(&database.0, &request.story_id, "ebook", &rows).await {
                 emit(&app, &format!("  ⚠ Could not save BISAC classification to database: {}", e));
             }
-            let _ = db::save_document(&conn, &request.story_id, "bisac_classification", &report);
+            let _ = db::save_document(&database.0, &request.story_id, "bisac_classification", &report).await;
             emit(&app, &format!("✓ BISAC classification saved to database — {} code(s).", picks.len()));
 
             GenreResult { success: true, report, error: String::new(), run_ts: String::new() }

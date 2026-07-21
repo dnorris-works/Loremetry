@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub data_dir: PathBuf,
+    pub database_url: String,
     pub port: u16,
     pub anthropic_api_key: String,
     pub tokenmix_api_key: String,
@@ -22,9 +22,8 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Self {
-        let data_dir = env::var("DATA_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("./data"));
+        let database_url = env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://loremetry:loremetry@localhost:5432/loremetry".into());
         let port = env::var("PORT")
             .ok()
             .and_then(|p| p.parse().ok())
@@ -34,7 +33,7 @@ impl Config {
             .unwrap_or_else(|_| PathBuf::from("./ui/dist"));
 
         Self {
-            data_dir,
+            database_url,
             port,
             anthropic_api_key: env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
             tokenmix_api_key: env::var("TOKENMIX_API_KEY").unwrap_or_default(),

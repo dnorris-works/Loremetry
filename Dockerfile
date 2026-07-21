@@ -23,9 +23,7 @@ WORKDIR /app
 COPY --from=rust /build/loremetry-web /app/loremetry-web
 COPY --from=ui /ui/dist /app/ui/dist
 ENV PORT=8080
-ENV DATA_DIR=/data
 ENV STATIC_DIR=/app/ui/dist
 ENV RUST_LOG=info
 EXPOSE 8080
-VOLUME ["/data"]
 CMD ["/app/loremetry-web"]

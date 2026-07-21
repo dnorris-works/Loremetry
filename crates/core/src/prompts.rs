@@ -1,21 +1,12 @@
 // prompts.rs — Prompt system: load templates from DB, preprocess text, fill placeholders, call LLM.
-//
-// The prompt pipeline:
-//   1. Load template from prompt_templates table by id
-//   2. Load/generate preprocessed chapter text (cached in preprocessed_chapters)
-//   3. Load bible text from story documents
-//   4. Fill placeholders in the user_template
-//   5. Call LLM with system_prompt + filled user_template
 
-use rusqlite::{params, Connection};
+use sqlx::PgPool;
 use std::collections::HashMap;
 use std::path::Path;
 
 use crate::commands::{call_llm, call_llm_json};
 use crate::db::Db;
 use crate::documents;
-
-// ── Template loading ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -27,44 +18,45 @@ pub struct PromptTemplate {
     pub json_mode:     bool,
 }
 
-/// Load a prompt template from the database by id.
-pub fn load_template(conn: &Connection, template_id: &str) -> Result<PromptTemplate, String> {
-    conn.query_row(
-        "SELECT id, system_prompt, user_template, max_tokens, json_mode FROM prompt_templates WHERE id = ?1",
-        params![template_id],
-        |r| Ok(PromptTemplate {
-            id:            r.get(0)?,
-            system_prompt: r.get(1)?,
-            user_template: r.get(2)?,
-            max_tokens:    r.get::<_, i64>(3)? as u32,
-            json_mode:     r.get::<_, i64>(4)? != 0,
-        }),
-    ).map_err(|e| format!("Prompt template '{}' not found: {}", template_id, e))
+pub async fn load_template(pool: &PgPool, template_id: &str) -> Result<PromptTemplate, String> {
+    let row: (String, String, String, i64, i64) = sqlx::query_as(
+        "SELECT id, system_prompt, user_template, max_tokens, json_mode FROM prompt_templates WHERE id = $1",
+    )
+    .bind(template_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("Prompt template '{}' not found: {}", template_id, e))?
+    .ok_or_else(|| format!("Prompt template '{}' not found", template_id))?;
+
+    Ok(PromptTemplate {
+        id: row.0,
+        system_prompt: row.1,
+        user_template: row.2,
+        max_tokens: row.3 as u32,
+        json_mode: row.4 != 0,
+    })
 }
 
-// ── Bible loading ─────────────────────────────────────────────────────────────
-
-/// Load bible / character / location documents for a story from SQLite.
-/// Returns the combined text (truncated to 8000 words), or empty if nothing found.
-pub fn discover_bible(db: &Db, story_id: &str) -> String {
-    let Ok(conn) = db.0.lock() else { return String::new(); };
-    truncate_bible(&documents::load_bible_text(&conn, story_id))
+pub async fn discover_bible(db: &Db, story_id: &str) -> String {
+    truncate_bible(&documents::load_bible_text(&db.0, story_id).await)
 }
 
-/// Load bible for a story: prefer DB documents, fall back to an explicit file path.
-pub fn load_bible_for_story(db: &Db, story_id: &str, explicit_bible_path: &str) -> String {
-    let discovered = discover_bible(db, story_id);
+pub async fn load_bible_for_story(db: &Db, story_id: &str, explicit_bible_path: &str) -> String {
+    let discovered = discover_bible(db, story_id).await;
     if !discovered.is_empty() {
         return discovered;
     }
     load_bible(explicit_bible_path)
 }
 
-/// Load bible text from a single explicit file path. Returns empty string if not found.
 pub fn load_bible(bible_path: &str) -> String {
-    if bible_path.is_empty() { return String::new(); }
+    if bible_path.is_empty() {
+        return String::new();
+    }
     let path = Path::new(bible_path);
-    if !path.exists() { return String::new(); }
+    if !path.exists() {
+        return String::new();
+    }
     match std::fs::read_to_string(path) {
         Ok(text) => truncate_bible(&text),
         Err(_) => String::new(),
@@ -80,24 +72,24 @@ fn truncate_bible(text: &str) -> String {
     }
 }
 
-// ── Preprocessed text cache ───────────────────────────────────────────────────
-
-/// Get or create preprocessed text for a chapter+report_type combo.
-/// Returns cached version if `source_mtime` matches the cached value
-/// (typically `document.updated_at`).
-pub fn get_preprocessed(
-    conn: &Connection,
+pub async fn get_preprocessed(
+    pool: &PgPool,
     story_id: &str,
     chapter_file: &str,
     report_type: &str,
     source_mtime: &str,
 ) -> Option<String> {
-    let cached: Option<(String, String)> = conn.query_row(
+    let cached: Option<(String, String)> = sqlx::query_as(
         "SELECT processed_text, source_modified_at FROM preprocessed_chapters
-         WHERE story_id = ?1 AND chapter_file = ?2 AND report_type = ?3",
-        params![story_id, chapter_file, report_type],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    ).ok();
+         WHERE story_id = $1 AND chapter_file = $2 AND report_type = $3",
+    )
+    .bind(story_id)
+    .bind(chapter_file)
+    .bind(report_type)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
 
     if let Some((text, cached_mtime)) = cached {
         if cached_mtime == source_mtime {
@@ -107,9 +99,8 @@ pub fn get_preprocessed(
     None
 }
 
-/// Store preprocessed text in the cache.
-pub fn store_preprocessed(
-    conn: &Connection,
+pub async fn store_preprocessed(
+    pool: &PgPool,
     story_id: &str,
     chapter_file: &str,
     report_type: &str,
@@ -117,32 +108,31 @@ pub fn store_preprocessed(
     source_mtime: &str,
 ) {
     let now = chrono::Utc::now().to_rfc3339();
-    let _ = conn.execute(
+    let _ = sqlx::query(
         "INSERT INTO preprocessed_chapters (story_id, chapter_file, report_type, processed_text, source_modified_at, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(story_id, chapter_file, report_type)
-         DO UPDATE SET processed_text = excluded.processed_text, source_modified_at = excluded.source_modified_at, created_at = excluded.created_at",
-        params![story_id, chapter_file, report_type, processed_text, source_mtime, now],
-    );
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (story_id, chapter_file, report_type)
+         DO UPDATE SET processed_text = EXCLUDED.processed_text, source_modified_at = EXCLUDED.source_modified_at, created_at = EXCLUDED.created_at",
+    )
+    .bind(story_id)
+    .bind(chapter_file)
+    .bind(report_type)
+    .bind(processed_text)
+    .bind(source_mtime)
+    .bind(&now)
+    .execute(pool)
+    .await;
 }
 
-// ── Placeholder filling ───────────────────────────────────────────────────────
-
-/// Fill placeholders in a template string. Placeholders are {key} format.
-/// Any unfilled placeholder is replaced with empty string.
 pub fn fill_template(template: &str, vars: &HashMap<&str, &str>) -> String {
     let mut result = template.to_string();
     for (key, value) in vars {
         result = result.replace(&format!("{{{}}}", key), value);
     }
-    // Remove any unfilled placeholders
     let re_unfilled = regex::Regex::new(r"\{[a-z_]+\}").unwrap();
     re_unfilled.replace_all(&result, "").to_string()
 }
 
-// ── Execute a prompt ──────────────────────────────────────────────────────────
-
-/// Full prompt execution: load template, fill variables, call LLM.
 pub async fn execute_prompt(
     db: &Db,
     template_id: &str,
@@ -151,10 +141,7 @@ pub async fn execute_prompt(
     model: &str,
     vars: HashMap<&str, &str>,
 ) -> Result<String, String> {
-    let template = {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        load_template(&conn, template_id)?
-    };
+    let template = load_template(&db.0, template_id).await?;
 
     let system_prompt = fill_template(&template.system_prompt, &vars);
     let user_content = fill_template(&template.user_template, &vars);
@@ -166,25 +153,19 @@ pub async fn execute_prompt(
     }
 }
 
-// ── Chapter preprocessing functions ───────────────────────────────────────────
-
-/// Preprocess chapter text for continuity extraction: keep full text but truncate at 4000 words.
 #[allow(dead_code)]
 pub fn preprocess_for_continuity(content: &str) -> String {
     truncate_words(content, 4000)
 }
 
-/// Preprocess chapter text for show-don't-tell checking: keep prose, truncate at 4000 words.
 pub fn preprocess_for_sdt(content: &str) -> String {
     truncate_words(content, 4000)
 }
 
-/// Preprocess chapter text for AI-isms checking (same truncation as SDT).
 pub fn preprocess_for_ai_isms(content: &str) -> String {
     truncate_words(content, 4000)
 }
 
-/// Preprocess chapter text for genre summary: aggressive truncation to 2000 words.
 #[allow(dead_code)]
 pub fn preprocess_for_genre(content: &str) -> String {
     truncate_words(content, 2000)
@@ -192,6 +173,8 @@ pub fn preprocess_for_genre(content: &str) -> String {
 
 fn truncate_words(text: &str, max: usize) -> String {
     let words: Vec<&str> = text.split_whitespace().collect();
-    if words.len() <= max { return text.to_string(); }
+    if words.len() <= max {
+        return text.to_string();
+    }
     words[..max].join(" ")
 }

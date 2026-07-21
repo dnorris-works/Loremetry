@@ -15,7 +15,7 @@
       "args": [],
       "cwd": "${workspaceFolder}",
       "env": {
-        "DATA_DIR": "${workspaceFolder}/data",
+        "DATABASE_URL": "postgres://loremetry:loremetry@localhost:5432/loremetry",
         "STATIC_DIR": "${workspaceFolder}/ui/dist",
         "PORT": "8080"
       }
