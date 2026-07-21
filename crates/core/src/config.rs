@@ -16,6 +16,8 @@ pub struct Config {
     pub static_dir: PathBuf,
     /// Shared secret for `/api/admin/*`. Empty disables admin endpoints.
     pub admin_token: String,
+    /// Max HTTP request body size in bytes (WinningCat CSV can be large).
+    pub max_body_bytes: usize,
 }
 
 impl Config {
@@ -42,6 +44,11 @@ impl Config {
             default_provider: env::var("DEFAULT_PROVIDER").unwrap_or_else(|_| "claude".into()),
             static_dir,
             admin_token: env::var("ADMIN_TOKEN").unwrap_or_default(),
+            max_body_bytes: env::var("MAX_BODY_MB")
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok())
+                .map(|mb| mb * 1024 * 1024)
+                .unwrap_or(256 * 1024 * 1024),
         }
     }
 

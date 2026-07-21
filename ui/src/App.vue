@@ -16,7 +16,6 @@ import TitleBar from './components/TitleBar.vue';
 import Sidebar from './components/Sidebar.vue';
 import AnalyzerPanel from './components/AnalyzerPanel.vue';
 import ReportsViewer from './components/ReportsViewer.vue';
-import SettingsPanel from './components/SettingsPanel.vue';
 import AdminPanel from './components/AdminPanel.vue';
 import StoryForm from './components/StoryForm.vue';
 import SeriesForm from './components/SeriesForm.vue';
@@ -50,21 +49,13 @@ provide('setAppMode', (mode: AppMode) => { appMode.value = mode; });
 
 // ── Panel state (within Analyzer mode) ────────────────────────────────────────
 
-type Panel = 'analyzer' | 'reports' | 'settings' | 'admin' | 'story-form' | 'series' | 'manuscript' | 'new-document';
+type Panel = 'analyzer' | 'reports' | 'admin' | 'story-form' | 'series' | 'manuscript' | 'new-document';
 const activePanel = ref<Panel>('analyzer');
-const prevPanel = ref<Panel>('analyzer');
 /** Panel to restore after cancelling New Document (works across writing/analyzer). */
 const panelBeforeNewDoc = ref<Panel>('analyzer');
 const modeBeforeNewDoc = ref<AppMode>('analyzer');
 
 function showPanel(name: Panel): void {
-  if (name === 'settings' && activePanel.value === 'settings') {
-    activePanel.value = prevPanel.value;
-    return;
-  }
-  if (name === 'settings' && activePanel.value !== 'settings') {
-    prevPanel.value = activePanel.value;
-  }
   activePanel.value = name;
 }
 
@@ -245,7 +236,6 @@ onMounted(() => {
       <template v-else-if="appMode === 'analyzer'">
         <AnalyzerPanel v-if="activePanel === 'analyzer'" />
         <ReportsViewer v-if="activePanel === 'reports'" />
-        <SettingsPanel v-if="activePanel === 'settings'" />
         <AdminPanel v-if="activePanel === 'admin'" />
         <StoryForm v-if="activePanel === 'story-form'" :story="editingStory" />
         <SeriesForm v-if="activePanel === 'series'" :series="editingSeries" />

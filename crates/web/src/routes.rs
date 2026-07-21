@@ -1,3 +1,4 @@
+use axum::extract::DefaultBodyLimit;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
@@ -96,6 +97,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .nest("/api", api)
         .fallback_service(static_service)
+        .layer(DefaultBodyLimit::max(state.config.max_body_bytes))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)

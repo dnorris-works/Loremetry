@@ -81,3 +81,27 @@ export async function adminFetch<T = unknown>(
   }
   return data as T;
 }
+
+/** Upload a file to an admin multipart endpoint (for large CSVs). */
+export async function adminUploadFile<T = unknown>(
+  path: string,
+  file: File,
+  fieldName = 'file',
+): Promise<T> {
+  const token = getAdminToken();
+  const fd = new FormData();
+  fd.append(fieldName, file, file.name);
+  const headers: HeadersInit = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const res = await fetch(`/api/admin${path}`, { method: 'POST', headers, body: fd });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || res.statusText || 'Upload failed');
+  }
+  if (data && typeof data === 'object' && 'error' in data && data.error && !('success' in data)) {
+    throw new Error(String((data as { error: string }).error));
+  }
+  return data as T;
+}
