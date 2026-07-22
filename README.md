@@ -23,14 +23,12 @@ createdb loremetry
 export DATABASE_URL=postgres://localhost:5432/loremetry
 ```
 
-**Docker** — only if [Docker Desktop](https://www.docker.com/products/docker-desktop/) is installed:
+**Docker (Postgres only)** — optional local database container:
 
 ```bash
 docker compose -f docker-compose.db.yml up -d
 export DATABASE_URL=postgres://loremetry:loremetry@localhost:5432/loremetry
 ```
-
-`docker-compose.yml` is the **Miget Compose `web` service** only (no database). Local Postgres: `docker-compose.db.yml` or `docker-compose.local.yml` with the app.
 
 The `lore` schema and tables are created automatically on first API boot.
 
@@ -55,99 +53,50 @@ Optional env secrets (also used on Miget):
 
 ## Production (Miget via GitHub)
 
-This repo is ready for **GitHub → Miget** deploy (same flow as other web apps). Push your code to GitHub; Miget builds from the root `Dockerfile`.
-
-### One-time setup
+Deploy as a **single application** from this repo — **not** a Docker Compose Stack.
 
 1. **Miget:** Workspace Settings → **Git Credentials** → **Connect GitHub** → install the Miget app on this repo.
-2. **New application** → source **GitHub** → select the `Loremetry` repo and branch (e.g. `main`).
-3. **Builder:** choose **Docker Engine** (not “Auto detection / Buildpacks”).
-   - Miget will build from the root **`Dockerfile`** (Vue + Rust in one image).
-   - If you only see buildpacks, set **Settings → Variables** → `LANGUAGE` = `dockerfile` and redeploy.
-4. **Database:** use your **shared project Postgres**. Set **`DATABASE_URL`** on the project or stack. Tables live in the `lore` schema (migrations on startup).
-   - You do **not** need a `/data` volume anymore (that was only for the old SQLite file).
-5. **Variables** (Settings → Variables):
-   - `DATABASE_URL` — from Miget Postgres
-   - `ANTHROPIC_API_KEY`, `CANOPY_API_KEY`, etc.
-   - Miget sets `PORT` automatically; the app already listens on it.
-6. Enable **Auto-deploy** so pushes to your branch redeploy.
+2. **New application** (not “Compose Stack”) → source **GitHub** → select the `Loremetry` repo and branch (e.g. `main`).
+3. **Builder:** **Docker Engine** (builds the root **`Dockerfile`**: Vue + Rust in one image).
+   - If Miget only offers buildpacks: **Settings → Variables** → `LANGUAGE` = `dockerfile` → redeploy.
+4. **Database:** use your **shared project Postgres**. On the **application**, set **`DATABASE_URL`** to that connection string (project variables can supply it). Migrations create the `lore` schema on startup.
+5. **Other variables** on the app: `ANTHROPIC_API_KEY`, `CANOPY_API_KEY`, etc. Miget sets **`PORT`**; the app listens on whatever `PORT` is.
+6. Enable **Auto-deploy** on push.
 
-After the first deploy, Miget gives you a public URL. No `git push miget` remote required.
+No `compose.miget.yml`, no `docker-compose.yml` in this repo for production — those were for Compose Stack experiments only.
 
 ### Inspecting the database (SQL, schema)
 
-**In the app:** open **Admin** (sidebar) → **SQL console**. Run queries, browse `lore` tables, and see results without leaving the UI.
+**In the app:** **Admin** → **SQL console**.
 
-Loremetry tables are in the **`lore`** schema (not `public`). Migration metadata is in `public._sqlx_migrations`.
+Loremetry tables are in the **`lore`** schema. Migration metadata is in `public._sqlx_migrations`.
 
-**From your Mac** (TablePlus, DBeaver, or `psql`):
-
-1. Open the **PostgreSQL addon** (or standalone Postgres service) in Miget.
-2. Enable **Public Access** on the database if you need to connect from outside Miget.
-3. Copy the **External Connection** details or the ready-made `psql` command from the Connection Information panel.
-4. Connect, then run:
+**From your Mac** (`psql`, TablePlus, DBeaver): use the shared DB connection string from Miget.
 
 ```sql
--- List all Loremetry tables
 \dt lore.*
-
--- Example queries
-SELECT * FROM lore.stories;
 SELECT COUNT(*) FROM lore.kdp_categories;
-SELECT * FROM lore.genres LIMIT 10;
 ```
-
-In GUI tools, set the schema to `lore` or qualify tables as `lore.stories`, etc.
-
-**Local dev:** `psql $DATABASE_URL` then `\dt lore.*`
 
 ### “Unable to detect language” on deploy
 
-You’re on **Buildpacks** instead of Docker. Fix one of these:
-
 | Fix | What to do |
 |-----|------------|
-| **Recommended** | App **Settings → Deployment** → change builder to **Docker Engine** → redeploy |
-| **Stay on buildpacks** | **Settings → Variables** → add `LANGUAGE` = `dockerfile` → redeploy |
+| **Recommended** | App **Settings → Deployment** → **Docker Engine** → redeploy |
+| **Buildpacks** | **Variables** → `LANGUAGE` = `dockerfile` → redeploy |
 
-Do **not** set `LANGUAGE=rust` or `nodejs` alone — this app needs both the Vue build and the Rust binary; only the `Dockerfile` does that.
+Do **not** use `LANGUAGE=rust` or `nodejs` alone — only the `Dockerfile` builds both UI and API.
 
-### Manual Docker (optional)
-
-**Full stack (app + Postgres in Docker):**
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
-open http://localhost:8080
-```
-
-**Database only** (run the Rust binary on the host):
-
-```bash
-docker compose -f docker-compose.db.yml up -d
-export DATABASE_URL=postgres://loremetry:loremetry@localhost:5432/loremetry
-export STATIC_DIR=./ui/dist PORT=8080
-cargo run -p loremetry-web
-```
-
-**Single container** (Postgres elsewhere):
+### Optional: run the production image locally
 
 ```bash
 docker compose -f docker-compose.db.yml up -d
 docker build -t loremetry .
 docker run -p 8080:8080 \
   -e DATABASE_URL=postgres://loremetry:loremetry@host.docker.internal:5432/loremetry \
+  -e PORT=8080 \
   -e ANTHROPIC_API_KEY=... \
   loremetry
 ```
 
-On Linux use `--network host` or point `DATABASE_URL` at the compose Postgres service hostname.
-
-### Miget Compose Stack
-
-Use **New Compose Stack** with compose path `.` (repo root). Miget merges `docker-compose.yml` + `compose.miget.yml`:
-
-- **`web`** only — builds from the `Dockerfile`, **1Gi** RAM, listens on **port 5000**.
-- **Database** — shared project **`DATABASE_URL`** (wire on project/stack; not in compose).
-
-Alternatively, deploy only the **Dockerfile** app (no compose stack) with the same project DB vars.
+On Linux, use `--network host` or a reachable `DATABASE_URL` host.
