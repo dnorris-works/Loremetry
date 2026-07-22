@@ -30,6 +30,8 @@ docker compose up -d db
 export DATABASE_URL=postgres://loremetry:loremetry@localhost:5432/loremetry
 ```
 
+`docker-compose.yml` is for **local** Postgres. On Miget, `compose.miget.yml` uses a **managed Postgres addon** (`db` service) with 1Gi RAM and 5Gi storage instead of the `loremetry-pg` volume.
+
 The `lore` schema and tables are created automatically on first API boot.
 
 ### Run the app
@@ -62,7 +64,7 @@ This repo is ready for **GitHub → Miget** deploy (same flow as other web apps)
 3. **Builder:** choose **Docker Engine** (not “Auto detection / Buildpacks”).
    - Miget will build from the root **`Dockerfile`** (Vue + Rust in one image).
    - If you only see buildpacks, set **Settings → Variables** → `LANGUAGE` = `dockerfile` and redeploy.
-4. **Database:** provision **PostgreSQL** on Miget and set **`DATABASE_URL`** in app variables. All tables live in the `lore` schema (migrations run automatically on startup).
+4. **Database:** attach the **PostgreSQL** addon (or deploy with `compose.miget.yml`, which sets `db` to `managed: postgres`). Miget injects a URL such as `POSTGRES_DBWEI_URL` or `DATABASE_URL`; the app reads those automatically. Tables live in the `lore` schema (migrations on startup).
    - You do **not** need a `/data` volume anymore (that was only for the old SQLite file).
 5. **Variables** (Settings → Variables):
    - `DATABASE_URL` — from Miget Postgres

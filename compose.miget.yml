@@ -1,0 +1,11 @@
+# Miget platform overlay (merged with docker-compose.yml on deploy).
+# Local `docker compose` ignores x-miget and still uses the postgres:16 container + loremetry-pg volume.
+
+services:
+  db:
+    x-miget:
+      managed: postgres
+      cpu: "500m"
+      ram: "1Gi"
+      storage: "5Gi"
+      private: true
