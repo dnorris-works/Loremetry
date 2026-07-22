@@ -1,1 +1,1 @@
-web: ./loremetry-web
+web: ./app

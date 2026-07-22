@@ -35,13 +35,16 @@ The `lore` schema and tables are created automatically on first API boot.
 ### Run the app
 
 ```bash
-# Terminal 1 — API
-export DATABASE_URL=postgres://localhost:5432/loremetry   # or the Docker URL above
-export STATIC_DIR=./ui/dist PORT=8080
-cargo run -p loremetry-web
+# Build the UI once (or use `cd ui && npm run dev` while developing)
+cd ui && npm install && npm run build && cd ..
 
-# Terminal 2 — Vue (proxies /api → :8080)
-cd ui && npm install && npm run dev
+# Terminal 1 — API
+export DATABASE_URL=postgres://localhost:5432/loremetry
+export STATIC_DIR=./ui/dist PORT=8080
+cargo run -p loremetry-web --bin app
+
+# Terminal 2 — Vue dev server (proxies /api → :8080)
+cd ui && npm run dev
 ```
 
 Optional env secrets (also used on Miget):
@@ -53,50 +56,35 @@ Optional env secrets (also used on Miget):
 
 ## Production (Miget via GitHub)
 
-Deploy as a **single application** from this repo — **not** a Docker Compose Stack.
+Deploy as a **single application** — **not** a Compose Stack. There is **no `Dockerfile`**; Miget **Buildpacks** build the app from `app.json`, `package.json`, and `Cargo.toml`.
 
-1. **Miget:** Workspace Settings → **Git Credentials** → **Connect GitHub** → install the Miget app on this repo.
-2. **New application** (not “Compose Stack”) → source **GitHub** → select the `Loremetry` repo and branch (e.g. `main`).
-3. **Builder:** **Docker Engine** (builds the root **`Dockerfile`**: Vue + Rust in one image).
-   - If Miget only offers buildpacks: **Settings → Variables** → `LANGUAGE` = `dockerfile` → redeploy.
-4. **Database:** use your **shared project Postgres**. On the **application**, set **`DATABASE_URL`** to that connection string (project variables can supply it). Migrations create the `lore` schema on startup.
-5. **Other variables** on the app: `ANTHROPIC_API_KEY`, `CANOPY_API_KEY`, etc. Miget sets **`PORT`**; the app listens on whatever `PORT` is.
-6. Enable **Auto-deploy** on push.
+1. **Miget:** connect GitHub → **New application** → this repo and branch.
+2. **Builder:** **Miget Buildpacks** (Auto detection). Do **not** select Dockerfile.
+3. **Database:** shared project Postgres → set **`DATABASE_URL`** on the app.
+4. **Other config vars:** `ANTHROPIC_API_KEY`, `CANOPY_API_KEY`, etc. Miget sets **`PORT`** (usually `5000`); the app binds to `PORT`.
+5. **Auto-deploy** on push.
 
-No `compose.miget.yml`, no `docker-compose.yml` in this repo for production — those were for Compose Stack experiments only.
+### What Miget builds
+
+| Step | Source |
+|------|--------|
+| Vue UI | Root `package.json` → `npm run build` in `ui/` |
+| Rust API | `cargo build --release -p loremetry-web --bin app` (`BUILD_COMMAND` in `app.json`) |
+| Start | `Procfile` → `web: ./app` |
 
 ### Inspecting the database (SQL, schema)
 
 **In the app:** **Admin** → **SQL console**.
-
-Loremetry tables are in the **`lore`** schema. Migration metadata is in `public._sqlx_migrations`.
-
-**From your Mac** (`psql`, TablePlus, DBeaver): use the shared DB connection string from Miget.
 
 ```sql
 \dt lore.*
 SELECT COUNT(*) FROM lore.kdp_categories;
 ```
 
-### “Unable to detect language” on deploy
+### Build troubleshooting
 
-| Fix | What to do |
-|-----|------------|
-| **Recommended** | App **Settings → Deployment** → **Docker Engine** → redeploy |
-| **Buildpacks** | **Variables** → `LANGUAGE` = `dockerfile` → redeploy |
+**`cp target/release/` failed** — Rust-only buildpack on a workspace with no root binary. This repo names the release binary **`app`** and sets `BUILD_COMMAND` in `app.json`. Ensure **nodejs + rust** buildpacks are used (declared in `app.json`) and redeploy.
 
-Do **not** use `LANGUAGE=rust` or `nodejs` alone — only the `Dockerfile` builds both UI and API.
+**UI 404 / empty** — set **`STATIC_DIR=/app/ui/dist`** on the app (default in `app.json`). Confirm the Node build step ran (`ui/dist` exists in the image).
 
-### Optional: run the production image locally
-
-```bash
-docker compose -f docker-compose.db.yml up -d
-docker build -t loremetry .
-docker run -p 8080:8080 \
-  -e DATABASE_URL=postgres://loremetry:loremetry@host.docker.internal:5432/loremetry \
-  -e PORT=8080 \
-  -e ANTHROPIC_API_KEY=... \
-  loremetry
-```
-
-On Linux, use `--network host` or a reachable `DATABASE_URL` host.
+**Wrong builder** — **Settings → Builders → Miget Buildpacks**, not Dockerfile.

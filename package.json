@@ -1,0 +1,10 @@
+{
+  "name": "loremetry",
+  "private": true,
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "build": "cd ui && npm ci && npm run build"
+  }
+}
