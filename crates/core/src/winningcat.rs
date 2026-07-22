@@ -60,6 +60,9 @@ pub async fn import_winningcat_csv(app: AppCtx, csv_text: String) -> ImportResul
         let mut parsed: Vec<(String, String)> = Vec::new(); // (name, node_id)
         let mut ok = true;
         for cell in &cells {
+            if cell.trim().is_empty() {
+                continue;
+            }
             match parse_node_cell(cell) {
                 Some(pair) => parsed.push(pair),
                 None => { ok = false; break; }
@@ -151,4 +154,24 @@ fn parse_csv_line(line: &str) -> Vec<String> {
     }
     fields.push(current.trim().to_string());
     fields
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skips_trailing_empty_csv_fields() {
+        let line = "Books (1000),Arts & Photography (1),Criticism (1002),";
+        let cells = parse_csv_line(line);
+        let mut parsed = Vec::new();
+        for cell in &cells {
+            if cell.trim().is_empty() {
+                continue;
+            }
+            parsed.push(parse_node_cell(cell).expect("cell"));
+        }
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[2], ("Criticism".into(), "1002".into()));
+    }
 }
