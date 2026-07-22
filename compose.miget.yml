@@ -1,11 +1,19 @@
-# Miget platform overlay (merged with docker-compose.yml on deploy).
-# Local `docker compose` ignores x-miget and still uses the postgres:16 container + loremetry-pg volume.
+# Miget overlay (merged with docker-compose.yml). Plain `docker compose` ignores x-miget.
+# Public ingress requires the web service to listen on PORT=5000.
 
 services:
+  web:
+    x-miget:
+      ram: "1024"
+    environment:
+      PORT: "5000"
+    ports:
+      - "5000:5000"
+
   db:
     x-miget:
       managed: postgres
       cpu: "500m"
-      ram: "1Gi"
-      storage: "5Gi"
+      ram: "1024"
+      storage: "5120"
       private: true

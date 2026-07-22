@@ -30,7 +30,7 @@ docker compose up -d db
 export DATABASE_URL=postgres://loremetry:loremetry@localhost:5432/loremetry
 ```
 
-`docker-compose.yml` is for **local** Postgres. On Miget, `compose.miget.yml` uses a **managed Postgres addon** (`db` service) with 1Gi RAM and 5Gi storage instead of the `loremetry-pg` volume.
+`docker-compose.yml` is for **local** Postgres + optional `web` service. On Miget, `compose.miget.yml` replaces `db` with a **managed Postgres addon** and sizes **`web`** (1Gi RAM, port 5000).
 
 The `lore` schema and tables are created automatically on first API boot.
 
@@ -114,6 +114,24 @@ Do **not** set `LANGUAGE=rust` or `nodejs` alone — this app needs both the Vue
 
 ### Manual Docker (optional)
 
+**Full stack (app + Postgres):**
+
+```bash
+docker compose up -d --build
+open http://localhost:8080
+```
+
+**Database only** (run the Rust binary on the host):
+
+```bash
+docker compose up -d db
+export DATABASE_URL=postgres://loremetry:loremetry@localhost:5432/loremetry
+export STATIC_DIR=./ui/dist PORT=8080
+cargo run -p loremetry-web
+```
+
+**Single container** (Postgres elsewhere):
+
 ```bash
 docker compose up -d db
 docker build -t loremetry .
@@ -124,3 +142,14 @@ docker run -p 8080:8080 \
 ```
 
 On Linux use `--network host` or point `DATABASE_URL` at the compose Postgres service hostname.
+
+### Miget Compose Stack
+
+Use **New Compose Stack** with compose path `.` (repo root). Miget merges `docker-compose.yml` + `compose.miget.yml`:
+
+- **`web`** — builds from the `Dockerfile`, **1Gi** RAM, listens on **port 5000** (required for Miget ingress).
+- **`db`** — **managed Postgres** addon (not the local `postgres:16` image); Miget injects `DATABASE_URL` / `POSTGRES_*_URL` into `web`.
+
+You need **at least one `web` service** in compose; a managed `db` alone shows **Services: 0** and blocks Continue.
+
+Alternatively, deploy only the **Dockerfile** app and attach a Postgres addon in the UI (what you used with `POSTGRES_DBWEI_URL`).
