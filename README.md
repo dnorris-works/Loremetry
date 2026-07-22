@@ -88,3 +88,9 @@ SELECT COUNT(*) FROM lore.kdp_categories;
 **UI 404 / empty** — set **`STATIC_DIR=/app/ui/dist`** on the app (default in `app.json`). Confirm the Node build step ran (`ui/dist` exists in the image).
 
 **Wrong builder** — **Settings → Builders → Miget Buildpacks**, not Dockerfile.
+
+### Build logs mention Docker / `Dockerfile.runtime`
+
+Normal. **Miget Buildpacks** (migetpacks) always compile your app by generating a temporary **`Dockerfile.runtime`** and running **BuildKit** — even when you did not add a `Dockerfile` to the repo. That is not the same as choosing **Builder → Dockerfile** (your own root `Dockerfile`).
+
+If the build fails on `rust:stable: not found`, the platform mirror is missing that tag. This repo pins **`rust-toolchain.toml`** to a concrete version (e.g. `1.85.0`) instead of `stable`.
