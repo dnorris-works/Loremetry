@@ -27,9 +27,9 @@ async fn main() {
 
     let Some(database_url) = resolve_database_url() else {
         tracing::error!(
-            "No Postgres URL found. Set DATABASE_URL or attach the Miget PostgreSQL addon (e.g. POSTGRES_DBWEI_URL)."
+            "No Postgres URL found. Set DATABASE_URL (or POSTGRES_URL) on the project or stack."
         );
-        eprintln!("FATAL: No Postgres URL in environment (DATABASE_URL, POSTGRES_DBWEI_URL, …).");
+        eprintln!("FATAL: DATABASE_URL is not set.");
         std::process::exit(1);
     };
 

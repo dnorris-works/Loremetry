@@ -1,5 +1,5 @@
 # Miget overlay (merged with docker-compose.yml). Plain `docker compose` ignores x-miget.
-# Uses the workspace shared Postgres — set DATABASE_URL / POSTGRES_DBWEI_URL on the project or stack.
+# Uses the workspace shared Postgres — set DATABASE_URL on the project or stack.
 
 services:
   web:

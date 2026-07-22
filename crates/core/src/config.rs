@@ -84,12 +84,7 @@ impl Config {
 
 /// Read Postgres URL from env (Miget may inject `DATABASE_URL`, `POSTGRES_*_URL`, etc.).
 pub fn resolve_database_url() -> Option<String> {
-    for key in [
-        "DATABASE_URL",
-        "POSTGRES_URL",
-        "POSTGRESQL_URL",
-        "POSTGRES_DBWEI_URL",
-    ] {
+    for key in ["DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_URL"] {
         if let Ok(url) = env::var(key) {
             if !url.trim().is_empty() {
                 return Some(normalize_database_url(&url));

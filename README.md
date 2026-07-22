@@ -48,7 +48,7 @@ cd ui && npm install && npm run dev
 
 Optional env secrets (also used on Miget):
 
-- `DATABASE_URL` — PostgreSQL connection string (required; Miget may inject `POSTGRES_<addon>_URL` instead, e.g. `POSTGRES_DBWEI_URL`)
+- `DATABASE_URL` — PostgreSQL connection string (required on Miget)
 - `ANTHROPIC_API_KEY` / `TOKENMIX_API_KEY`
 - `CANOPY_API_KEY`
 - `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`
@@ -64,7 +64,7 @@ This repo is ready for **GitHub → Miget** deploy (same flow as other web apps)
 3. **Builder:** choose **Docker Engine** (not “Auto detection / Buildpacks”).
    - Miget will build from the root **`Dockerfile`** (Vue + Rust in one image).
    - If you only see buildpacks, set **Settings → Variables** → `LANGUAGE` = `dockerfile` and redeploy.
-4. **Database:** use your **shared project Postgres** (or workspace DB service). Set **`DATABASE_URL`** and/or **`POSTGRES_DBWEI_URL`** on the project or stack so the app can connect. Tables live in the `lore` schema (migrations on startup). Do **not** provision a separate compose `db` addon unless you want a dedicated instance.
+4. **Database:** use your **shared project Postgres**. Set **`DATABASE_URL`** on the project or stack. Tables live in the `lore` schema (migrations on startup).
    - You do **not** need a `/data` volume anymore (that was only for the old SQLite file).
 5. **Variables** (Settings → Variables):
    - `DATABASE_URL` — from Miget Postgres
@@ -148,6 +148,6 @@ On Linux use `--network host` or point `DATABASE_URL` at the compose Postgres se
 Use **New Compose Stack** with compose path `.` (repo root). Miget merges `docker-compose.yml` + `compose.miget.yml`:
 
 - **`web`** only — builds from the `Dockerfile`, **1Gi** RAM, listens on **port 5000**.
-- **Database** — your **shared project** connection string (`DATABASE_URL` / `POSTGRES_DBWEI_URL`). Wire it in stack or project variables; do not leave the old `postgres://…@db:5432` local default.
+- **Database** — shared project **`DATABASE_URL`** (wire on project/stack; not in compose).
 
 Alternatively, deploy only the **Dockerfile** app (no compose stack) with the same project DB vars.
