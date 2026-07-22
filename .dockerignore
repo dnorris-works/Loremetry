@@ -1,0 +1,13 @@
+.git
+.github
+.kiro
+.vscode
+target
+**/target
+ui/node_modules
+data
+*.db
+.env
+.env.*
+icon-concepts
+info

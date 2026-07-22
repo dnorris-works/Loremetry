@@ -84,10 +84,20 @@ impl Config {
 
 /// Read Postgres URL from env (Miget may inject `DATABASE_URL`, `POSTGRES_*_URL`, etc.).
 pub fn resolve_database_url() -> Option<String> {
-    for key in ["DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_URL"] {
+    resolve_database_url_with_source().map(|(url, _)| url)
+}
+
+/// Same as [`resolve_database_url`], but returns which env var supplied the URL (for logs).
+pub fn resolve_database_url_with_source() -> Option<(String, String)> {
+    for key in [
+        "DATABASE_URL",
+        "POSTGRES_DBWEI_URL",
+        "POSTGRES_URL",
+        "POSTGRESQL_URL",
+    ] {
         if let Ok(url) = env::var(key) {
             if let Some(normalized) = normalize_resolved_url(&url) {
-                return Some(normalized);
+                return Some((normalized, key.to_string()));
             }
         }
     }
@@ -105,7 +115,7 @@ pub fn resolve_database_url() -> Option<String> {
     for key in miget_keys {
         if let Ok(url) = env::var(&key) {
             if let Some(normalized) = normalize_resolved_url(&url) {
-                return Some(normalized);
+                return Some((normalized, key));
             }
         }
     }
@@ -134,17 +144,50 @@ pub fn database_url_diagnostics() -> String {
     let mut lines = vec![
         "Checked DATABASE_URL, POSTGRES_URL, POSTGRESQL_URL, and POSTGRES_*_URL.".to_string(),
     ];
-    for key in ["DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_URL"] {
+    for key in [
+        "DATABASE_URL",
+        "POSTGRES_DBWEI_URL",
+        "POSTGRES_URL",
+        "POSTGRESQL_URL",
+    ] {
         match env::var(key) {
             Ok(v) if v.trim().is_empty() => lines.push(format!("{key} is set but empty.")),
             Ok(v) if !looks_like_postgres_url(&v) => {
                 lines.push(format!(
-                    "{key} is set but does not look like postgres://… (got {} chars; Miget secret refs must resolve at runtime).",
+                    "{key} is set but does not look like postgres://… (got {} chars; use a full postgres:// connection string at runtime, or attach the Postgres addon to this app).",
                     v.len()
                 ));
             }
             Ok(_) => lines.push(format!("{key} looks like a postgres URL.")),
             Err(_) => lines.push(format!("{key} is not set.")),
+        }
+    }
+    let mut miget_keys: Vec<String> = env::vars()
+        .filter_map(|(key, value)| {
+            if key.starts_with("POSTGRES_") && key.ends_with("_URL") && !value.trim().is_empty() {
+                Some(key)
+            } else {
+                None
+            }
+        })
+        .collect();
+    miget_keys.sort();
+    for key in miget_keys {
+        if matches!(
+            key.as_str(),
+            "POSTGRES_DBWEI_URL" | "POSTGRES_URL" | "POSTGRESQL_URL"
+        ) {
+            continue;
+        }
+        match env::var(&key) {
+            Ok(v) if looks_like_postgres_url(&v) => {
+                lines.push(format!("{key} looks like a postgres URL."));
+            }
+            Ok(v) => lines.push(format!(
+                "{key} is set but does not look like postgres://… ({} chars).",
+                v.len()
+            )),
+            Err(_) => {}
         }
     }
     lines.join(" ")

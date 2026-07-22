@@ -56,21 +56,19 @@ Optional env secrets (also used on Miget):
 
 ## Production (Miget via GitHub)
 
-Deploy as a **single application** — **not** a Compose Stack. There is **no `Dockerfile`**; Miget **Buildpacks** build the app from `app.json`, `package.json`, and `Cargo.toml`.
+You should only need **GitHub → this repo → deploy** (same as your other app). Miget builds from what’s **in the repo** — you don’t run Docker locally or pick a separate “Dockerfile deploy” product in the UI.
 
-1. **Miget:** connect GitHub → **New application** → this repo and branch.
-2. **Builder:** **Miget Buildpacks** (Auto detection). Do **not** select Dockerfile.
-3. **Database:** shared project Postgres → set **`DATABASE_URL`** on the app.
-4. **Other config vars:** `ANTHROPIC_API_KEY`, `CANOPY_API_KEY`, etc. Miget sets **`PORT`** (usually `5000`); the app binds to `PORT`.
-5. **Auto-deploy** on push.
+What worked before: a root **`Dockerfile`** in git plus a minimal **`app.json`** (`LANGUAGE=dockerfile`). Miget builds that image on push.
 
-### What Miget builds
+What broke **Loremetry** on `main`: the **`Dockerfile` was deleted** and **`app.json` pointed at Rust + Node buildpacks** (`BUILD_COMMAND`, `Procfile`, root `package.json`). That’s when you started seeing `./app: not found` and `cargo: not found` — not because the app name changed.
 
-| Step | Source |
-|------|--------|
-| Vue UI | Root `package.json` → `npm run build` in `ui/` |
-| Rust API | `cargo build --release -p loremetry-web` (`BUILD_COMMAND` in `app.json`) |
-| Start | `Procfile` → `web: bin/start` (finds `./app` or `./loremetry-web`) |
+After you push the fix ( **`Dockerfile` back**, buildpack cruft removed):
+
+1. **GitHub app** → Loremetry repo → deploy / auto-deploy on push (same flow as the working app).
+2. If this app still fails but the other one doesn’t, open **Settings → Variables** on Loremetry and **delete leftovers** from the bad period: `BUILD_COMMAND`, `LANGUAGE=rust`, anything forcing buildpacks.
+3. **Postgres:** DB addon on the app (`DATABASE_URL`) or project `POSTGRES_*_URL` — the server accepts both.
+
+The container runs **`/app/loremetry-web`** on Miget’s **`$PORT`**.
 
 ### Inspecting the database (SQL, schema)
 
@@ -81,30 +79,17 @@ Deploy as a **single application** — **not** a Compose Stack. There is **no `D
 SELECT COUNT(*) FROM lore.kdp_categories;
 ```
 
-### App deploys but crashes / CrashLoopBackOff
+### Deploy / runtime troubleshooting
 
-Check **runtime logs** (not build logs). Common causes:
+| Symptom | Fix |
+|---------|-----|
+| `cargo: not found` during build | Repo or app vars still on **buildpacks**. Commit root **`Dockerfile`**, restore minimal **`app.json`**, remove `BUILD_COMMAND` / `LANGUAGE=rust` on the Miget app, redeploy from GitHub. |
+| `./app: not found` | Same — buildpack image. Push **`Dockerfile`** + `CMD /app/loremetry-web`; redeploy from GitHub. |
+| `DATABASE_URL` / DB errors | Real `postgres://…` at runtime; check logs for `FATAL` / `Database init failed`. |
 
-| Log message | Fix |
-|-------------|-----|
-| `/bin/sh: ./app: not found` | Rust binary not at `./app` in the image. `Procfile` should use `bin/start` (this repo) — push and redeploy. |
-| `DATABASE_URL must be a postgres://…` / `does not look like postgres` | The var is a **placeholder or secret id**, not the real URL. In Miget, link the **shared DB** to the app or paste the full `postgres://user:pass@host:5432/db` string. Set on **Run** config vars, not build-only. |
-| `DATABASE_URL is not set` | App has no runtime URL. Use project **link** to inject `POSTGRES_*_URL`, or set `DATABASE_URL` on **this application**. |
-| `Database init failed` | Wrong host/credentials, DB not reachable from the app network, or SSL. Try `DATABASE_SSLMODE=require` (or `disable` for internal Miget Postgres). |
-| `Bind failed` | Rare; check `PORT` (Miget usually sets `5000`). |
+Optional local production image:
 
-Startup waits up to ~60s for Postgres (retries). If the health check is shorter, the pod may restart before DB connects — check DB hostname is reachable from the app.
-
-**Note:** Linux env names are case-sensitive — use `DATABASE_URL`, not `database_url`.
-
-**`cp target/release/` failed** — Rust buildpack on a workspace. Ensure **rust + nodejs** buildpacks in `app.json` and `BUILD_COMMAND` in `app.json`. Redeploy.
-
-**UI 404 / empty** — set **`STATIC_DIR=/app/ui/dist`** on the app (default in `app.json`). Confirm the Node build step ran (`ui/dist` exists in the image).
-
-**Wrong builder** — **Settings → Builders → Miget Buildpacks**, not Dockerfile.
-
-### Build logs mention Docker / `Dockerfile.runtime`
-
-Normal. **Miget Buildpacks** (migetpacks) always compile your app by generating a temporary **`Dockerfile.runtime`** and running **BuildKit** — even when you did not add a `Dockerfile` to the repo. That is not the same as choosing **Builder → Dockerfile** (your own root `Dockerfile`).
-
-If the build fails on `rust:stable: not found`, the platform mirror is missing that tag. This repo pins **`rust-toolchain.toml`** to a concrete version (e.g. `1.85.0`) instead of `stable`.
+```bash
+docker build -t loremetry .
+docker run -p 5000:5000 -e DATABASE_URL=... -e PORT=5000 loremetry
+```

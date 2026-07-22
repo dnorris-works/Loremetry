@@ -10,7 +10,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use loremetry_core::{db, AppCtx, Config};
-use loremetry_core::config::{database_url_diagnostics, database_url_host, resolve_database_url};
+use loremetry_core::config::{
+    database_url_diagnostics, database_url_host, resolve_database_url_with_source,
+};
 use tracing_subscriber::EnvFilter;
 
 use crate::state::AppState;
@@ -25,18 +27,19 @@ async fn main() {
 
     let config = Config::from_env();
 
-    let Some(database_url) = resolve_database_url() else {
+    let Some((database_url, database_env)) = resolve_database_url_with_source() else {
         let diag = database_url_diagnostics();
         tracing::error!("No valid Postgres URL in environment. {diag}");
-        eprintln!("FATAL: DATABASE_URL must be a postgres:// or postgresql:// connection string at runtime.");
+        eprintln!("FATAL: Set DATABASE_URL (or POSTGRES_*_URL from Miget) to a postgres:// connection string at runtime.");
         eprintln!("{diag}");
         std::process::exit(1);
     };
 
     tracing::info!(
-        "Starting Loremetry (port={}, db={})",
+        "Starting Loremetry (port={}, db={}, env={})",
         config.port,
-        database_url_host(&database_url)
+        database_url_host(&database_url),
+        database_env
     );
 
     let database = match db::init(&database_url).await {

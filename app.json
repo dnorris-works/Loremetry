@@ -1,24 +1,8 @@
 {
-  "name": "loremetry",
+  "name": "Loremetry",
   "env": {
-    "BUILD_COMMAND": {
-      "value": "cargo build --release -p loremetry-web"
-    },
-    "STATIC_DIR": {
-      "value": "/app/ui/dist"
-    },
-    "DATABASE_URL": {
-      "required": true,
-      "description": "Shared project Postgres connection string"
-    }
-  },
-  "buildpacks": [
-    { "url": "heroku/rust" },
-    { "url": "heroku/nodejs" }
-  ],
-  "formation": {
-    "web": {
-      "quantity": 1
+    "LANGUAGE": {
+      "value": "dockerfile"
     }
   }
 }
