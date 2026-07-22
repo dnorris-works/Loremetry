@@ -26,11 +26,11 @@ export DATABASE_URL=postgres://localhost:5432/loremetry
 **Docker** — only if [Docker Desktop](https://www.docker.com/products/docker-desktop/) is installed:
 
 ```bash
-docker compose up -d db
+docker compose -f docker-compose.db.yml up -d
 export DATABASE_URL=postgres://loremetry:loremetry@localhost:5432/loremetry
 ```
 
-`docker-compose.yml` is for **local** Postgres + optional `web` service. On Miget, `compose.miget.yml` replaces `db` with a **managed Postgres addon** and sizes **`web`** (1Gi RAM, port 5000).
+`docker-compose.yml` is the **Miget Compose `web` service** only (no database). Local Postgres: `docker-compose.db.yml` or `docker-compose.local.yml` with the app.
 
 The `lore` schema and tables are created automatically on first API boot.
 
@@ -64,7 +64,7 @@ This repo is ready for **GitHub → Miget** deploy (same flow as other web apps)
 3. **Builder:** choose **Docker Engine** (not “Auto detection / Buildpacks”).
    - Miget will build from the root **`Dockerfile`** (Vue + Rust in one image).
    - If you only see buildpacks, set **Settings → Variables** → `LANGUAGE` = `dockerfile` and redeploy.
-4. **Database:** attach the **PostgreSQL** addon (or deploy with `compose.miget.yml`, which sets `db` to `managed: postgres`). Miget injects a URL such as `POSTGRES_DBWEI_URL` or `DATABASE_URL`; the app reads those automatically. Tables live in the `lore` schema (migrations on startup).
+4. **Database:** use your **shared project Postgres** (or workspace DB service). Set **`DATABASE_URL`** and/or **`POSTGRES_DBWEI_URL`** on the project or stack so the app can connect. Tables live in the `lore` schema (migrations on startup). Do **not** provision a separate compose `db` addon unless you want a dedicated instance.
    - You do **not** need a `/data` volume anymore (that was only for the old SQLite file).
 5. **Variables** (Settings → Variables):
    - `DATABASE_URL` — from Miget Postgres
@@ -114,17 +114,17 @@ Do **not** set `LANGUAGE=rust` or `nodejs` alone — this app needs both the Vue
 
 ### Manual Docker (optional)
 
-**Full stack (app + Postgres):**
+**Full stack (app + Postgres in Docker):**
 
 ```bash
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 open http://localhost:8080
 ```
 
 **Database only** (run the Rust binary on the host):
 
 ```bash
-docker compose up -d db
+docker compose -f docker-compose.db.yml up -d
 export DATABASE_URL=postgres://loremetry:loremetry@localhost:5432/loremetry
 export STATIC_DIR=./ui/dist PORT=8080
 cargo run -p loremetry-web
@@ -133,7 +133,7 @@ cargo run -p loremetry-web
 **Single container** (Postgres elsewhere):
 
 ```bash
-docker compose up -d db
+docker compose -f docker-compose.db.yml up -d
 docker build -t loremetry .
 docker run -p 8080:8080 \
   -e DATABASE_URL=postgres://loremetry:loremetry@host.docker.internal:5432/loremetry \
@@ -147,9 +147,7 @@ On Linux use `--network host` or point `DATABASE_URL` at the compose Postgres se
 
 Use **New Compose Stack** with compose path `.` (repo root). Miget merges `docker-compose.yml` + `compose.miget.yml`:
 
-- **`web`** — builds from the `Dockerfile`, **1Gi** RAM, listens on **port 5000** (required for Miget ingress).
-- **`db`** — **managed Postgres** addon (not the local `postgres:16` image); Miget injects `DATABASE_URL` / `POSTGRES_*_URL` into `web`.
+- **`web`** only — builds from the `Dockerfile`, **1Gi** RAM, listens on **port 5000**.
+- **Database** — your **shared project** connection string (`DATABASE_URL` / `POSTGRES_DBWEI_URL`). Wire it in stack or project variables; do not leave the old `postgres://…@db:5432` local default.
 
-You need **at least one `web` service** in compose; a managed `db` alone shows **Services: 0** and blocks Continue.
-
-Alternatively, deploy only the **Dockerfile** app and attach a Postgres addon in the UI (what you used with `POSTGRES_DBWEI_URL`).
+Alternatively, deploy only the **Dockerfile** app (no compose stack) with the same project DB vars.

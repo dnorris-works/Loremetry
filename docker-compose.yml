@@ -1,3 +1,6 @@
+# App service for Miget Compose Stack (and local full-stack via docker-compose.local.yml).
+# Database: use Miget shared/project DATABASE_URL or POSTGRES_*_URL — not defined here.
+
 services:
   web:
     build: .
@@ -6,23 +9,7 @@ services:
       - "${LOREMETRY_PORT:-8080}:${LOREMETRY_PORT:-8080}"
     environment:
       PORT: ${LOREMETRY_PORT:-8080}
-      DATABASE_URL: ${DATABASE_URL:-postgres://loremetry:loremetry@db:5432/loremetry}
+      DATABASE_URL: ${DATABASE_URL}
+      POSTGRES_DBWEI_URL: ${POSTGRES_DBWEI_URL}
       STATIC_DIR: /app/ui/dist
       RUST_LOG: ${RUST_LOG:-info}
-    depends_on:
-      - db
-
-  db:
-    image: postgres:16
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: loremetry
-      POSTGRES_PASSWORD: loremetry
-      POSTGRES_DB: loremetry
-    ports:
-      - "5432:5432"
-    volumes:
-      - loremetry-pg:/var/lib/postgresql/data
-
-volumes:
-  loremetry-pg:

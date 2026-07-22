@@ -1,0 +1,18 @@
+# Local dev: Postgres only (run the app on the host with cargo run).
+# Usage: docker compose -f docker-compose.db.yml up -d
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: loremetry
+      POSTGRES_PASSWORD: loremetry
+      POSTGRES_DB: loremetry
+    ports:
+      - "5432:5432"
+    volumes:
+      - loremetry-pg:/var/lib/postgresql/data
+
+volumes:
+  loremetry-pg:

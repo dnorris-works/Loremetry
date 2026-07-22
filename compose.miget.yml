@@ -1,5 +1,5 @@
 # Miget overlay (merged with docker-compose.yml). Plain `docker compose` ignores x-miget.
-# Public ingress requires the web service to listen on PORT=5000.
+# Uses the workspace shared Postgres — set DATABASE_URL / POSTGRES_DBWEI_URL on the project or stack.
 
 services:
   web:
@@ -9,11 +9,3 @@ services:
       PORT: "5000"
     ports:
       - "5000:5000"
-
-  db:
-    x-miget:
-      managed: postgres
-      cpu: "500m"
-      ram: "1024"
-      storage: "5120"
-      private: true

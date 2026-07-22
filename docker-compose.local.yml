@@ -1,0 +1,24 @@
+# Local dev: Postgres container + web wired to it.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+
+services:
+  web:
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgres://loremetry:loremetry@db:5432/loremetry
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: loremetry
+      POSTGRES_PASSWORD: loremetry
+      POSTGRES_DB: loremetry
+    ports:
+      - "5432:5432"
+    volumes:
+      - loremetry-pg:/var/lib/postgresql/data
+
+volumes:
+  loremetry-pg:
