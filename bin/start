@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+set -e
+# Miget rust buildpack usually copies the release binary to ./app; multi-buildpack
+# layouts vary. Try known locations before failing (logs list dir on error).
+for candidate in ./app ./loremetry-web ./target/release/loremetry-web ./target/release/app; do
+  if [ -x "$candidate" ]; then
+    exec "$candidate"
+  fi
+done
+echo "loremetry: no API binary found (pwd=$(pwd))" >&2
+ls -la >&2
+ls -la target/release 2>/dev/null >&2 || true
+exit 1

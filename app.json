@@ -2,7 +2,7 @@
   "name": "loremetry",
   "env": {
     "BUILD_COMMAND": {
-      "value": "cargo build --release -p loremetry-web --bin app"
+      "value": "cargo build --release -p loremetry-web"
     },
     "STATIC_DIR": {
       "value": "/app/ui/dist"
@@ -13,8 +13,8 @@
     }
   },
   "buildpacks": [
-    { "url": "heroku/nodejs" },
-    { "url": "heroku/rust" }
+    { "url": "heroku/rust" },
+    { "url": "heroku/nodejs" }
   ],
   "formation": {
     "web": {

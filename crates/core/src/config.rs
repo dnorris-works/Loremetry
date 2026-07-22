@@ -86,12 +86,68 @@ impl Config {
 pub fn resolve_database_url() -> Option<String> {
     for key in ["DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_URL"] {
         if let Ok(url) = env::var(key) {
-            if !url.trim().is_empty() {
-                return Some(normalize_database_url(&url));
+            if let Some(normalized) = normalize_resolved_url(&url) {
+                return Some(normalized);
+            }
+        }
+    }
+    // Miget shared/project DB addons often use POSTGRES_<name>_URL (e.g. POSTGRES_DBWEI_URL).
+    let mut miget_keys: Vec<String> = env::vars()
+        .filter_map(|(key, value)| {
+            if key.starts_with("POSTGRES_") && key.ends_with("_URL") && !value.trim().is_empty() {
+                Some(key)
+            } else {
+                None
+            }
+        })
+        .collect();
+    miget_keys.sort();
+    for key in miget_keys {
+        if let Ok(url) = env::var(&key) {
+            if let Some(normalized) = normalize_resolved_url(&url) {
+                return Some(normalized);
             }
         }
     }
     None
+}
+
+/// Reject empty values and Miget placeholder IDs that are not connection strings.
+fn normalize_resolved_url(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if !looks_like_postgres_url(raw) {
+        return None;
+    }
+    Some(normalize_database_url(raw))
+}
+
+pub fn looks_like_postgres_url(url: &str) -> bool {
+    let u = url.trim();
+    u.starts_with("postgres://") || u.starts_with("postgresql://")
+}
+
+/// Human-readable hint when startup cannot find a valid database URL.
+pub fn database_url_diagnostics() -> String {
+    let mut lines = vec![
+        "Checked DATABASE_URL, POSTGRES_URL, POSTGRESQL_URL, and POSTGRES_*_URL.".to_string(),
+    ];
+    for key in ["DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_URL"] {
+        match env::var(key) {
+            Ok(v) if v.trim().is_empty() => lines.push(format!("{key} is set but empty.")),
+            Ok(v) if !looks_like_postgres_url(&v) => {
+                lines.push(format!(
+                    "{key} is set but does not look like postgres://… (got {} chars; Miget secret refs must resolve at runtime).",
+                    v.len()
+                ));
+            }
+            Ok(_) => lines.push(format!("{key} looks like a postgres URL.")),
+            Err(_) => lines.push(format!("{key} is not set.")),
+        }
+    }
+    lines.join(" ")
 }
 
 /// Host portion of the URL for startup logs (no credentials).
@@ -109,10 +165,25 @@ pub fn database_url_host(url: &str) -> String {
 pub fn normalize_database_url(url: &str) -> String {
     let mut out = url.trim().replace("postgres://", "postgresql://");
     if !out.contains("sslmode=") {
+        let sslmode = env::var("DATABASE_SSLMODE").unwrap_or_else(|_| {
+            if is_local_db_host(&out) {
+                "disable".into()
+            } else {
+                "prefer".into()
+            }
+        });
         let sep = if out.contains('?') { '&' } else { '?' };
-        out.push_str(&format!("{sep}sslmode=disable"));
+        out.push_str(&format!("{sep}sslmode={sslmode}"));
     }
     out
+}
+
+fn is_local_db_host(url: &str) -> bool {
+    let host = database_url_host(url).to_lowercase();
+    host.starts_with("localhost")
+        || host.starts_with("127.0.0.1")
+        || host.starts_with("[::1]")
+        || host.starts_with("host.docker.internal")
 }
 
 #[cfg(test)]
@@ -123,6 +194,12 @@ mod tests {
     fn normalizes_scheme_and_sslmode() {
         let u = normalize_database_url("postgres://user:pass@host:5432/db");
         assert!(u.starts_with("postgresql://"));
+        assert!(u.contains("sslmode=prefer"));
+    }
+
+    #[test]
+    fn local_host_uses_disable_sslmode() {
+        let u = normalize_database_url("postgres://user:pass@localhost:5432/db");
         assert!(u.contains("sslmode=disable"));
     }
 }
