@@ -26,6 +26,14 @@ pub struct DataForSeoClient {
 
 impl DataForSeoClient {
     pub fn new(login: &str, password: &str) -> Result<Self, String> {
+        let login = login.trim();
+        let password = password.trim();
+        if login.is_empty() || password.is_empty() {
+            return Err(
+                "DataForSEO login and API password are not configured (Admin → Platform credentials or DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD).".into(),
+            );
+        }
+
         let client = Client::builder()
             .timeout(Duration::from_secs(TIMEOUT_SECS))
             .build()
@@ -53,7 +61,13 @@ impl DataForSeoClient {
         let body_text = resp.text().await.map_err(|e| format!("DataForSEO read error: {}", e))?;
 
         if !status.is_success() {
-            return Err(format!("DataForSEO API error ({}): {}", status.as_u16(), &body_text[..body_text.len().min(300)]));
+            let snippet = &body_text[..body_text.len().min(300)];
+            if status.as_u16() == 401 || body_text.contains("40100") {
+                return Err(format!(
+                    "DataForSEO rejected the API credentials (401). Use the API login and API password from https://app.dataforseo.com/api-access — not your website password. Re-save in Admin → Platform credentials and use Test DataForSEO. Response: {snippet}"
+                ));
+            }
+            return Err(format!("DataForSEO API error ({}): {}", status.as_u16(), snippet));
         }
 
         let json: Value = serde_json::from_str(&body_text)
