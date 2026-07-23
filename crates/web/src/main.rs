@@ -49,7 +49,7 @@ async fn main() {
             eprintln!("Database init failed: {e}");
             if e.contains("migrations") {
                 eprintln!(
-                    "Hint: Check DATABASE_URL and that Postgres is reachable. New deploys run migration 002 (users, platform_secrets, ai_usage_events)."
+                    "Hint: Check DATABASE_URL and Postgres reachability. If you see _sqlx_migrations does not exist, redeploy the latest image (migrate connection must use public search_path for sqlx)."
                 );
             }
             std::process::exit(1);

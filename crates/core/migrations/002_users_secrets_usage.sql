@@ -1,5 +1,3 @@
-SET search_path TO lore;
-
 CREATE TABLE lore.users (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     clerk_id            TEXT UNIQUE,

@@ -40,6 +40,38 @@ fn pool_options() -> PgPoolOptions {
         .idle_timeout(Duration::from_secs(600))
 }
 
+async fn connect_migrate_pool(database_url: &str) -> Result<PgPool, String> {
+    let mut last_err = String::new();
+    for attempt in 1..=30 {
+        match pool_options()
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    // sqlx stores migration state in public._sqlx_migrations
+                    sqlx::query("SET search_path TO public")
+                        .execute(conn)
+                        .await?;
+                    Ok(())
+                })
+            })
+            .connect(database_url)
+            .await
+        {
+            Ok(pool) => {
+                if attempt > 1 {
+                    log::info!("migrate pool: connected on attempt {attempt}");
+                }
+                return Ok(pool);
+            }
+            Err(e) => {
+                last_err = e.to_string();
+                log::warn!("migrate pool: attempt {attempt}/30 failed: {last_err}");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }
+    }
+    Err(format!("migrate pool: failed after 30 attempts: {last_err}"))
+}
+
 async fn connect_with_retry(database_url: &str, label: &str) -> Result<PgPool, String> {
     let mut last_err = String::new();
     for attempt in 1..=30 {
@@ -100,8 +132,8 @@ pub async fn init(database_url: &str) -> Result<Db, String> {
     );
     log::info!("Connecting to database and running migrations…");
 
-    // Migrations must run with default search_path so sqlx can manage public._sqlx_migrations.
-    let migrate_pool = connect_with_retry(&database_url, "migrate pool").await?;
+    // Migrations must run with search_path=public so sqlx can manage public._sqlx_migrations.
+    let migrate_pool = connect_migrate_pool(&database_url).await?;
     sqlx::migrate!("./migrations")
         .run(&migrate_pool)
         .await
