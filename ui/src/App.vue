@@ -22,8 +22,7 @@ import SeriesForm from './components/SeriesForm.vue';
 import NewDocumentForm from './components/NewDocumentForm.vue';
 import ManuscriptViewer from './components/ManuscriptViewer.vue';
 import WritingPanel from './components/WritingPanel.vue';
-import ClerkGate from './components/ClerkGate.vue';
-import OperatorSignIn from './components/OperatorSignIn.vue';
+import AuthPage from './components/AuthPage.vue';
 import { useAuth } from './composables/useAuth';
 import { useReportTypes } from './composables/useReportTypes';
 
@@ -279,8 +278,7 @@ watch(
       </template>
     </main>
   </div>
-  <ClerkGate v-else-if="props.clerkEnabled" />
-  <OperatorSignIn v-else />
+  <AuthPage v-else :clerk-enabled="Boolean(props.clerkEnabled)" />
 </template>
 
 <style scoped>

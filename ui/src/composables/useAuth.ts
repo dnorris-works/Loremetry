@@ -14,6 +14,12 @@ const publishableKey = ref('');
 const me = ref<MeResponse | null>(null);
 const authReady = ref(false);
 
+let clerkSignOut: (() => Promise<void>) | null = null;
+
+export function registerClerkSignOut(fn: () => Promise<void>): void {
+  clerkSignOut = fn;
+}
+
 export function useAuth() {
   const breakGlass = computed(() => me.value?.breakGlass === true);
   const isAdmin = computed(() => me.value?.isAdmin === true);
@@ -63,8 +69,17 @@ export function useAuth() {
   function clearOperatorBypass(): void {
     setOperatorBypassToken('');
     me.value = null;
-    authReady.value = false;
     void refreshMe();
+  }
+
+  async function signOut(): Promise<void> {
+    if (breakGlass.value) {
+      setOperatorBypassToken('');
+    } else if (clerkSignOut) {
+      await clerkSignOut();
+    }
+    me.value = null;
+    await refreshMe();
   }
 
   function wireClerkGetToken(getToken: () => Promise<string | null>): void {
@@ -92,6 +107,7 @@ export function useAuth() {
     refreshMe,
     applyOperatorBypass,
     clearOperatorBypass,
+    signOut,
     wireClerkGetToken,
   };
 }
