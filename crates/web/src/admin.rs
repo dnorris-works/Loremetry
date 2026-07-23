@@ -198,13 +198,15 @@ pub struct TestCanopyBody {
 
 pub async fn test_platform_canopy(
     State(state): State<AppState>,
-    body: Option<Json<TestCanopyBody>>,
+    Json(body): Json<TestCanopyBody>,
 ) -> impl IntoResponse {
-    let key = match body {
-        Some(Json(b)) => match b.canopy_api_key.filter(|s| !s.trim().is_empty()) {
-            Some(k) => k,
-            None => state.secrets.canopy_key().await,
-        },
+    let key = match body
+        .canopy_api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(k) => k.to_string(),
         None => state.secrets.canopy_key().await,
     };
     ok_json(serde_json::to_value(canopy::test_canopy_connection(key).await).unwrap_or(json!(null)))
@@ -221,17 +223,20 @@ pub struct TestDataforseoBody {
 
 pub async fn test_platform_dataforseo(
     State(state): State<AppState>,
-    body: Option<Json<TestDataforseoBody>>,
+    Json(body): Json<TestDataforseoBody>,
 ) -> impl IntoResponse {
-    let (login, password) = match body {
-        Some(Json(b)) => match (
-            b.dataforseo_login.filter(|s| !s.trim().is_empty()),
-            b.dataforseo_password.filter(|s| !s.trim().is_empty()),
-        ) {
-            (Some(l), Some(p)) => (l, p),
-            _ => state.secrets.dataforseo().await,
-        },
-        None => state.secrets.dataforseo().await,
+    let (login, password) = match (
+        body.dataforseo_login
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        body.dataforseo_password
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+    ) {
+        (Some(l), Some(p)) => (l.to_string(), p.to_string()),
+        _ => state.secrets.dataforseo().await,
     };
     ok_json(
         serde_json::to_value(dataforseo::test_dataforseo_connection(login, password).await)

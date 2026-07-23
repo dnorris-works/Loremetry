@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref } from 'vue';
-import { adminFetch, adminUploadFile } from '../api';
+import { adminFetch, adminUploadFile, invoke } from '../api';
 import { settingsKey, showPanelKey } from '../injectionKeys';
 import type { ModelInfo, StaleCleanupResult, WinningCatImportResult } from '../types';
 import { useReportTypes } from '../composables/useReportTypes';
@@ -198,15 +198,11 @@ async function savePlatformSecrets(): Promise<void> {
       if (dfsLogin && dfsPassword) {
         platformDfsStatus.value = 'Testing…';
         try {
-          const testResult = await adminFetch<{ success: boolean; error: string }>(
-            '/platform-secrets/test-dataforseo',
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ dataforseo_login: dfsLogin, dataforseo_password: dfsPassword }),
-            },
+          const testResult = await invoke<{ success: boolean; error: string }>(
+            'test_dataforseo_connection',
+            { dataforseo_login: dfsLogin, dataforseo_password: dfsPassword },
           );
-          platformDfsStatus.value = testResult.success ? '✓ Connected' : '✗ ' + testResult.error;
+          platformDfsStatus.value = testResult.success ? '✓ Connected' : '✗ ' + (testResult.error || 'Connection failed');
         } catch (e) {
           platformDfsStatus.value = '✗ ' + String(e);
         }
@@ -224,12 +220,10 @@ async function onTestPlatformCanopy(): Promise<void> {
   platformCanopyStatus.value = 'Testing…';
   const key = credCanopy.value.trim();
   try {
-    const result = await adminFetch<{ success: boolean; error: string }>('/platform-secrets/test-canopy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(key ? { canopy_api_key: key } : {}),
+    const result = await invoke<{ success: boolean; error: string }>('test_canopy_connection', {
+      ...(key ? { canopy_api_key: key } : {}),
     });
-    platformCanopyStatus.value = result.success ? '✓ Connected' : '✗ ' + result.error;
+    platformCanopyStatus.value = result.success ? '✓ Connected' : '✗ ' + (result.error || 'Connection failed');
   } catch (e) {
     platformCanopyStatus.value = '✗ ' + String(e);
   }
@@ -240,16 +234,12 @@ async function onTestPlatformDataforseo(): Promise<void> {
   const login = credDfsLogin.value.trim();
   const password = credDfsPassword.value.trim();
   try {
-    const result = await adminFetch<{ success: boolean; error: string }>('/platform-secrets/test-dataforseo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(
-        login && password
-          ? { dataforseo_login: login, dataforseo_password: password }
-          : {},
-      ),
+    const result = await invoke<{ success: boolean; error: string }>('test_dataforseo_connection', {
+      ...(login && password
+        ? { dataforseo_login: login, dataforseo_password: password }
+        : {}),
     });
-    platformDfsStatus.value = result.success ? '✓ Connected' : '✗ ' + result.error;
+    platformDfsStatus.value = result.success ? '✓ Connected' : '✗ ' + (result.error || 'Connection failed');
   } catch (e) {
     platformDfsStatus.value = '✗ ' + String(e);
   }

@@ -52,8 +52,18 @@ export async function adminFetch<T = unknown>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const res = await fetch(`/api/admin${path}`, init);
-  const data = await res.json();
+  let res: Response;
+  try {
+    res = await fetch(`/api/admin${path}`, init);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      msg === 'Failed to fetch'
+        ? 'Could not reach the server. Check that loremetry-web is running and the Admin API is deployed.'
+        : msg,
+    );
+  }
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error((data as { error?: string }).error || res.statusText || 'Admin request failed');
   }

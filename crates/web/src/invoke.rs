@@ -32,7 +32,14 @@ pub async fn invoke_handler(
     Json(body): Json<InvokeBody>,
 ) -> impl IntoResponse {
     let mut args = normalize_args(body.args);
-    inject_platform_credentials(&state, &mut args).await;
+    // Connection tests may pass unsaved form values; do not strip or replace them.
+    let skip_credential_inject = matches!(
+        body.cmd.as_str(),
+        "test_canopy_connection" | "test_dataforseo_connection"
+    );
+    if !skip_credential_inject {
+        inject_platform_credentials(&state, &mut args).await;
+    }
     match dispatch(&state, &body.cmd, args).await {
         Ok(v) => ok_json(v),
         Err(e) => json_error(e),
@@ -177,11 +184,21 @@ async fn dispatch(state: &AppState, cmd: &str, mut args: Value) -> Result<Value,
             to_val(commands::list_models(&db, provider, api_key).await?)
         }
         "test_canopy_connection" => {
-            let key = state.secrets.canopy_key().await;
+            let key = match optional_string(&args, &["canopy_api_key", "canopyApiKey"])
+                .filter(|s| !s.trim().is_empty())
+            {
+                Some(k) => k,
+                None => state.secrets.canopy_key().await,
+            };
             to_val(canopy::test_canopy_connection(key).await)
         }
         "test_dataforseo_connection" => {
-            let (login, password) = state.secrets.dataforseo().await;
+            let login = optional_string(&args, &["dataforseo_login", "dataforseoLogin"]);
+            let password = optional_string(&args, &["dataforseo_password", "dataforseoPassword"]);
+            let (login, password) = match (login, password) {
+                (Some(l), Some(p)) if !l.trim().is_empty() && !p.trim().is_empty() => (l, p),
+                _ => state.secrets.dataforseo().await,
+            };
             to_val(dataforseo::test_dataforseo_connection(login, password).await)
         }
         "import_winningcat_csv" | "remove_stale_kdp_categories" => {
@@ -312,6 +329,10 @@ fn to_val<T: serde::Serialize>(v: T) -> Result<Value, String> {
 fn take_request<T: serde::de::DeserializeOwned>(args: &Value) -> Result<T, String> {
     let src = args.get("request").unwrap_or(args);
     serde_json::from_value(src.clone()).map_err(|e| format!("Invalid request: {e}"))
+}
+
+fn optional_string(args: &Value, keys: &[&str]) -> Option<String> {
+    take_string(args, keys).ok()
 }
 
 fn take_string(args: &Value, keys: &[&str]) -> Result<String, String> {

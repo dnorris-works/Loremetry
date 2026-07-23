@@ -89,6 +89,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/admin/platform-secrets", get(admin::get_platform_secrets).put(admin::put_platform_secrets))
         .route("/admin/platform-secrets/test-canopy", post(admin::test_platform_canopy))
         .route("/admin/platform-secrets/test-dataforseo", post(admin::test_platform_dataforseo))
+        .route("/admin/test-canopy", post(admin::test_platform_canopy))
+        .route("/admin/test-dataforseo", post(admin::test_platform_dataforseo))
         .route("/admin/usage/summary", get(admin::admin_usage_summary))
         .route("/admin/usage/events", get(admin::admin_usage_events))
         // Chat / costs / suggests
