@@ -52,7 +52,7 @@ pub async fn upload_chapters(
             id: None,
         };
 
-        match documents::upsert_document(&state.ctx.db.0, &req).await {
+        match documents::upsert_document(&state.ctx.db.pool, &req).await {
             Ok(doc) => {
                 created.push(json!({
                     "id": doc.id,

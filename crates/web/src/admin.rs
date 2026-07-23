@@ -2,10 +2,12 @@
 
 use std::time::Instant;
 
-use axum::extract::{Multipart, State};
+use axum::extract::{Multipart, Query, State};
 use axum::response::IntoResponse;
 use axum::Json;
-use loremetry_core::winningcat;
+use loremetry_core::platform_secrets::PlatformCredentialsPatch;
+use loremetry_core::usage::{usage_events, usage_summary};
+use loremetry_core::{canopy, dataforseo, winningcat};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::{Column, Row, ValueRef};
@@ -82,7 +84,7 @@ pub async fn winningcat_remove_stale(
 
 /// GET /api/admin/tables — tables in `lore` and `public` schemas.
 pub async fn admin_tables(State(state): State<AppState>) -> impl IntoResponse {
-    let pool = &state.ctx.db.0;
+    let pool = &state.ctx.db.pool;
     let result = sqlx::query_as::<_, (String, String)>(
         "SELECT table_schema, table_name
          FROM information_schema.tables
@@ -124,7 +126,7 @@ pub async fn admin_sql(State(state): State<AppState>, Json(body): Json<SqlBody>)
         return ok_json(json!({ "success": false, "error": "Empty query" }));
     }
 
-    let pool = &state.ctx.db.0;
+    let pool = &state.ctx.db.pool;
     let started = Instant::now();
     let lower = sql.to_lowercase();
     let returns_rows = lower.starts_with("select")
@@ -164,6 +166,94 @@ pub async fn admin_sql(State(state): State<AppState>, Json(body): Json<SqlBody>)
             })),
             Err(e) => ok_json(json!({ "success": false, "error": e.to_string() })),
         }
+    }
+}
+
+/// GET /api/admin/platform-secrets
+pub async fn get_platform_secrets(State(state): State<AppState>) -> impl IntoResponse {
+    let status = state.secrets.configured_status().await;
+    ok_json(serde_json::to_value(status).unwrap_or(json!(null)))
+}
+
+/// PUT /api/admin/platform-secrets
+pub async fn put_platform_secrets(
+    State(state): State<AppState>,
+    Json(patch): Json<PlatformCredentialsPatch>,
+) -> impl IntoResponse {
+    match state.secrets.update(patch).await {
+        Ok(()) => {
+            let status = state.secrets.configured_status().await;
+            ok_json(json!({ "success": true, "configured": status }))
+        }
+        Err(e) => ok_json(json!({ "success": false, "error": e })),
+    }
+}
+
+/// POST /api/admin/platform-secrets/test-canopy
+pub async fn test_platform_canopy(State(state): State<AppState>) -> impl IntoResponse {
+    let key = state.secrets.canopy_key().await;
+    ok_json(serde_json::to_value(canopy::test_canopy_connection(key).await).unwrap_or(json!(null)))
+}
+
+/// POST /api/admin/platform-secrets/test-dataforseo
+pub async fn test_platform_dataforseo(State(state): State<AppState>) -> impl IntoResponse {
+    let (login, password) = state.secrets.dataforseo().await;
+    ok_json(
+        serde_json::to_value(dataforseo::test_dataforseo_connection(login, password).await)
+            .unwrap_or(json!(null)),
+    )
+}
+
+#[derive(Deserialize)]
+pub struct UsageQuery {
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+/// GET /api/admin/usage/summary
+pub async fn admin_usage_summary(
+    State(state): State<AppState>,
+    Query(q): Query<UsageQuery>,
+) -> impl IntoResponse {
+    let now = chrono::Utc::now();
+    let from = q
+        .from
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.with_timezone(&chrono::Utc))
+        .unwrap_or_else(|| now - chrono::Duration::days(30));
+    let to = q
+        .to
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.with_timezone(&chrono::Utc))
+        .unwrap_or(now);
+
+    match usage_summary(&state.ctx.db.pool, from, to).await {
+        Ok(rows) => ok_json(json!({ "success": true, "from": from, "to": to, "users": rows })),
+        Err(e) => ok_json(json!({ "success": false, "error": e, "users": [] })),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct UsageEventsQuery {
+    pub user_id: uuid::Uuid,
+    #[serde(default = "default_limit")]
+    pub limit: i64,
+}
+
+fn default_limit() -> i64 {
+    100
+}
+
+/// GET /api/admin/usage/events
+pub async fn admin_usage_events(
+    State(state): State<AppState>,
+    Query(q): Query<UsageEventsQuery>,
+) -> impl IntoResponse {
+    match usage_events(&state.ctx.db.pool, q.user_id, q.limit.min(500)).await {
+        Ok(events) => ok_json(json!({ "success": true, "events": events })),
+        Err(e) => ok_json(json!({ "success": false, "error": e, "events": [] })),
     }
 }
 

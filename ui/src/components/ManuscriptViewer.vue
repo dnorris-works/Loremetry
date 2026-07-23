@@ -58,7 +58,6 @@ async function onSuggestFix(): Promise<void> {
       const result = await invoke<{ success: boolean; suggestions: string; error: string }>('suggest_sdt_fix', {
         request: {
           provider: settings.provider.value,
-          api_key: settings.apiKey.value,
           model: proseModel,
           telling_text: finding.value.tellingText,
           context: finding.value.context,
@@ -73,7 +72,6 @@ async function onSuggestFix(): Promise<void> {
       const result = await invoke<{ success: boolean; suggestions: string; error: string }>('suggest_ai_isms_fix', {
         request: {
           provider: settings.provider.value,
-          api_key: settings.apiKey.value,
           model: proseModel,
           telling_text: finding.value.tellingText,
           context: finding.value.context,
@@ -88,7 +86,6 @@ async function onSuggestFix(): Promise<void> {
       const result = await invoke<{ success: boolean; suggestions: string; error: string }>('suggest_continuity_fix', {
         request: {
           provider: settings.provider.value,
-          api_key: settings.apiKey.value,
           model: proseModel,
           entity: finding.value.entity || '',
           attribute: finding.value.attribute || '',

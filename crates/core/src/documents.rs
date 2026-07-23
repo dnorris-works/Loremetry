@@ -203,9 +203,9 @@ pub fn chapter_display_name(doc: &Document) -> String {
 }
 
 pub async fn list_documents_db(db: &Db, story_id: &str) -> Result<Vec<DocumentMeta>, String> {
-    list_documents(&db.0, story_id).await
+    list_documents(&db.pool, story_id).await
 }
 
 pub async fn list_chapters_db(db: &Db, story_id: &str) -> Result<Vec<Document>, String> {
-    list_chapters(&db.0, story_id).await
+    list_chapters(&db.pool, story_id).await
 }

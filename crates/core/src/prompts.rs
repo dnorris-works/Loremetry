@@ -4,6 +4,7 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::app_ctx::AppCtx;
 use crate::commands::{call_llm, call_llm_json};
 use crate::db::Db;
 use crate::documents;
@@ -38,7 +39,7 @@ pub async fn load_template(pool: &PgPool, template_id: &str) -> Result<PromptTem
 }
 
 pub async fn discover_bible(db: &Db, story_id: &str) -> String {
-    truncate_bible(&documents::load_bible_text(&db.0, story_id).await)
+    truncate_bible(&documents::load_bible_text(&db.pool, story_id).await)
 }
 
 pub async fn load_bible_for_story(db: &Db, story_id: &str, explicit_bible_path: &str) -> String {
@@ -134,6 +135,58 @@ pub fn fill_template(template: &str, vars: &HashMap<&str, &str>) -> String {
 }
 
 pub async fn execute_prompt(
+    app: &AppCtx,
+    template_id: &str,
+    provider: &str,
+    api_key: &str,
+    model: &str,
+    vars: HashMap<&str, &str>,
+    story_id: Option<&str>,
+) -> Result<String, String> {
+    let template = load_template(&app.db.pool, template_id).await?;
+
+    let system_prompt = fill_template(&template.system_prompt, &vars);
+    let user_content = fill_template(&template.user_template, &vars);
+
+    let result = if template.json_mode {
+        call_llm_json(
+            provider,
+            api_key,
+            model,
+            &system_prompt,
+            &user_content,
+            template.max_tokens,
+        )
+        .await?
+    } else {
+        call_llm(
+            provider,
+            api_key,
+            model,
+            &system_prompt,
+            &user_content,
+            template.max_tokens,
+        )
+        .await?
+    };
+
+    let _ = app
+        .usage
+        .record_llm(
+            app.user_id(),
+            provider,
+            model,
+            template_id,
+            story_id,
+            result.usage,
+        )
+        .await;
+
+    Ok(result.text)
+}
+
+/// Like [`execute_prompt`] but only needs database access (no usage recording).
+pub async fn execute_prompt_db(
     db: &Db,
     template_id: &str,
     provider: &str,
@@ -141,16 +194,31 @@ pub async fn execute_prompt(
     model: &str,
     vars: HashMap<&str, &str>,
 ) -> Result<String, String> {
-    let template = load_template(&db.0, template_id).await?;
-
+    let template = load_template(&db.pool, template_id).await?;
     let system_prompt = fill_template(&template.system_prompt, &vars);
     let user_content = fill_template(&template.user_template, &vars);
-
-    if template.json_mode {
-        call_llm_json(provider, api_key, model, &system_prompt, &user_content, template.max_tokens).await
+    let result = if template.json_mode {
+        call_llm_json(
+            provider,
+            api_key,
+            model,
+            &system_prompt,
+            &user_content,
+            template.max_tokens,
+        )
+        .await?
     } else {
-        call_llm(provider, api_key, model, &system_prompt, &user_content, template.max_tokens).await
-    }
+        call_llm(
+            provider,
+            api_key,
+            model,
+            &system_prompt,
+            &user_content,
+            template.max_tokens,
+        )
+        .await?
+    };
+    Ok(result.text)
 }
 
 #[allow(dead_code)]

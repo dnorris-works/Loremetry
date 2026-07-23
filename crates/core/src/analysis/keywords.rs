@@ -25,7 +25,7 @@ pub struct KeywordRequest {
 
 pub async fn generate_search_terms(app: AppCtx, request: KeywordRequest) -> GenreResult {
     let database = app.db.as_ref();
-    let genre_data = db::load_genre_data(&database.0, &request.story_id).await;
+    let genre_data = db::load_genre_data(&database.pool, &request.story_id).await;
     let genre_data = match genre_data {
         Some(d) => d,
         None    => return err("No genre data found. Run Analyze first."),
@@ -34,15 +34,23 @@ pub async fn generate_search_terms(app: AppCtx, request: KeywordRequest) -> Genr
     emit(&app, "Generating competition search terms...");
     emit(&app, &format!("  Genre: {}", genre_data.industry_ebook));
 
-    match generate_mi_search_terms(&database, &request.provider, &request.api_key, &request.model, &genre_data).await {
+    match generate_mi_search_terms(
+        &app,
+        &request.story_id,
+        &request.provider,
+        &request.api_key,
+        &request.model,
+        &genre_data,
+    )
+    .await {
         Err(e) => err(&format!("AI error: {}", e)),
         Ok(keywords) => {
             emit(&app, &format!("  ✓ {} search terms generated:", keywords.len()));
             for kw in &keywords { emit(&app, &format!("    • {}", kw)); }
 
             let rendered = render_search_terms(&keywords);
-            let _ = db::save_mi_search_terms(&database.0, &request.story_id, &keywords).await;
-            let _ = db::save_document(&database.0, &request.story_id, "mi_search_terms", &rendered).await;
+            let _ = db::save_mi_search_terms(&database.pool, &request.story_id, &keywords).await;
+            let _ = db::save_document(&database.pool, &request.story_id, "mi_search_terms", &rendered).await;
 
             GenreResult { success: true, report: rendered, error: String::new(), run_ts: String::new() }
         }
@@ -51,7 +59,7 @@ pub async fn generate_search_terms(app: AppCtx, request: KeywordRequest) -> Genr
 
 pub async fn optimize_keywords(app: AppCtx, request: KeywordRequest) -> GenreResult {
     let database = app.db.as_ref();
-    let genre_data = db::load_genre_data(&database.0, &request.story_id).await;
+    let genre_data = db::load_genre_data(&database.pool, &request.story_id).await;
     let genre_data = match genre_data {
         Some(d) => d,
         None    => return err("No genre data found. Run Full Analysis first."),
@@ -66,12 +74,21 @@ pub async fn optimize_keywords(app: AppCtx, request: KeywordRequest) -> GenreRes
 
     emit(&app, &format!("Asking {} to optimize keywords...", &request.model));
 
-    match call_keyword_optimizer(&database, &request.provider, &request.api_key, &request.model, &genre_data, &genre_data.genre_signals).await {
+    match call_keyword_optimizer(
+        &app,
+        &request.story_id,
+        &request.provider,
+        &request.api_key,
+        &request.model,
+        &genre_data,
+        &genre_data.genre_signals,
+    )
+    .await {
         Err(e) => err(&format!("AI error: {}", e)),
         Ok((entries, strategy)) => {
             let rendered = render_kdp_keywords(&entries, &strategy, source_note);
-            let _ = db::save_kdp_keywords(&database.0, &request.story_id, &entries, &strategy, source_note).await;
-            let _ = db::save_document(&database.0, &request.story_id, "kdp_keywords", &rendered).await;
+            let _ = db::save_kdp_keywords(&database.pool, &request.story_id, &entries, &strategy, source_note).await;
+            let _ = db::save_document(&database.pool, &request.story_id, "kdp_keywords", &rendered).await;
             emit(&app, "✓ KDP keywords saved to database.");
             GenreResult { success: true, report: rendered, error: String::new(), run_ts: String::new() }
         }
@@ -81,7 +98,8 @@ pub async fn optimize_keywords(app: AppCtx, request: KeywordRequest) -> GenreRes
 // ── Core logic ───────────────────────────────────────────────────────────────
 
 pub(crate) async fn generate_mi_search_terms(
-    db: &db::Db,
+    app: &AppCtx,
+    story_id: &str,
     provider: &str,
     api_key: &str,
     model: &str,
@@ -98,7 +116,16 @@ pub(crate) async fn generate_mi_search_terms(
     vars.insert("kdp_categories", kdp_categories.as_str());
     vars.insert("genre_signals", genre_signals);
 
-    let raw = prompts::execute_prompt(db, "mi_search_terms", provider, api_key, model, vars).await?;
+    let raw = prompts::execute_prompt(
+        app,
+        "mi_search_terms",
+        provider,
+        api_key,
+        model,
+        vars,
+        Some(story_id),
+    )
+    .await?;
     let clean = raw.trim()
         .trim_start_matches("```json").trim_start_matches("```")
         .trim_end_matches("```").trim();
@@ -108,7 +135,8 @@ pub(crate) async fn generate_mi_search_terms(
 }
 
 pub(crate) async fn call_keyword_optimizer(
-    db: &db::Db,
+    app: &AppCtx,
+    story_id: &str,
     provider: &str,
     api_key: &str,
     model: &str,
@@ -126,7 +154,16 @@ pub(crate) async fn call_keyword_optimizer(
     vars.insert("kdp_print", kdp_print.as_str());
     vars.insert("keywords_text", keywords_text);
 
-    let raw = prompts::execute_prompt(db, "kdp_keywords", provider, api_key, model, vars).await?;
+    let raw = prompts::execute_prompt(
+        app,
+        "kdp_keywords",
+        provider,
+        api_key,
+        model,
+        vars,
+        Some(story_id),
+    )
+    .await?;
     let clean = extract_json_object(&raw)
         .ok_or_else(|| format!("No JSON object found in response: {}", &raw[..raw.len().min(200)]))?;
 
@@ -164,7 +201,8 @@ pub(crate) fn format_keyword_pool_table(pool: &[KeywordResult]) -> String {
 }
 
 pub(crate) async fn call_keyword_optimizer_with_pool(
-    db: &db::Db,
+    app: &AppCtx,
+    story_id: &str,
     provider: &str,
     api_key: &str,
     model: &str,
@@ -173,7 +211,16 @@ pub(crate) async fn call_keyword_optimizer_with_pool(
     keyword_pool: &[KeywordResult],
 ) -> Result<(Vec<db::KdpKeywordEntry>, String), String> {
     if keyword_pool.is_empty() {
-        return call_keyword_optimizer(db, provider, api_key, model, genre_data, keywords_text).await;
+        return call_keyword_optimizer(
+            app,
+            story_id,
+            provider,
+            api_key,
+            model,
+            genre_data,
+            keywords_text,
+        )
+        .await;
     }
 
     let pool_table = format_keyword_pool_table(keyword_pool);
@@ -188,7 +235,16 @@ pub(crate) async fn call_keyword_optimizer_with_pool(
     vars.insert("keywords_text", keywords_text);
     vars.insert("pool_table", pool_table.as_str());
 
-    let raw = prompts::execute_prompt(db, "kdp_keywords_with_pool", provider, api_key, model, vars).await?;
+    let raw = prompts::execute_prompt(
+        app,
+        "kdp_keywords_with_pool",
+        provider,
+        api_key,
+        model,
+        vars,
+        Some(story_id),
+    )
+    .await?;
     let clean = extract_json_object(&raw)
         .ok_or_else(|| format!("No JSON object found in response: {}", &raw[..raw.len().min(200)]))?;
 
@@ -213,7 +269,8 @@ pub(crate) async fn call_keyword_optimizer_with_pool(
 
 /// Generate 10 discovery keyword phrases for non-Amazon platforms.
 pub(crate) async fn generate_discovery_keywords(
-    db: &db::Db,
+    app: &AppCtx,
+    story_id: &str,
     provider: &str,
     api_key: &str,
     model: &str,
@@ -226,7 +283,16 @@ pub(crate) async fn generate_discovery_keywords(
     vars.insert("bookstore_shelving", genre_data.bookstore_shelving.as_str());
     vars.insert("genre_signals", genre_data.genre_signals.as_str());
 
-    let raw = prompts::execute_prompt(db, "discovery_keywords", provider, api_key, model, vars).await?;
+    let raw = prompts::execute_prompt(
+        app,
+        "discovery_keywords",
+        provider,
+        api_key,
+        model,
+        vars,
+        Some(story_id),
+    )
+    .await?;
     let clean = extract_json_object(&raw)
         .ok_or_else(|| format!("No JSON in discovery response: {}", &raw[..raw.len().min(200)]))?;
     let v: serde_json::Value = serde_json::from_str(&clean)
@@ -361,7 +427,7 @@ pub(crate) async fn run_keyword_searches_canopy(
         let rows: Vec<(String, String, String, String)> = results.iter()
             .map(|r| (r.keyword.clone(), r.searches.clone(), r.competition.clone(), r.estimated_earnings.clone()))
             .collect();
-        let _ = crate::db::replace_keyword_search_results(&database.0, folder, seed, &rows).await;
+        let _ = crate::db::replace_keyword_search_results(&database.pool, folder, seed, &rows).await;
         let _ = app.emit("cdp:log", &format!("✓ \"{}\" → {} keyword(s).", seed, results.len()));
         all_results.extend(results);
     }
@@ -422,6 +488,16 @@ pub(crate) async fn run_keyword_searches_dataforseo(
     let all_results: Vec<KeywordResult> = match client.amazon_related_keywords_batch(seeds, 20).await {
         Ok(keywords) => {
             let _ = app.emit("cdp:log", &format!("  ✓ {} keywords returned.", keywords.len()));
+            let _ = app
+                .usage
+                .record_external(
+                    app.user_id(),
+                    "dataforseo",
+                    "dataforseo",
+                    "amazon_related_keywords_batch",
+                    Some(folder),
+                )
+                .await;
             keywords.into_iter().map(|kw| {
                 let competition = if kw.search_volume > 50000 { "High" }
                     else if kw.search_volume > 5000 { "Medium" }
@@ -448,7 +524,7 @@ pub(crate) async fn run_keyword_searches_dataforseo(
             .map(|r| (r.keyword.clone(), r.searches.clone(), r.competition.clone(), r.estimated_earnings.clone()))
             .collect();
         if let Some(first_seed) = seeds.first() {
-            let _ = crate::db::replace_keyword_search_results(&database.0, folder, first_seed, &rows).await;
+            let _ = crate::db::replace_keyword_search_results(&database.pool, folder, first_seed, &rows).await;
         }
     }
     let _ = app.emit("cdp:log", &format!("✓ DataForSEO: {} total Amazon keywords.", all_results.len()));

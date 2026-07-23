@@ -90,7 +90,7 @@ pub async fn check_continuity_for_story(app: AppCtx, request: ContinuityRequest)
     let database = app.db.as_ref();
     let story_name = sqlx::query_scalar::<_, String>("SELECT name FROM stories WHERE id = $1")
         .bind(&request.story_id)
-        .fetch_optional(&database.0)
+        .fetch_optional(&database.pool)
         .await
         .ok()
         .flatten()
@@ -102,7 +102,7 @@ pub async fn check_continuity_for_story(app: AppCtx, request: ContinuityRequest)
         Err(e) => return err(&e),
     };
 
-    let _ = db::replace_continuity_facts(&database.0, &request.story_id, &flatten_facts(&book)).await;
+    let _ = db::replace_continuity_facts(&database.pool, &request.story_id, &flatten_facts(&book)).await;
 
     emit(&app, "Comparing facts across chapters for contradictions...");
     let findings = match judge_contradictions(&app, &database, &request.provider, &request.api_key, &request.model, &[book], &bible).await {
@@ -112,10 +112,10 @@ pub async fn check_continuity_for_story(app: AppCtx, request: ContinuityRequest)
     emit(&app, &format!("  {} finding(s) worth reviewing.", findings.len()));
 
     let run_ts = chrono::Utc::now().to_rfc3339();
-    let _ = db::replace_continuity_findings(&database.0, "manuscript", &request.story_id, &findings).await;
+    let _ = db::replace_continuity_findings(&database.pool, "manuscript", &request.story_id, &findings).await;
 
     let content = render_findings_json(&findings, "manuscript", &request.story_id);
-    let _ = db::save_document_at(&database.0, &request.story_id, "continuity_check", &content, &run_ts).await;
+    let _ = db::save_document_at(&database.pool, &request.story_id, "continuity_check", &content, &run_ts).await;
     emit(&app, "✓ Continuity check saved to database.");
 
     GenreResult { success: true, report: content, error: String::new(), run_ts }
@@ -127,7 +127,7 @@ pub async fn check_continuity_for_series(app: AppCtx, request: SeriesContinuityR
     crate::reset_cancel();
     let database = app.db.as_ref();
 
-    let books_meta = db::list_series_books(&database.0, request.series_id).await;
+    let books_meta = db::list_series_books(&database.pool, request.series_id).await;
     let books_meta = match books_meta {
         Ok(b) if !b.is_empty() => b,
         Ok(_) => return err("This series has no books yet. Add stories to it first."),
@@ -151,7 +151,7 @@ pub async fn check_continuity_for_series(app: AppCtx, request: SeriesContinuityR
             Ok(b) => b,
             Err(e) => { emit(&app, &format!("  ⚠ Skipping {}: {}", meta.story_name, e)); continue; }
         };
-        let _ = db::replace_continuity_facts(&database.0, &meta.story_id, &flatten_facts(&book)).await;
+        let _ = db::replace_continuity_facts(&database.pool, &meta.story_id, &flatten_facts(&book)).await;
         books.push(book);
         if crate::is_cancelled() { emit(&app, "⚠ Cancelled."); return err("Cancelled."); }
     }
@@ -167,10 +167,10 @@ pub async fn check_continuity_for_series(app: AppCtx, request: SeriesContinuityR
 
     let scope_key = format!("series:{}", request.series_id);
     let run_ts = chrono::Utc::now().to_rfc3339();
-    let _ = db::replace_continuity_findings(&database.0, "series", &scope_key, &findings).await;
+    let _ = db::replace_continuity_findings(&database.pool, "series", &scope_key, &findings).await;
 
     let content = render_findings_json(&findings, "series", &scope_key);
-    let _ = db::save_document_at(&database.0, &scope_key, "continuity_check", &content, &run_ts).await;
+    let _ = db::save_document_at(&database.pool, &scope_key, "continuity_check", &content, &run_ts).await;
     emit(&app, "✓ Series continuity check saved to database.");
 
     GenreResult { success: true, report: content, error: String::new(), run_ts }
@@ -210,7 +210,7 @@ async fn extract_book_facts(
             extract_title(raw).unwrap_or_else(|| fname.clone())
         };
 
-        let facts = match extract_facts_for_chapter(db, provider, api_key, model, &fname, &truncate_words(raw, 6000), bible).await {
+        let facts = match extract_facts_for_chapter(app, story_id, provider, api_key, model, &fname, &truncate_words(raw, 6000), bible).await {
             Ok(f) => f,
             Err(e) => { emit(app, &format!("    ⚠ {}: {}", fname, e)); Vec::new() }
         };
@@ -225,7 +225,8 @@ async fn extract_book_facts(
 }
 
 async fn extract_facts_for_chapter(
-    db: &crate::db::Db,
+    app: &AppCtx,
+    story_id: &str,
     provider: &str,
     api_key: &str,
     model: &str,
@@ -240,7 +241,16 @@ async fn extract_facts_for_chapter(
     vars.insert("chapter_text", content);
     vars.insert("bible", bible);
 
-    let raw = crate::prompts::execute_prompt(db, "continuity_extract", provider, api_key, model, vars).await?;
+    let raw = crate::prompts::execute_prompt(
+        app,
+        "continuity_extract",
+        provider,
+        api_key,
+        model,
+        vars,
+        Some(story_id),
+    )
+    .await?;
 
     let clean = raw.trim()
         .trim_start_matches("```json").trim_start_matches("```")
@@ -286,7 +296,7 @@ fn flatten_facts(book: &Book) -> Vec<db::ContinuityFactRow> {
 // ── Entity name clustering (no AI — plain heuristic coreference) ───────────
 
 async fn load_honorifics(db: &crate::db::Db) -> Vec<String> {
-    let list = crate::db::load_lookup_string_list(&db.0, "continuity.honorifics").await;
+    let list = crate::db::load_lookup_string_list(&db.pool, "continuity.honorifics").await;
     if list.is_empty() { default_honorifics() } else { list }
 }
 
@@ -455,9 +465,10 @@ async fn judge_contradictions(
 
     let mut findings = Vec::new();
     const CHUNK: usize = 15;
+    let story_id_for_usage = books.first().map(|b| b.story_id.as_str());
     for (chunk_idx, chunk) in candidates.chunks(CHUNK).enumerate() {
         emit(app, &format!("  Judging batch {}/{}...", chunk_idx + 1, candidates.len().div_ceil(CHUNK)));
-        match judge_batch(database, provider, api_key, model, chunk, bible).await {
+        match judge_batch(app, story_id_for_usage, provider, api_key, model, chunk, bible).await {
             Ok(verdicts) => {
                 for v in verdicts {
                     if v.id >= chunk.len() { continue; }
@@ -486,7 +497,8 @@ async fn judge_contradictions(
 }
 
 async fn judge_batch(
-    database: &crate::db::Db,
+    app: &AppCtx,
+    story_id: Option<&str>,
     provider: &str,
     api_key: &str,
     model: &str,
@@ -513,7 +525,16 @@ async fn judge_batch(
     vars.insert("bible", bible);
     vars.insert("candidates", candidates_json.as_str());
 
-    let raw = crate::prompts::execute_prompt(database, "continuity_judge", provider, api_key, model, vars).await?;
+    let raw = crate::prompts::execute_prompt(
+        app,
+        "continuity_judge",
+        provider,
+        api_key,
+        model,
+        vars,
+        story_id,
+    )
+    .await?;
     let clean = raw.trim()
         .trim_start_matches("```json").trim_start_matches("```")
         .trim_end_matches("```").trim();
@@ -627,8 +648,15 @@ pub async fn suggest_continuity_fix(app: AppCtx, request: SuggestFixRequest) -> 
     vars.insert("bible", bible.as_str());
 
     match crate::prompts::execute_prompt(
-        &database, "continuity_suggest", &request.provider, &request.api_key, &request.model, vars,
-    ).await {
+        &app,
+        "continuity_suggest",
+        &request.provider,
+        &request.api_key,
+        &request.model,
+        vars,
+        None,
+    )
+    .await {
         Ok(suggestions) => SuggestFixResult { success: true, suggestions, error: String::new() },
         Err(e) => SuggestFixResult { success: false, suggestions: String::new(), error: e },
     }

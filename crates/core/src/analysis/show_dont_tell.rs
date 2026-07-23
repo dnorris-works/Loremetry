@@ -90,7 +90,7 @@ async fn check_inner(app: AppCtx, request: ShowDontTellRequest) -> GenreResult {
 
         // Use preprocessed text (cached by document updated_at)
         let processed = match crate::prompts::get_preprocessed(
-            &database.0, &request.story_id, &filename, "sdt_check", &chapter.updated_at,
+            &database.pool, &request.story_id, &filename, "sdt_check", &chapter.updated_at,
         )
         .await
         {
@@ -98,7 +98,7 @@ async fn check_inner(app: AppCtx, request: ShowDontTellRequest) -> GenreResult {
             None => {
                 let p = crate::prompts::preprocess_for_sdt(content);
                 let _ = crate::prompts::store_preprocessed(
-                    &database.0, &request.story_id, &filename, "sdt_check", &p, &chapter.updated_at,
+                    &database.pool, &request.story_id, &filename, "sdt_check", &p, &chapter.updated_at,
                 )
                 .await;
                 p
@@ -108,7 +108,7 @@ async fn check_inner(app: AppCtx, request: ShowDontTellRequest) -> GenreResult {
         emit(&app, &format!("[{}/{}] {} — checking...", i + 1, chapters.len(), filename));
 
         let violations = match extract_violations(
-            &database, &request.provider, &request.api_key, &request.model,
+            &app, &request.story_id, &request.provider, &request.api_key, &request.model,
             &filename, &processed, &bible,
         ).await {
             Ok(v) => v,
@@ -153,7 +153,7 @@ async fn check_inner(app: AppCtx, request: ShowDontTellRequest) -> GenreResult {
         "chapters": all_findings,
     }).to_string();
 
-    let _ = db::save_document_at(&database.0, &request.story_id, "show_dont_tell", &report, &run_ts).await;
+    let _ = db::save_document_at(&database.pool, &request.story_id, "show_dont_tell", &report, &run_ts).await;
 
     GenreResult { success: true, report: String::new(), error: String::new(), run_ts }
 }
@@ -161,7 +161,8 @@ async fn check_inner(app: AppCtx, request: ShowDontTellRequest) -> GenreResult {
 // ── AI extraction ────────────────────────────────────────────────────────────
 
 async fn extract_violations(
-    db: &db::Db,
+    app: &AppCtx,
+    story_id: &str,
     provider: &str, api_key: &str, model: &str,
     filename: &str, content: &str, bible: &str,
 ) -> Result<Vec<AiViolation>, String> {
@@ -173,7 +174,16 @@ async fn extract_violations(
     vars.insert("chapter_text", content);
     vars.insert("bible", bible);
 
-    let raw = prompts::execute_prompt(db, "sdt_check", provider, api_key, model, vars).await?;
+    let raw = prompts::execute_prompt(
+        app,
+        "sdt_check",
+        provider,
+        api_key,
+        model,
+        vars,
+        Some(story_id),
+    )
+    .await?;
 
     let clean = raw.trim()
         .trim_start_matches("```json").trim_start_matches("```")
@@ -268,8 +278,15 @@ pub async fn suggest_sdt_fix(app: AppCtx, request: SuggestSdtFixRequest) -> Sugg
     vars.insert("bible", bible.as_str());
 
     match crate::prompts::execute_prompt(
-        &database, "sdt_suggest", &request.provider, &request.api_key, &request.model, vars,
-    ).await {
+        &app,
+        "sdt_suggest",
+        &request.provider,
+        &request.api_key,
+        &request.model,
+        vars,
+        Some(&request.story_id),
+    )
+    .await {
         Ok(suggestions) => SuggestSdtFixResult { success: true, suggestions, error: String::new() },
         Err(e) => SuggestSdtFixResult { success: false, suggestions: String::new(), error: e },
     }

@@ -13,7 +13,7 @@ use loremetry_core::db;
 use loremetry_core::documents::{self, UpsertDocumentRequest};
 use loremetry_core::series::{self, CreateSeriesRequest, UpdateSeriesRequest};
 use loremetry_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
-use loremetry_core::{cancel_operation, Config};
+use loremetry_core::cancel_operation;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -31,7 +31,8 @@ pub async fn invoke_handler(
     State(state): State<AppState>,
     Json(body): Json<InvokeBody>,
 ) -> impl IntoResponse {
-    let args = normalize_args(body.args);
+    let mut args = normalize_args(body.args);
+    inject_platform_credentials(&state, &mut args).await;
     match dispatch(&state, &body.cmd, args).await {
         Ok(v) => ok_json(v),
         Err(e) => json_error(e),
@@ -39,7 +40,6 @@ pub async fn invoke_handler(
 }
 
 async fn dispatch(state: &AppState, cmd: &str, mut args: Value) -> Result<Value, String> {
-    fill_api_keys(state.config.as_ref(), &mut args);
     let app = state.ctx.clone();
     let db = app.db.clone();
 
@@ -173,19 +173,15 @@ async fn dispatch(state: &AppState, cmd: &str, mut args: Value) -> Result<Value,
         // ── Settings / external APIs ─────────────────────────────────────────
         "list_models" => {
             let provider = take_string(&args, &["provider"])?;
-            let api_key = take_string(&args, &["api_key"]).unwrap_or_default();
-            let api_key = state.config.resolve_api_key(&provider, &api_key);
+            let api_key = state.secrets.resolve_api_key(&provider).await;
             to_val(commands::list_models(&db, provider, api_key).await?)
         }
         "test_canopy_connection" => {
-            let key = take_string(&args, &["api_key", "canopy_api_key"]).unwrap_or_default();
-            let key = state.config.resolve_canopy_key(&key);
+            let key = state.secrets.canopy_key().await;
             to_val(canopy::test_canopy_connection(key).await)
         }
         "test_dataforseo_connection" => {
-            let login = take_string(&args, &["login"]).unwrap_or_default();
-            let password = take_string(&args, &["password"]).unwrap_or_default();
-            let (login, password) = state.config.resolve_dataforseo(&login, &password);
+            let (login, password) = state.secrets.dataforseo().await;
             to_val(dataforseo::test_dataforseo_connection(login, password).await)
         }
         "import_winningcat_csv" | "remove_stale_kdp_categories" => {
@@ -206,11 +202,8 @@ async fn dispatch(state: &AppState, cmd: &str, mut args: Value) -> Result<Value,
 
         // ── Chat / costs ─────────────────────────────────────────────────────
         "chat_with_context" => {
-            let mut request: ChatRequest = take_request(&args)?;
-            request.api_key = state
-                .config
-                .resolve_api_key(&request.provider, &request.api_key);
-            match commands::chat_with_context(&db, request).await {
+            let request: ChatRequest = take_request(&args)?;
+            match commands::chat_with_context(&app, request).await {
                 Ok(r) => to_val(r),
                 Err(_) => Err("Chat failed.".into()),
             }
@@ -272,7 +265,7 @@ async fn create_story_document(state: &AppState, args: &Value) -> Result<Value, 
         id: None,
     };
 
-    let doc = documents::upsert_document(&state.ctx.db.0, &upsert).await?;
+    let doc = documents::upsert_document(&state.ctx.db.pool, &upsert).await?;
     Ok(json!({
         "path": format!("doc:{}", doc.id),
         "title": doc.title,
@@ -282,7 +275,7 @@ async fn create_story_document(state: &AppState, args: &Value) -> Result<Value, 
 async fn delete_story_document(state: &AppState, args: &Value) -> Result<Value, String> {
     let story_id = take_string(args, &["story_folder", "story_id", "folder"])?;
     let doc_id = take_doc_id(args, &["file_path", "doc_id", "id", "path"])?;
-    documents::delete_document(&state.ctx.db.0, &story_id, doc_id).await?;
+    documents::delete_document(&state.ctx.db.pool, &story_id, doc_id).await?;
     Ok(json!(null))
 }
 
@@ -429,67 +422,78 @@ fn camel_to_snake(s: &str) -> String {
     out
 }
 
-/// Fill empty api_key / canopy / dataforseo fields from Config.
-fn fill_api_keys(config: &Config, args: &mut Value) {
-    fill_keys_in_obj(config, args);
+/// Inject platform credentials from server storage; ignore any client-supplied secrets.
+pub async fn inject_platform_credentials(state: &AppState, args: &mut Value) {
+    strip_client_secrets(args);
     if let Some(req) = args.get_mut("request") {
-        fill_keys_in_obj(config, req);
+        strip_client_secrets(req);
+    }
+    let default_provider = state.secrets.default_provider().await;
+    fill_keys_from_secrets(&state.secrets, &default_provider, args).await;
+    if let Some(req) = args.get_mut("request") {
+        fill_keys_from_secrets(&state.secrets, &default_provider, req).await;
     }
 }
 
-fn fill_keys_in_obj(config: &Config, obj: &mut Value) {
+fn strip_client_secrets(obj: &mut Value) {
+    let Some(map) = obj.as_object_mut() else {
+        return;
+    };
+    for key in [
+        "api_key",
+        "apiKey",
+        "canopy_api_key",
+        "canopyApiKey",
+        "dataforseo_login",
+        "dataforseoLogin",
+        "dataforseo_password",
+        "dataforseoPassword",
+    ] {
+        map.remove(key);
+    }
+}
+
+async fn fill_keys_from_secrets(
+    secrets: &loremetry_core::platform_secrets::PlatformSecrets,
+    default_provider: &str,
+    obj: &mut Value,
+) {
     let Some(map) = obj.as_object_mut() else {
         return;
     };
     let provider = map
         .get("provider")
         .and_then(|v| v.as_str())
-        .unwrap_or(&config.default_provider)
+        .unwrap_or(default_provider)
         .to_string();
 
-    let needs_api = map.contains_key("api_key")
+    let story_scoped = map.contains_key("folder")
+        || map.contains_key("story_id")
+        || map.get("story_id").is_some();
+    let needs_llm = map.contains_key("model")
         || map.contains_key("provider")
-        || map.contains_key("model");
-    if needs_api {
-        let current = map
-            .get("api_key")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if current.trim().is_empty() {
-            map.insert(
-                "api_key".into(),
-                Value::String(config.resolve_api_key(&provider, "")),
-            );
-        }
+        || map.contains_key("selected")
+        || map.contains_key("force_resummarize")
+        || map.contains_key("message")
+        || map.contains_key("chapter_text");
+
+    if needs_llm || story_scoped {
+        map.insert(
+            "api_key".into(),
+            Value::String(secrets.resolve_api_key(&provider).await),
+        );
     }
 
-    if map.contains_key("canopy_api_key") {
-        let current = map
-            .get("canopy_api_key")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if current.trim().is_empty() {
-            map.insert(
-                "canopy_api_key".into(),
-                Value::String(config.resolve_canopy_key("")),
-            );
-        }
+    if story_scoped || map.contains_key("canopy_api_key") {
+        map.insert(
+            "canopy_api_key".into(),
+            Value::String(secrets.canopy_key().await),
+        );
     }
 
-    if map.contains_key("dataforseo_login") || map.contains_key("dataforseo_password") {
-        let login = map
-            .get("dataforseo_login")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let password = map
-            .get("dataforseo_password")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let (l, p) = config.resolve_dataforseo(&login, &password);
+    if story_scoped || map.contains_key("dataforseo_login") || map.contains_key("dataforseo_password")
+    {
+        let (l, p) = secrets.dataforseo().await;
         map.insert("dataforseo_login".into(), Value::String(l));
         map.insert("dataforseo_password".into(), Value::String(p));
     }

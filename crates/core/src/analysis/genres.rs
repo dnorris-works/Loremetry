@@ -37,7 +37,7 @@ pub struct RankedGenre {
 pub async fn rank_genres_for_story(app: AppCtx, request: FolderRequest) -> GenreResult {
     let database = app.db.as_ref();
 
-    let genre_data = db::load_genre_data(&database.0, &request.story_id).await;
+    let genre_data = db::load_genre_data(&database.pool, &request.story_id).await;
     let genre_data = match genre_data {
         Some(d) => d,
         None    => return err("No genre data found. Run Analyze first."),
@@ -55,7 +55,16 @@ pub async fn rank_genres_for_story(app: AppCtx, request: FolderRequest) -> Genre
     };
     emit(&app, &format!("  Scoring against {} known genres.", master_list.len()));
 
-    match ai_rank_genres(&database, &request.provider, &request.api_key, &request.model, &description, &master_list).await {
+    match ai_rank_genres(
+        &app,
+        &request.story_id,
+        &request.provider,
+        &request.api_key,
+        &request.model,
+        &description,
+        &master_list,
+    )
+    .await {
         Err(e) => err(&e),
         Ok(ai_ranked) => {
             let mut ranked: Vec<RankedGenre> = Vec::new();
@@ -100,10 +109,10 @@ pub async fn rank_genres_for_story(app: AppCtx, request: FolderRequest) -> Genre
             let rows: Vec<(String, u8, String)> = ranked.iter()
                 .map(|r| (r.genre.clone(), r.confidence, r.reason.clone()))
                 .collect();
-            if let Err(e) = db::replace_genre_rankings(&database.0, &request.story_id, &rows).await {
+            if let Err(e) = db::replace_genre_rankings(&database.pool, &request.story_id, &rows).await {
                 emit(&app, &format!("  \u{26a0} Could not save ranking to database: {}", e));
             }
-            let _ = db::save_document(&database.0, &request.story_id, "genre_ranking", &report).await;
+            let _ = db::save_document(&database.pool, &request.story_id, "genre_ranking", &report).await;
             emit(&app, &format!("\u{2713} Ranking saved to database \u{2014} {} genre(s) ranked.", ranked.len()));
 
             GenreResult { success: true, report, error: String::new(), run_ts: String::new() }
@@ -117,7 +126,7 @@ pub async fn analyze_genre(app: AppCtx, request: FolderRequest) -> GenreResult {
     }
 
     let database = app.db.as_ref();
-    let mut summaries = db::load_chapter_summaries(&database.0, &request.story_id).await;
+    let mut summaries = db::load_chapter_summaries(&database.pool, &request.story_id).await;
 
     if summaries.is_empty() {
         emit(&app, "No summaries found \u{2014} running Phase 1 first...");
@@ -127,7 +136,7 @@ pub async fn analyze_genre(app: AppCtx, request: FolderRequest) -> GenreResult {
         };
         if chapters.is_empty() { return err("No chapter documents found. Upload manuscript chapters first."); }
         phase1_summaries(&app, &database, &chapters, &request.story_id, &request.provider, &request.api_key, &request.model).await;
-        summaries = db::load_chapter_summaries(&database.0, &request.story_id).await;
+        summaries = db::load_chapter_summaries(&database.pool, &request.story_id).await;
     }
 
     if summaries.is_empty() { return err("Could not produce any chapter summaries."); }
@@ -154,11 +163,11 @@ pub(crate) async fn phase2_analyze(
         summaries.len(), combined.len(), model
     ));
 
-    match call_ai_genre_analysis(database, provider, api_key, model, &combined).await {
+    match call_ai_genre_analysis(app, story_id, provider, api_key, model, &combined).await {
         Err(e) => err(&format!("Phase 2 AI error: {}", e)),
         Ok(g) => {
             let _ = db::save_genre_data(
-                &database.0, story_id,
+                &database.pool, story_id,
                 &g.industry_ebook, &g.industry_print, &g.genre_signals,
                 &g.reader_demographic, &g.bookstore_shelving,
                 &g.kdp_ebook, &g.kdp_print, &g.comps_ebook, &g.comps_print, &g.marketing_notes,
@@ -166,7 +175,7 @@ pub(crate) async fn phase2_analyze(
             .await;
             emit(app, "  \u{2713} Genre data saved to database.");
             let rendered = render_genre_analysis_md(&g);
-            let _ = db::save_document(&database.0, story_id, "genre_analysis", &rendered).await;
+            let _ = db::save_document(&database.pool, story_id, "genre_analysis", &rendered).await;
             GenreResult { success: true, report: rendered, error: String::new(), run_ts: String::new() }
         }
     }
@@ -175,7 +184,8 @@ pub(crate) async fn phase2_analyze(
 // ── AI calls ─────────────────────────────────────────────────────────────────
 
 pub(crate) async fn ai_rank_genres(
-    database: &db::Db,
+    app: &AppCtx,
+    story_id: &str,
     provider: &str,
     api_key: &str,
     model: &str,
@@ -191,7 +201,16 @@ pub(crate) async fn ai_rank_genres(
     vars.insert("genre_list", genre_list.as_str());
     vars.insert("description", description);
 
-    let raw = prompts::execute_prompt(database, "genre_ranking", provider, api_key, model, vars).await?;
+    let raw = prompts::execute_prompt(
+        app,
+        "genre_ranking",
+        provider,
+        api_key,
+        model,
+        vars,
+        Some(story_id),
+    )
+    .await?;
     let clean = raw.trim()
         .trim_start_matches("```json").trim_start_matches("```")
         .trim_end_matches("```").trim();
@@ -201,7 +220,8 @@ pub(crate) async fn ai_rank_genres(
 }
 
 pub(crate) async fn call_ai_genre_analysis(
-    database: &db::Db,
+    app: &AppCtx,
+    story_id: &str,
     provider: &str,
     api_key: &str,
     model: &str,
@@ -210,7 +230,16 @@ pub(crate) async fn call_ai_genre_analysis(
     let mut vars = HashMap::new();
     vars.insert("combined", combined);
 
-    let raw = prompts::execute_prompt(database, "genre_analysis", provider, api_key, model, vars).await?;
+    let raw = prompts::execute_prompt(
+        app,
+        "genre_analysis",
+        provider,
+        api_key,
+        model,
+        vars,
+        Some(story_id),
+    )
+    .await?;
 
     let clean = extract_json_object(&raw)
         .ok_or_else(|| format!("No JSON object found: {}", &raw[..raw.len().min(200)]))?;

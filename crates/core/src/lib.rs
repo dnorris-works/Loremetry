@@ -12,9 +12,12 @@ pub mod db;
 pub mod documents;
 pub mod genre_taxonomy;
 pub mod models;
+pub mod platform_secrets;
 pub mod prompts;
+pub mod secrets;
 pub mod series;
 pub mod stories;
+pub mod usage;
 pub mod winningcat;
 
 pub use app_ctx::{AppCtx, LogEvent};

@@ -58,7 +58,6 @@ async function onSend(): Promise<void> {
     const result = await invoke<{ success: boolean; reply: string; error: string }>('chat_with_context', {
       request: {
         provider: settings.provider.value,
-        api_key: settings.apiKey.value,
         model: chatModel.value,
         message: messageForAi,
         chapter_text: props.chapterText,

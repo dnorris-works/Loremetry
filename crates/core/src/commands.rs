@@ -7,6 +7,22 @@ use serde_json::{json, Value};
 
 use crate::app_ctx::AppCtx;
 use crate::documents;
+use crate::usage::LlmUsage;
+
+#[derive(Debug, Clone, Default)]
+pub struct LlmResult {
+    pub text: String,
+    pub usage: LlmUsage,
+}
+
+impl LlmResult {
+    fn from_text(text: String) -> Self {
+        Self {
+            text,
+            usage: LlmUsage::default(),
+        }
+    }
+}
 
 // ── Shared result types ───────────────────────────────────────────────────────
 
@@ -53,7 +69,16 @@ pub async fn analyze_csv(
     vars.insert("keyword", request.keyword.as_str());
     vars.insert("csv_content", request.csv_content.as_str());
 
-    match crate::prompts::execute_prompt(database, "csv_competition_analysis", &request.provider, &request.api_key, &request.model, vars).await {
+    match crate::prompts::execute_prompt(
+        &app,
+        "csv_competition_analysis",
+        &request.provider,
+        &request.api_key,
+        &request.model,
+        vars,
+        None,
+    )
+    .await {
         Ok(markdown) => {
             let _ = app.emit("cdp:log", "✓ CSV analysis complete.");
             AnalyzerResult { success: true, markdown, error: String::new(), rows: Vec::new() }
@@ -73,7 +98,7 @@ pub async fn call_llm(
     system: &str,
     user: &str,
     max_tokens: u32,
-) -> Result<String, String> {
+) -> Result<LlmResult, String> {
     match provider {
         "tokenmix" => call_tokenmix(api_key, model, system, user, max_tokens, false).await,
         _ => call_claude(api_key, model, system, user, max_tokens).await,
@@ -88,7 +113,7 @@ pub async fn call_llm_json(
     system: &str,
     user: &str,
     max_tokens: u32,
-) -> Result<String, String> {
+) -> Result<LlmResult, String> {
     match provider {
         "tokenmix" => call_tokenmix(api_key, model, system, user, max_tokens, true).await,
         _ => call_claude(api_key, model, system, user, max_tokens).await,
@@ -101,7 +126,7 @@ async fn call_claude(
     system: &str,
     user: &str,
     max_tokens: u32,
-) -> Result<String, String> {
+) -> Result<LlmResult, String> {
     let body = json!({
         "model": model,
         "max_tokens": max_tokens,
@@ -132,10 +157,26 @@ async fn call_claude(
         return Err(format!("Claude API error: {}", err["message"].as_str().unwrap_or("unknown")));
     }
 
-    json["content"][0]["text"]
+    let text = json["content"][0]["text"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or_else(|| "Claude: empty response".to_string())
+        .ok_or_else(|| "Claude: empty response".to_string())?;
+
+    let usage = json.get("usage");
+    let input_tokens = usage
+        .and_then(|u| u["input_tokens"].as_u64())
+        .unwrap_or(0) as u32;
+    let output_tokens = usage
+        .and_then(|u| u["output_tokens"].as_u64())
+        .unwrap_or(0) as u32;
+
+    Ok(LlmResult {
+        text,
+        usage: LlmUsage {
+            input_tokens,
+            output_tokens,
+        },
+    })
 }
 
 async fn call_tokenmix(
@@ -145,7 +186,7 @@ async fn call_tokenmix(
     user: &str,
     max_tokens: u32,
     json_mode: bool,
-) -> Result<String, String> {
+) -> Result<LlmResult, String> {
     let mut body = json!({
         "model": model,
         "max_tokens": max_tokens,
@@ -184,10 +225,26 @@ async fn call_tokenmix(
         return Err(format!("TokenMix error: {}", msg));
     }
 
-    json["choices"][0]["message"]["content"]
+    let text = json["choices"][0]["message"]["content"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or_else(|| "TokenMix: empty response".to_string())
+        .ok_or_else(|| "TokenMix: empty response".to_string())?;
+
+    let usage = json.get("usage");
+    let input_tokens = usage
+        .and_then(|u| u["prompt_tokens"].as_u64())
+        .unwrap_or(0) as u32;
+    let output_tokens = usage
+        .and_then(|u| u["completion_tokens"].as_u64())
+        .unwrap_or(0) as u32;
+
+    Ok(LlmResult {
+        text,
+        usage: LlmUsage {
+            input_tokens,
+            output_tokens,
+        },
+    })
 }
 
 // ── List models (async) ───────────────────────────────────────────────────────
@@ -345,7 +402,7 @@ async fn fetch_tokenmix_models_legacy(client: &reqwest::Client, api_key: &str) -
 }
 
 async fn fetch_claude_models(db: &crate::db::Db) -> ModelsResult {
-    let models = crate::db::list_provider_models(&db.0, "claude")
+    let models = crate::db::list_provider_models(&db.pool, "claude")
         .await
         .into_iter()
         .map(|m| ModelInfo {
@@ -369,7 +426,7 @@ async fn fetch_claude_models(db: &crate::db::Db) -> ModelsResult {
 
 /// Read a chapter document by id. Returns the full text content.
 pub async fn read_chapter(app: AppCtx, doc_id: i64) -> Result<String, String> {
-    let doc = documents::get_document(&app.db.0, doc_id)
+    let doc = documents::get_document(&app.db.pool, doc_id)
         .await?
         .ok_or_else(|| format!("Document {} not found", doc_id))?;
     Ok(doc.content)
@@ -377,7 +434,7 @@ pub async fn read_chapter(app: AppCtx, doc_id: i64) -> Result<String, String> {
 
 /// Save a chapter document (full overwrite). Used by the editor's auto-save.
 pub async fn save_chapter(app: AppCtx, doc_id: i64, content: String) -> Result<(), String> {
-    let doc = documents::get_document(&app.db.0, doc_id)
+    let doc = documents::get_document(&app.db.pool, doc_id)
         .await?
         .ok_or_else(|| format!("Document {} not found", doc_id))?;
     let req = documents::UpsertDocumentRequest {
@@ -388,7 +445,7 @@ pub async fn save_chapter(app: AppCtx, doc_id: i64, content: String) -> Result<(
         content,
         id: Some(doc_id),
     };
-    documents::upsert_document(&app.db.0, &req).await?;
+    documents::upsert_document(&app.db.pool, &req).await?;
     Ok(())
 }
 
@@ -401,7 +458,7 @@ pub async fn write_manuscript_fix(
     old_text: String,
     new_text: String,
 ) -> Result<String, String> {
-    let doc = documents::write_document_fix(&app.db.0, doc_id, &old_text, &new_text).await?;
+    let doc = documents::write_document_fix(&app.db.pool, doc_id, &old_text, &new_text).await?;
     Ok(doc.content)
 }
 
@@ -529,7 +586,7 @@ pub async fn estimate_report_costs(
 
     let mut cost_params = std::collections::HashMap::new();
     for rp in &request.model_prices {
-        let p = crate::db::load_report_cost_params(&app.db.0, &rp.report_id).await;
+        let p = crate::db::load_report_cost_params(&app.db.pool, &rp.report_id).await;
         cost_params.insert(rp.report_id.clone(), p);
     }
 
@@ -599,6 +656,7 @@ pub struct ChatMessage {
 #[derive(Deserialize)]
 pub struct ChatRequest {
     pub provider:       String,
+    #[serde(default)]
     pub api_key:        String,
     pub model:          String,
     pub message:        String,
@@ -618,14 +676,25 @@ pub struct ChatResponse {
 /// Contextual AI chat for the Writing panel.
 /// Sends the user's message with the current chapter and bible as context.
 pub async fn chat_with_context(
-    db: &crate::db::Db,
+    app: &AppCtx,
     request: ChatRequest,
 ) -> Result<ChatResponse, ()> {
-    if request.api_key.is_empty() || request.model.is_empty() {
-        return Ok(ChatResponse { success: false, reply: String::new(), error: "Set an API key and model in Settings.".to_string() });
+    if request.api_key.is_empty() {
+        return Ok(ChatResponse {
+            success: false,
+            reply: String::new(),
+            error: "Platform API keys not configured (Admin).".to_string(),
+        });
+    }
+    if request.model.is_empty() {
+        return Ok(ChatResponse {
+            success: false,
+            reply: String::new(),
+            error: "No model selected. Go to Settings.".to_string(),
+        });
     }
 
-    let template = match crate::prompts::load_template(&db.0, "writing_chat").await {
+    let template = match crate::prompts::load_template(&app.db.pool, "writing_chat").await {
         Ok(t) => t,
         Err(e) => return Ok(ChatResponse { success: false, reply: String::new(), error: e }),
     };
@@ -710,6 +779,27 @@ pub async fn chat_with_context(
         }
 
         let reply = json["content"][0]["text"].as_str().unwrap_or("").to_string();
+        let usage = json.get("usage");
+        let input_tokens = usage
+            .and_then(|u| u["input_tokens"].as_u64())
+            .unwrap_or(0) as u32;
+        let output_tokens = usage
+            .and_then(|u| u["output_tokens"].as_u64())
+            .unwrap_or(0) as u32;
+        let _ = app
+            .usage
+            .record_llm(
+                app.user_id(),
+                &request.provider,
+                &request.model,
+                "writing_chat",
+                None,
+                LlmUsage {
+                    input_tokens,
+                    output_tokens,
+                },
+            )
+            .await;
         return Ok(ChatResponse { success: true, reply, error: String::new() });
     }
 
@@ -734,5 +824,26 @@ pub async fn chat_with_context(
     }
 
     let reply = json["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string();
+    let usage = json.get("usage");
+    let input_tokens = usage
+        .and_then(|u| u["prompt_tokens"].as_u64())
+        .unwrap_or(0) as u32;
+    let output_tokens = usage
+        .and_then(|u| u["completion_tokens"].as_u64())
+        .unwrap_or(0) as u32;
+    let _ = app
+        .usage
+        .record_llm(
+            app.user_id(),
+            &request.provider,
+            &request.model,
+            "writing_chat",
+            None,
+            LlmUsage {
+                input_tokens,
+                output_tokens,
+            },
+        )
+        .await;
     Ok(ChatResponse { success: true, reply, error: String::new() })
 }

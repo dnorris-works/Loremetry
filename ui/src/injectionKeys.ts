@@ -65,20 +65,14 @@ export interface SettingsContext {
   theme: Ref<ThemeMode>;
   setTheme: (mode: ThemeMode) => void;
   provider: Ref<string>;
-  apiKey: Ref<string>;
   model: ComputedRef<string>;
   proseModel: ComputedRef<string>;
   modelAssignments: Ref<ModelAssignments>;
   modelFor: (fn: keyof ModelAssignments) => string;
-  canopyApiKey: Ref<string>;
-  dataforseoLogin: Ref<string>;
-  dataforseoPassword: Ref<string>;
   models: Ref<ModelInfo[]>;
   folderStructure: Ref<FolderStructure>;
   fetchModels: () => Promise<{ success: boolean; error: string }>;
   saveSettings: () => Promise<void>;
-  testCanopy: () => Promise<{ success: boolean; error: string }>;
-  testDataforseo: () => Promise<{ success: boolean; error: string }>;
 }
 
 export const settingsKey: InjectionKey<SettingsContext> = Symbol('settings');

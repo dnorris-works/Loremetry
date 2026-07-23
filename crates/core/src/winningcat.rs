@@ -45,7 +45,7 @@ pub async fn import_winningcat_csv(app: AppCtx, csv_text: String) -> ImportResul
     // retired/renamed the category), not something to silently ignore.
     let import_started_at = chrono::Utc::now().to_rfc3339();
 
-    let pool = &app.db.0;
+    let pool = &app.db.pool;
 
     let mut imported = 0usize;
     let mut skipped_dept = 0usize;
@@ -116,7 +116,7 @@ pub struct StaleCleanupResult {
 /// category disappearing from one file could be a CSV quirk, not a real
 /// Amazon retirement.
 pub async fn remove_stale_kdp_categories(app: AppCtx, since: String) -> StaleCleanupResult {
-    match db::remove_stale_winningcat_paths(&app.db.0, &since).await {
+    match db::remove_stale_winningcat_paths(&app.db.pool, &since).await {
         Ok(removed) => StaleCleanupResult { success: true, removed, error: String::new() },
         Err(e) => StaleCleanupResult { success: false, removed: 0, error: e },
     }

@@ -62,7 +62,7 @@ pub(crate) async fn phase1_summaries(
     for (i, chapter) in chapters.iter().enumerate() {
         let fname = documents::chapter_display_name(chapter);
 
-        let already_done = db::chapter_summary_exists(&database.0, story_id, &fname).await;
+        let already_done = db::chapter_summary_exists(&database.pool, story_id, &fname).await;
         if already_done {
             emit(
                 app,
@@ -87,7 +87,7 @@ pub(crate) async fn phase1_summaries(
         emit(app, &format!("    {} words", word_count));
 
         match summarize_chapter(
-            database,
+            app,
             provider,
             api_key,
             model,
@@ -104,7 +104,7 @@ pub(crate) async fn phase1_summaries(
                     extract_title(content).unwrap_or_else(|| fname.clone())
                 };
                 let _ = db::save_chapter_summary(
-                    &database.0,
+                    &database.pool,
                     story_id,
                     &fname,
                     &title,
@@ -135,7 +135,7 @@ pub(crate) async fn phase1_summaries(
 }
 
 pub(crate) async fn summarize_chapter(
-    db: &db::Db,
+    app: &AppCtx,
     provider: &str,
     api_key: &str,
     model: &str,
@@ -143,7 +143,7 @@ pub(crate) async fn summarize_chapter(
     filename: &str,
     content: &str,
 ) -> Result<String, String> {
-    let bible = documents::load_bible_text(&db.0, story_id).await;
+    let bible = documents::load_bible_text(&app.db.pool, story_id).await;
     let title = extract_title(content).unwrap_or_else(|| filename.to_string());
 
     let mut vars = HashMap::new();
@@ -151,7 +151,16 @@ pub(crate) async fn summarize_chapter(
     vars.insert("chapter_text", content);
     vars.insert("bible", bible.as_str());
 
-    prompts::execute_prompt(db, "chapter_summary", provider, api_key, model, vars).await
+    prompts::execute_prompt(
+        app,
+        "chapter_summary",
+        provider,
+        api_key,
+        model,
+        vars,
+        Some(story_id),
+    )
+    .await
 }
 
 pub(crate) fn truncate_words(text: &str, max_words: usize) -> String {

@@ -50,7 +50,7 @@ pub struct SeriesBookInput {
 }
 
 pub async fn list_series(app: AppCtx) -> SeriesResult {
-    let pool = &app.db.0;
+    let pool = &app.db.pool;
     let series_rows: Vec<(i64, String, String, String)> = match sqlx::query_as(
         r#"SELECT id, name, created_at, COALESCE(bible_path, '') FROM "series" ORDER BY name"#,
     )
@@ -87,7 +87,7 @@ pub async fn list_series(app: AppCtx) -> SeriesResult {
 }
 
 pub async fn create_series(app: AppCtx, request: CreateSeriesRequest) -> SeriesResult {
-    let pool = &app.db.0;
+    let pool = &app.db.pool;
     let name = request.name.trim();
     if name.is_empty() {
         return SeriesResult {
@@ -128,7 +128,7 @@ pub async fn create_series(app: AppCtx, request: CreateSeriesRequest) -> SeriesR
 }
 
 pub async fn update_series(app: AppCtx, request: UpdateSeriesRequest) -> SeriesResult {
-    let pool = &app.db.0;
+    let pool = &app.db.pool;
     let name = request.name.trim();
     if name.is_empty() {
         return SeriesResult {
@@ -166,7 +166,7 @@ pub async fn update_series(app: AppCtx, request: UpdateSeriesRequest) -> SeriesR
 }
 
 pub async fn delete_series(app: AppCtx, id: i64) -> SeriesResult {
-    let pool = &app.db.0;
+    let pool = &app.db.pool;
     let _ = sqlx::query("DELETE FROM series_books WHERE series_id = $1")
         .bind(id)
         .execute(pool)

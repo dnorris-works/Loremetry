@@ -22,13 +22,13 @@ struct AiBisacPick { code: String, confidence: u8, reason: String }
 pub async fn classify_bisac_for_story(app: AppCtx, request: FolderRequest) -> GenreResult {
     let database = app.db.as_ref();
 
-    let genre_data = db::load_genre_data(&database.0, &request.story_id).await;
+    let genre_data = db::load_genre_data(&database.pool, &request.story_id).await;
     let genre_data = match genre_data {
         Some(d) => d,
         None    => return err("No genre data found. Run Analyze first."),
     };
 
-    let master_list = db::master_bisac_list(&database.0).await;
+    let master_list = db::master_bisac_list(&database.pool).await;
     if master_list.is_empty() { return err("No BISAC codes loaded in the database."); }
 
     emit(&app, "Classifying against BISAC subject headings...");
@@ -36,7 +36,7 @@ pub async fn classify_bisac_for_story(app: AppCtx, request: FolderRequest) -> Ge
 
     let description = format!("{}\n\n{}", genre_data.industry_ebook, genre_data.genre_signals);
 
-    match ai_pick_bisac(&database, &request.provider, &request.api_key, &request.model, &description, &master_list).await {
+    match ai_pick_bisac(&app, &request.story_id, &request.provider, &request.api_key, &request.model, &description, &master_list).await {
         Err(e) => err(&e),
         Ok(picks) => {
             if picks.is_empty() { return err("AI did not select any BISAC codes."); }
@@ -69,10 +69,10 @@ pub async fn classify_bisac_for_story(app: AppCtx, request: FolderRequest) -> Ge
             let rows: Vec<(String, String, u8, String)> = picks.iter()
                 .map(|(code, heading, conf, reason)| (code.clone(), heading.clone(), *conf, reason.clone()))
                 .collect();
-            if let Err(e) = db::replace_bisac_classifications(&database.0, &request.story_id, "ebook", &rows).await {
+            if let Err(e) = db::replace_bisac_classifications(&database.pool, &request.story_id, "ebook", &rows).await {
                 emit(&app, &format!("  ⚠ Could not save BISAC classification to database: {}", e));
             }
-            let _ = db::save_document(&database.0, &request.story_id, "bisac_classification", &report).await;
+            let _ = db::save_document(&database.pool, &request.story_id, "bisac_classification", &report).await;
             emit(&app, &format!("✓ BISAC classification saved to database — {} code(s).", picks.len()));
 
             GenreResult { success: true, report, error: String::new(), run_ts: String::new() }
@@ -83,7 +83,8 @@ pub async fn classify_bisac_for_story(app: AppCtx, request: FolderRequest) -> Ge
 // ── Core logic ───────────────────────────────────────────────────────────────
 
 pub(crate) async fn ai_pick_bisac(
-    database: &db::Db,
+    app: &AppCtx,
+    story_id: &str,
     provider: &str,
     api_key: &str,
     model: &str,
@@ -100,7 +101,16 @@ pub(crate) async fn ai_pick_bisac(
     vars.insert("bisac_list", bisac_list.as_str());
     vars.insert("description", description);
 
-    let raw = prompts::execute_prompt(database, "bisac_pick", provider, api_key, model, vars).await?;
+    let raw = prompts::execute_prompt(
+        app,
+        "bisac_pick",
+        provider,
+        api_key,
+        model,
+        vars,
+        Some(story_id),
+    )
+    .await?;
     let clean = raw.trim()
         .trim_start_matches("```json").trim_start_matches("```")
         .trim_end_matches("```").trim();

@@ -51,13 +51,28 @@ async fn main() {
         }
     };
 
+    let secrets = match loremetry_core::platform_secrets::PlatformSecrets::load(
+        database.pool.clone(),
+        &config,
+    )
+    .await
+    {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            tracing::error!("Platform secrets init failed: {e}");
+            eprintln!("Platform secrets init failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
     let ctx = AppCtx::new(database);
-    let port = config.port;
     let state = AppState {
         ctx,
         config: Arc::new(config),
+        secrets,
     };
 
+    let port = state.config.port;
     let app = routes::build_router(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("Loremetry listening on http://{addr}");

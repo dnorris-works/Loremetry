@@ -11,7 +11,7 @@ use loremetry_core::db;
 use loremetry_core::documents::{self, UpsertDocumentRequest};
 use loremetry_core::series::{self, CreateSeriesRequest, UpdateSeriesRequest};
 use loremetry_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
-use loremetry_core::{cancel_operation, Config};
+use loremetry_core::cancel_operation;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tower_http::cors::CorsLayer;
@@ -86,6 +86,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/admin/winningcat/import", post(admin::winningcat_import_json))
         .route("/admin/winningcat/upload", post(admin::winningcat_import_upload))
         .route("/admin/winningcat/remove-stale", post(admin::winningcat_remove_stale))
+        .route("/admin/platform-secrets", get(admin::get_platform_secrets).put(admin::put_platform_secrets))
+        .route("/admin/platform-secrets/test-canopy", post(admin::test_platform_canopy))
+        .route("/admin/platform-secrets/test-dataforseo", post(admin::test_platform_dataforseo))
+        .route("/admin/usage/summary", get(admin::admin_usage_summary))
+        .route("/admin/usage/events", get(admin::admin_usage_events))
         // Chat / costs / suggests
         .route("/chat", post(chat))
         .route("/costs/estimate", post(estimate_costs))
@@ -181,7 +186,7 @@ async fn upsert_document(
     Json(mut body): Json<UpsertDocumentRequest>,
 ) -> impl IntoResponse {
     body.story_id = story_id;
-    match documents::upsert_document(&state.ctx.db.0, &body).await {
+    match documents::upsert_document(&state.ctx.db.pool, &body).await {
         Ok(doc) => ok_json(json!({ "success": true, "document": doc, "error": "" })),
         Err(e) => json_error(e),
     }
@@ -198,7 +203,7 @@ async fn get_document(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    match documents::get_document(&state.ctx.db.0, id).await {
+    match documents::get_document(&state.ctx.db.pool, id).await {
         Ok(Some(doc)) => ok_json(json!({ "success": true, "document": doc, "error": "" })),
         Ok(None) => json_error("Document not found"),
         Err(e) => json_error(e),
@@ -211,7 +216,7 @@ async fn update_document(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if let Some(content) = body.get("content").and_then(|v| v.as_str()) {
-        let doc = match documents::get_document(&state.ctx.db.0, id).await {
+        let doc = match documents::get_document(&state.ctx.db.pool, id).await {
             Ok(Some(d)) => d,
             Ok(None) => return json_error("Document not found"),
             Err(e) => return json_error(e),
@@ -224,7 +229,7 @@ async fn update_document(
             content: content.to_string(),
             id: Some(id),
         };
-        return match documents::upsert_document(&state.ctx.db.0, &req).await {
+        return match documents::upsert_document(&state.ctx.db.pool, &req).await {
             Ok(doc) => ok_json(json!({ "success": true, "document": doc, "error": "" })),
             Err(e) => json_error(e),
         };
@@ -232,7 +237,7 @@ async fn update_document(
     match serde_json::from_value::<UpsertDocumentRequest>(body) {
         Ok(mut req) => {
             req.id = Some(id);
-            match documents::upsert_document(&state.ctx.db.0, &req).await {
+            match documents::upsert_document(&state.ctx.db.pool, &req).await {
                 Ok(doc) => ok_json(json!({ "success": true, "document": doc, "error": "" })),
                 Err(e) => json_error(e),
             }
@@ -249,14 +254,14 @@ async fn delete_document(
     let story_id = match q.story_id {
         Some(s) => s,
         None => {
-            match documents::get_document(&state.ctx.db.0, id).await {
+            match documents::get_document(&state.ctx.db.pool, id).await {
                 Ok(Some(d)) => d.story_id,
                 Ok(None) => return json_error("Document not found"),
                 Err(e) => return json_error(e),
             }
         }
     };
-    match documents::delete_document(&state.ctx.db.0, &story_id, id).await {
+    match documents::delete_document(&state.ctx.db.pool, &story_id, id).await {
         Ok(()) => ok_json(json!({ "success": true })),
         Err(e) => json_error(e),
     }
@@ -305,7 +310,7 @@ async fn analyze_story(
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
 ) -> impl IntoResponse {
-    fill_keys(&state.config, &mut body);
+    invoke::inject_platform_credentials(&state, &mut body).await;
     match serde_json::from_value::<loremetry_core::analysis::AnalyzeStoryRequest>(body) {
         Ok(req) => ok_json(
             serde_json::to_value(pipeline::analyze_story(state.ctx, req).await).unwrap_or(json!(null)),
@@ -318,7 +323,7 @@ async fn craft_pipeline(
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
 ) -> impl IntoResponse {
-    fill_keys(&state.config, &mut body);
+    invoke::inject_platform_credentials(&state, &mut body).await;
     match serde_json::from_value::<pipeline::CraftPipelineRequest>(body) {
         Ok(req) => ok_json(
             serde_json::to_value(pipeline::run_craft_pipeline(state.ctx, req).await)
@@ -332,7 +337,7 @@ async fn market_intel(
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
 ) -> impl IntoResponse {
-    fill_keys(&state.config, &mut body);
+    invoke::inject_platform_credentials(&state, &mut body).await;
     match serde_json::from_value::<MarketIntelRequest>(body) {
         Ok(req) => ok_json(
             serde_json::to_value(canopy::run_market_intel(state.ctx, req).await)
@@ -443,8 +448,6 @@ async fn delete_series(
 #[derive(Deserialize)]
 struct ModelsQuery {
     provider: Option<String>,
-    #[serde(default)]
-    api_key: String,
 }
 
 async fn list_models(
@@ -454,42 +457,22 @@ async fn list_models(
     let provider = q
         .provider
         .unwrap_or_else(|| state.config.default_provider.clone());
-    let api_key = state.config.resolve_api_key(&provider, &q.api_key);
+    let api_key = state.secrets.resolve_api_key(&provider).await;
     match commands::list_models(&state.ctx.db, provider, api_key).await {
         Ok(r) => ok_json(serde_json::to_value(r).unwrap_or(json!(null))),
         Err(e) => json_error(e),
     }
 }
 
-#[derive(Deserialize)]
-struct CanopyTestBody {
-    #[serde(default, alias = "apiKey")]
-    api_key: String,
-}
-
-async fn test_canopy(
-    State(state): State<AppState>,
-    Json(body): Json<CanopyTestBody>,
-) -> impl IntoResponse {
-    let key = state.config.resolve_canopy_key(&body.api_key);
+async fn test_canopy(State(state): State<AppState>) -> impl IntoResponse {
+    let key = state.secrets.canopy_key().await;
     ok_json(
         serde_json::to_value(canopy::test_canopy_connection(key).await).unwrap_or(json!(null)),
     )
 }
 
-#[derive(Deserialize)]
-struct DfsTestBody {
-    #[serde(default)]
-    login: String,
-    #[serde(default)]
-    password: String,
-}
-
-async fn test_dataforseo(
-    State(state): State<AppState>,
-    Json(body): Json<DfsTestBody>,
-) -> impl IntoResponse {
-    let (login, password) = state.config.resolve_dataforseo(&body.login, &body.password);
+async fn test_dataforseo(State(state): State<AppState>) -> impl IntoResponse {
+    let (login, password) = state.secrets.dataforseo().await;
     ok_json(
         serde_json::to_value(dataforseo::test_dataforseo_connection(login, password).await)
             .unwrap_or(json!(null)),
@@ -502,9 +485,9 @@ async fn chat(
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
 ) -> impl IntoResponse {
-    fill_keys(&state.config, &mut body);
+    invoke::inject_platform_credentials(&state, &mut body).await;
     match serde_json::from_value::<commands::ChatRequest>(body) {
-        Ok(req) => match commands::chat_with_context(&state.ctx.db, req).await {
+        Ok(req) => match commands::chat_with_context(&state.ctx, req).await {
             Ok(r) => ok_json(serde_json::to_value(r).unwrap_or(json!(null))),
             Err(_) => json_error("Chat failed"),
         },
@@ -523,7 +506,7 @@ async fn suggest_sdt(
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
 ) -> impl IntoResponse {
-    fill_keys(&state.config, &mut body);
+    invoke::inject_platform_credentials(&state, &mut body).await;
     match serde_json::from_value::<
         loremetry_core::analysis::show_dont_tell::SuggestSdtFixRequest,
     >(body)
@@ -543,7 +526,7 @@ async fn suggest_ai_isms(
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
 ) -> impl IntoResponse {
-    fill_keys(&state.config, &mut body);
+    invoke::inject_platform_credentials(&state, &mut body).await;
     match serde_json::from_value::<
         loremetry_core::analysis::ai_isms::SuggestAiIsmsFixRequest,
     >(body)
@@ -563,7 +546,7 @@ async fn suggest_continuity(
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
 ) -> impl IntoResponse {
-    fill_keys(&state.config, &mut body);
+    invoke::inject_platform_credentials(&state, &mut body).await;
     match serde_json::from_value::<
         loremetry_core::analysis::continuity::SuggestFixRequest,
     >(body)
@@ -578,39 +561,5 @@ async fn suggest_continuity(
             .unwrap_or(json!(null)),
         ),
         Err(e) => json_error(format!("Invalid request: {e}")),
-    }
-}
-
-fn fill_keys(config: &Config, obj: &mut Value) {
-    let Some(map) = obj.as_object_mut() else {
-        return;
-    };
-    let provider = map
-        .get("provider")
-        .and_then(|v| v.as_str())
-        .unwrap_or(&config.default_provider)
-        .to_string();
-    if map
-        .get("api_key")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .is_empty()
-    {
-        map.insert(
-            "api_key".into(),
-            Value::String(config.resolve_api_key(&provider, "")),
-        );
-    }
-    if map
-        .get("canopy_api_key")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().is_empty())
-        .unwrap_or(false)
-    {
-        map.insert(
-            "canopy_api_key".into(),
-            Value::String(config.resolve_canopy_key("")),
-        );
     }
 }

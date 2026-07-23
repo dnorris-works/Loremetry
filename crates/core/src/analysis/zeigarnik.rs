@@ -50,7 +50,7 @@ pub async fn analyze_zeigarnik_for_story(app: AppCtx, request: ZeigarnikRequest)
     if chapters.is_empty() { return err("No chapter documents found. Upload manuscript chapters first."); }
 
     let database = app.db.as_ref();
-    let config = db::load_zeigarnik_config(&database.0).await;
+    let config = db::load_zeigarnik_config(&database.pool).await;
     let run_ts = chrono::Utc::now().to_rfc3339();
 
     emit(&app, &format!("Found {} chapter(s). Scanning for open loops (no AI — pattern matching only)...", chapters.len()));
@@ -100,7 +100,7 @@ pub async fn analyze_zeigarnik_for_story(app: AppCtx, request: ZeigarnikRequest)
     emit(&app, &format!("  {} candidate open thread(s) found (gap ≥ {} chapters).", threads.len(), config.min_gap_chapters_for_thread));
 
     // ── Persist ──────────────────────────────────────────────────────────
-    if let Err(e) = db::replace_zeigarnik_analysis(&database.0, &request.story_id, &chapter_rows, &threads).await {
+    if let Err(e) = db::replace_zeigarnik_analysis(&database.pool, &request.story_id, &chapter_rows, &threads).await {
         return err(&format!("Could not save analysis: {}", e));
     }
 
@@ -166,7 +166,7 @@ pub async fn analyze_zeigarnik_for_story(app: AppCtx, request: ZeigarnikRequest)
     });
     let content = json.to_string();
 
-    let _ = db::save_document_at(&database.0, &request.story_id, "zeigarnik_analysis", &content, &run_ts).await;
+    let _ = db::save_document_at(&database.pool, &request.story_id, "zeigarnik_analysis", &content, &run_ts).await;
     emit(&app, "✓ Zeigarnik analysis saved to database.");
 
     GenreResult { success: true, report: content, error: String::new(), run_ts }

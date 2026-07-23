@@ -67,9 +67,7 @@ export interface SeriesBookRow {
 
 export interface Settings {
   provider: string;
-  apiKey: string;
   model: string;
-  canopyApiKey: string;
 }
 
 export interface DocMeta {

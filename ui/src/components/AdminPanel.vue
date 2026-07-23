@@ -12,8 +12,37 @@ loadReportTypes();
 
 const savedMsg = ref('');
 const modelFetchStatus = ref('');
-const canopyTestStatus = ref('');
-const dataforseoTestStatus = ref('');
+
+const platformStatus = ref<{
+  anthropic: boolean;
+  tokenmix: boolean;
+  canopy: boolean;
+  dataforseo: boolean;
+  default_provider: string;
+} | null>(null);
+const platformSaveMsg = ref('');
+const platformCanopyStatus = ref('');
+const platformDfsStatus = ref('');
+const credAnthropic = ref('');
+const credTokenmix = ref('');
+const credCanopy = ref('');
+const credDfsLogin = ref('');
+const credDfsPassword = ref('');
+const credDefaultProvider = ref('tokenmix');
+
+type UsageSummaryRow = {
+  user_id: string;
+  email: string;
+  role: string;
+  monthly_fee_cents: number;
+  total_cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+};
+const usageMonth = ref(monthInputValue());
+const usageRows = ref<UsageSummaryRow[]>([]);
+const usageError = ref('');
+const usageLoading = ref(false);
 
 const winningcatStatus = ref('');
 const staleStatus = ref('');
@@ -87,7 +116,144 @@ function modelLabel(m: ModelInfo): string {
 
 onMounted(() => {
   loadDbTables();
+  loadPlatformSecrets();
+  loadUsageSummary();
 });
+
+function monthInputValue(d = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function usageRangeFromMonth(ym: string): { from: string; to: string } {
+  const [y, m] = ym.split('-').map(Number);
+  const from = new Date(Date.UTC(y, m - 1, 1));
+  const to = new Date(Date.UTC(y, m, 1));
+  return { from: from.toISOString(), to: to.toISOString() };
+}
+
+async function loadPlatformSecrets(): Promise<void> {
+  try {
+    const status = await adminFetch<{
+      anthropic: boolean;
+      tokenmix: boolean;
+      canopy: boolean;
+      dataforseo: boolean;
+      default_provider: string;
+    }>('/platform-secrets');
+    platformStatus.value = status;
+    if (status.default_provider) {
+      credDefaultProvider.value = status.default_provider;
+    }
+  } catch {
+    platformStatus.value = null;
+  }
+}
+
+async function savePlatformSecrets(): Promise<void> {
+  platformSaveMsg.value = 'Saving…';
+  const body: Record<string, string> = {
+    default_provider: credDefaultProvider.value,
+  };
+  if (credAnthropic.value.trim()) body.anthropic_api_key = credAnthropic.value.trim();
+  if (credTokenmix.value.trim()) body.tokenmix_api_key = credTokenmix.value.trim();
+  if (credCanopy.value.trim()) body.canopy_api_key = credCanopy.value.trim();
+  if (credDfsLogin.value.trim()) body.dataforseo_login = credDfsLogin.value.trim();
+  if (credDfsPassword.value.trim()) body.dataforseo_password = credDfsPassword.value.trim();
+  try {
+    const result = await adminFetch<{ success: boolean; error?: string }>('/platform-secrets', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (result.success) {
+      platformSaveMsg.value = '✓ Saved';
+      credAnthropic.value = '';
+      credTokenmix.value = '';
+      credCanopy.value = '';
+      credDfsLogin.value = '';
+      credDfsPassword.value = '';
+      await loadPlatformSecrets();
+    } else {
+      platformSaveMsg.value = result.error || 'Save failed';
+    }
+  } catch (e) {
+    platformSaveMsg.value = String(e);
+  }
+  setTimeout(() => { platformSaveMsg.value = ''; }, 3000);
+}
+
+async function onTestPlatformCanopy(): Promise<void> {
+  platformCanopyStatus.value = 'Testing…';
+  try {
+    const result = await adminFetch<{ success: boolean; error: string }>('/platform-secrets/test-canopy', {
+      method: 'POST',
+    });
+    platformCanopyStatus.value = result.success ? '✓ Connected' : '✗ ' + result.error;
+  } catch (e) {
+    platformCanopyStatus.value = '✗ ' + String(e);
+  }
+}
+
+async function onTestPlatformDataforseo(): Promise<void> {
+  platformDfsStatus.value = 'Testing…';
+  try {
+    const result = await adminFetch<{ success: boolean; error: string }>('/platform-secrets/test-dataforseo', {
+      method: 'POST',
+    });
+    platformDfsStatus.value = result.success ? '✓ Connected' : '✗ ' + result.error;
+  } catch (e) {
+    platformDfsStatus.value = '✗ ' + String(e);
+  }
+}
+
+async function loadUsageSummary(): Promise<void> {
+  usageLoading.value = true;
+  usageError.value = '';
+  const { from, to } = usageRangeFromMonth(usageMonth.value);
+  try {
+    const result = await adminFetch<{
+      success: boolean;
+      error?: string;
+      users: UsageSummaryRow[];
+    }>(`/usage/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    if (result.success) {
+      usageRows.value = result.users ?? [];
+    } else {
+      usageRows.value = [];
+      usageError.value = result.error || 'Failed to load usage';
+    }
+  } catch (e) {
+    usageRows.value = [];
+    usageError.value = String(e);
+  } finally {
+    usageLoading.value = false;
+  }
+}
+
+const usageTotals = computed(() => {
+  return usageRows.value.reduce(
+    (acc, row) => {
+      acc.cost += row.total_cost_usd;
+      acc.input += row.input_tokens;
+      acc.output += row.output_tokens;
+      acc.fee += row.monthly_fee_cents;
+      return acc;
+    },
+    { cost: 0, input: 0, output: 0, fee: 0 },
+  );
+});
+
+function formatUsd(n: number): string {
+  return '$' + n.toFixed(4);
+}
+
+function formatFeeCents(cents: number): string {
+  return '$' + (cents / 100).toFixed(2);
+}
+
+function configuredLabel(ok: boolean): string {
+  return ok ? '✓ configured' : '— not set';
+}
 
 async function loadDbTables(): Promise<void> {
   try {
@@ -162,18 +328,6 @@ function onSave(): void {
   });
 }
 
-async function onTestCanopy(): Promise<void> {
-  canopyTestStatus.value = 'Testing...';
-  const result = await settingsCtx.testCanopy();
-  canopyTestStatus.value = result.success ? '✓ Connected' : '✗ ' + result.error;
-}
-
-async function onTestDataforseo(): Promise<void> {
-  dataforseoTestStatus.value = 'Testing...';
-  const result = await settingsCtx.testDataforseo();
-  dataforseoTestStatus.value = result.success ? '✓ Connected' : '✗ ' + result.error;
-}
-
 async function onWinningCatFile(ev: Event): Promise<void> {
   const input = ev.target as HTMLInputElement;
   const file = input.files?.[0];
@@ -233,7 +387,7 @@ async function onRemoveStale(): Promise<void> {
     </div>
 
     <p class="panel-desc">
-      Operator configuration — API keys, models, catalog import, and SQL console. Settings are saved in this browser; leave keys blank to use server env vars on Miget.
+      Operator tools — platform API credentials (encrypted on server), usage reporting, catalog import, and SQL console.
     </p>
 
     <!-- SQL console -->
@@ -289,6 +443,89 @@ async function onRemoveStale(): Promise<void> {
 
     <div class="settings-section-divider"></div>
 
+    <h3 class="section-title">Platform credentials</h3>
+    <div class="settings-form">
+      <p class="panel-desc">Stored encrypted on the server. Leave a field blank to keep the current value.</p>
+      <div v-if="platformStatus" class="platform-status">
+        <span>Anthropic: {{ configuredLabel(platformStatus.anthropic) }}</span>
+        <span>TokenMix: {{ configuredLabel(platformStatus.tokenmix) }}</span>
+        <span>Canopy: {{ configuredLabel(platformStatus.canopy) }}</span>
+        <span>DataForSEO: {{ configuredLabel(platformStatus.dataforseo) }}</span>
+      </div>
+      <label class="field-label">Anthropic API key</label>
+      <input v-model="credAnthropic" type="password" autocomplete="off" placeholder="sk-ant-…" />
+      <label class="field-label">TokenMix API key</label>
+      <input v-model="credTokenmix" type="password" autocomplete="off" placeholder="tm-…" />
+      <label class="field-label">Canopy API key</label>
+      <input v-model="credCanopy" type="password" autocomplete="off" />
+      <button type="button" class="btn btn-sm" @click="onTestPlatformCanopy">Test Canopy</button>
+      <div class="status-msg">{{ platformCanopyStatus }}</div>
+      <label class="field-label">DataForSEO login</label>
+      <input v-model="credDfsLogin" type="text" autocomplete="off" />
+      <label class="field-label">DataForSEO password</label>
+      <input v-model="credDfsPassword" type="password" autocomplete="off" />
+      <button type="button" class="btn btn-sm" @click="onTestPlatformDataforseo">Test DataForSEO</button>
+      <div class="status-msg">{{ platformDfsStatus }}</div>
+      <label class="field-label">Default LLM provider</label>
+      <div class="provider-options">
+        <label class="provider-option">
+          <input v-model="credDefaultProvider" type="radio" value="claude" />
+          Claude
+        </label>
+        <label class="provider-option">
+          <input v-model="credDefaultProvider" type="radio" value="tokenmix" />
+          TokenMix
+        </label>
+      </div>
+      <button type="button" class="btn" @click="savePlatformSecrets">Save platform credentials</button>
+      <div class="settings-saved">{{ platformSaveMsg }}</div>
+    </div>
+
+    <div class="settings-section-divider"></div>
+    <h3 class="section-title">Usage &amp; cost</h3>
+    <div class="settings-form usage-toolbar">
+      <label class="field-label">Month</label>
+      <input v-model="usageMonth" type="month" @change="loadUsageSummary" />
+      <button type="button" class="btn btn-sm" :disabled="usageLoading" @click="loadUsageSummary">
+        {{ usageLoading ? 'Loading…' : 'Refresh' }}
+      </button>
+      <div v-if="usageError" class="sql-error">{{ usageError }}</div>
+      <table v-if="usageRows.length > 0" class="sql-results usage-table">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Role</th>
+            <th>Monthly fee</th>
+            <th>AI cost</th>
+            <th>Input tokens</th>
+            <th>Output tokens</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in usageRows" :key="row.user_id">
+            <td>{{ row.email }}</td>
+            <td>{{ row.role }}</td>
+            <td>{{ formatFeeCents(row.monthly_fee_cents) }}</td>
+            <td>{{ formatUsd(row.total_cost_usd) }}</td>
+            <td>{{ row.input_tokens.toLocaleString() }}</td>
+            <td>{{ row.output_tokens.toLocaleString() }}</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="2"><strong>Totals</strong></td>
+            <td>{{ formatFeeCents(usageTotals.fee) }}</td>
+            <td>{{ formatUsd(usageTotals.cost) }}</td>
+            <td>{{ usageTotals.input.toLocaleString() }}</td>
+            <td>{{ usageTotals.output.toLocaleString() }}</td>
+          </tr>
+        </tfoot>
+      </table>
+      <p v-else-if="!usageLoading" class="panel-desc">No usage in this period.</p>
+    </div>
+
+    <div class="settings-section-divider"></div>
+
     <!-- Appearance -->
     <h3 class="section-title">Appearance</h3>
         <div class="settings-form">
@@ -319,9 +556,9 @@ async function onRemoveStale(): Promise<void> {
 
         <!-- AI provider -->
         <div class="settings-section-divider"></div>
-        <h3 class="section-title">AI provider</h3>
+        <h3 class="section-title">AI provider &amp; models</h3>
         <div class="settings-form">
-          <label class="field-label">Provider</label>
+          <label class="field-label">Provider (this browser)</label>
           <div class="provider-options">
             <label class="provider-option">
               <input type="radio" v-model="settingsCtx.provider.value" value="claude" />
@@ -332,13 +569,6 @@ async function onRemoveStale(): Promise<void> {
               TokenMix
             </label>
           </div>
-
-          <label class="field-label">API key</label>
-          <input
-            type="password"
-            v-model="settingsCtx.apiKey.value"
-            placeholder="Optional if set on server (ANTHROPIC_API_KEY / TOKENMIX_API_KEY)"
-          />
 
           <label class="field-label">
             Default model
@@ -416,29 +646,6 @@ async function onRemoveStale(): Promise<void> {
           <div class="settings-saved">{{ savedMsg }}</div>
         </div>
 
-        <!-- Canopy -->
-        <div class="settings-section-divider"></div>
-        <h3 class="section-title">Canopy API</h3>
-        <div class="settings-form">
-          <label class="field-label">Canopy API key</label>
-          <input type="password" v-model="settingsCtx.canopyApiKey.value" placeholder="Optional if CANOPY_API_KEY is set on server" />
-          <button type="button" class="btn btn-sm" @click="onTestCanopy">Test connection</button>
-          <div class="status-msg">{{ canopyTestStatus }}</div>
-        </div>
-
-        <!-- DataForSEO -->
-        <div class="settings-section-divider"></div>
-        <h3 class="section-title">DataForSEO</h3>
-        <div class="settings-form">
-          <p class="panel-desc">Keyword search volume (Amazon + Google).</p>
-          <label class="field-label">Login</label>
-          <input type="text" v-model="settingsCtx.dataforseoLogin.value" placeholder="your@email.com" />
-          <label class="field-label">Password</label>
-          <input type="password" v-model="settingsCtx.dataforseoPassword.value" placeholder="DataForSEO API password" />
-          <button type="button" class="btn btn-sm" @click="onTestDataforseo">Test connection</button>
-          <div class="status-msg">{{ dataforseoTestStatus }}</div>
-        </div>
-
         <!-- WinningCat -->
         <div class="settings-section-divider"></div>
         <h3 class="section-title">WinningCat catalog</h3>
@@ -458,6 +665,26 @@ async function onRemoveStale(): Promise<void> {
 </template>
 
 <style scoped>
+.platform-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.usage-table {
+  margin-top: 12px;
+}
+
+.usage-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
 .admin-panel {
   padding: 20px;
   overflow-y: auto;

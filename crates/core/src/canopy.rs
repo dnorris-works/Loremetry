@@ -504,7 +504,7 @@ pub async fn analyze_categories_canopy(
         emit_canopy(&app, &format!("[{}/{}] {}", i + 1, paths.len(), path));
 
         // Look up node ID from DB
-        let node_id = db::node_id_for_path(&database.0, path, &store).await;
+        let node_id = db::node_id_for_path(&database.pool, path, &store).await;
 
         let node_id = match node_id {
             Some(id) => id,
@@ -599,7 +599,7 @@ async fn run_competition_canopy(app: &AppCtx, database: &db::Db, req: &Competiti
         Err(e) => return CompetitionResult { success: false, report: String::new(), error: e },
     };
 
-    let keywords = db::load_mi_search_terms(&database.0, &req.story_id).await;
+    let keywords = db::load_mi_search_terms(&database.pool, &req.story_id).await;
     if keywords.is_empty() {
         emit_canopy(app, "✗ No search terms found. Run Analyze first.");
         return CompetitionResult { success: false, report: String::new(), error: "No search terms found. Run Analyze first.".to_string() };
@@ -674,14 +674,14 @@ async fn run_competition_canopy(app: &AppCtx, database: &db::Db, req: &Competiti
         categories: Vec::new(), // No category CSV from Canopy — we already have WinningCat
     };
     if let Ok(json) = serde_json::to_string_pretty(&data) {
-        match db::save_document(&database.0, &req.story_id, "competition_data", &json).await {
+        match db::save_document(&database.pool, &req.story_id, "competition_data", &json).await {
             Ok(()) => emit_canopy(app, "  ✓ competition data saved."),
             Err(e) => emit_canopy(app, &format!("  ⚠ could not save competition data: {}", e)),
         }
     }
     // AI analysis
     emit_canopy(app, &format!("Running AI analysis... [{}]", req.model));
-    let genre_context = db::load_genre_data(&database.0, &req.story_id)
+    let genre_context = db::load_genre_data(&database.pool, &req.story_id)
         .await
         .map(|g| g.genre_signals)
         .unwrap_or_default();
@@ -697,7 +697,16 @@ async fn run_competition_canopy(app: &AppCtx, database: &db::Db, req: &Competiti
     vars.insert("keywords", keywords_str.as_str());
     vars.insert("books_summary", books_summary.as_str());
 
-    match crate::prompts::execute_prompt(&database, "competition_report", &req.provider, &req.api_key, &req.model, vars).await {
+    match crate::prompts::execute_prompt(
+        &app,
+        "competition_report",
+        &req.provider,
+        &req.api_key,
+        &req.model,
+        vars,
+        Some(&req.story_id),
+    )
+    .await {
         Err(e) => CompetitionResult { success: false, report: String::new(), error: format!("AI error: {}", e) },
         Ok(report) => {
             let json = serde_json::json!({
@@ -705,7 +714,7 @@ async fn run_competition_canopy(app: &AppCtx, database: &db::Db, req: &Competiti
                 "content_format": "markdown",
                 "content": report,
             }).to_string();
-            let _ = db::save_document(&database.0, &req.story_id, "competition_report", &json).await;
+            let _ = db::save_document(&database.pool, &req.story_id, "competition_report", &json).await;
             emit_canopy(app, "✓ Competition report saved to database.");
             CompetitionResult { success: true, report: json, error: String::new() }
         }
@@ -826,7 +835,7 @@ pub async fn search_keywords_canopy(app: AppCtx, request: KeywordSearchCanopyReq
     let rows: Vec<(String, String, String, String)> = results.iter()
         .map(|r| (r.keyword.clone(), r.searches.clone(), r.competition.clone(), r.estimated_earnings.clone()))
         .collect();
-    let _ = db::replace_keyword_search_results(&database.0, &request.story_id, &request.seed, &rows);
+    let _ = db::replace_keyword_search_results(&database.pool, &request.story_id, &request.seed, &rows);
 
     KeywordSearchResponse { success: true, results, error: String::new() }
 }
@@ -863,7 +872,7 @@ pub async fn mine_competitor_reviews(app: AppCtx, request: ReviewMiningRequest) 
     };
 
     // Get search terms to find comp books
-    let keywords = db::load_mi_search_terms(&database.0, &request.story_id).await;
+    let keywords = db::load_mi_search_terms(&database.pool, &request.story_id).await;
     if keywords.is_empty() {
         emit_canopy(&app, "✗ No search terms found. Run Analyze first.");
         return ReviewMiningResult { success: false, report: String::new(), error: "No search terms found. Run Analyze first.".to_string() };
@@ -936,7 +945,7 @@ pub async fn mine_competitor_reviews(app: AppCtx, request: ReviewMiningRequest) 
 
     emit_canopy(&app, "  Running AI analysis on reviews...");
 
-    let genre_context = db::load_genre_data(&database.0, &request.story_id)
+    let genre_context = db::load_genre_data(&database.pool, &request.story_id)
         .await
         .map(|g| g.genre_signals)
         .unwrap_or_default();
@@ -945,7 +954,16 @@ pub async fn mine_competitor_reviews(app: AppCtx, request: ReviewMiningRequest) 
     vars.insert("genre_context", genre_context.as_str());
     vars.insert("review_text", review_text.as_str());
 
-    match crate::prompts::execute_prompt(&database, "review_mining", &request.provider, &request.api_key, &request.model, vars).await {
+    match crate::prompts::execute_prompt(
+        &app,
+        "review_mining",
+        &request.provider,
+        &request.api_key,
+        &request.model,
+        vars,
+        Some(&request.story_id),
+    )
+    .await {
         Ok(report) => {
             let json = serde_json::json!({
                 "schema": "review_mining_v1",
@@ -954,7 +972,7 @@ pub async fn mine_competitor_reviews(app: AppCtx, request: ReviewMiningRequest) 
                 "books_analyzed": comp_asins.iter().map(|(a, t)| serde_json::json!({"asin": a, "title": t})).collect::<Vec<_>>(),
                 "total_reviews": all_reviews.iter().map(|(_, r)| r.len()).sum::<usize>(),
             }).to_string();
-            let _ = db::save_document(&database.0, &request.story_id, "review_mining", &json).await;
+            let _ = db::save_document(&database.pool, &request.story_id, "review_mining", &json).await;
             emit_canopy(&app, "✓ Review mining report saved.");
             ReviewMiningResult { success: true, report: json, error: String::new() }
         }
@@ -989,7 +1007,7 @@ pub async fn analyze_comp_authors(app: AppCtx, request: AuthorAnalysisRequest) -
         Err(e) => return AuthorAnalysisResult { success: false, report: String::new(), error: e },
     };
 
-    let keywords = db::load_mi_search_terms(&database.0, &request.story_id).await;
+    let keywords = db::load_mi_search_terms(&database.pool, &request.story_id).await;
     if keywords.is_empty() {
         emit_canopy(&app, "✗ No search terms found. Run Analyze first.");
         return AuthorAnalysisResult { success: false, report: String::new(), error: "No search terms found. Run Analyze first.".to_string() };
@@ -1058,7 +1076,7 @@ pub async fn analyze_comp_authors(app: AppCtx, request: AuthorAnalysisRequest) -
 
     emit_canopy(&app, "  Running AI analysis on author catalogs...");
 
-    let genre_context = db::load_genre_data(&database.0, &request.story_id)
+    let genre_context = db::load_genre_data(&database.pool, &request.story_id)
         .await
         .map(|g| g.genre_signals)
         .unwrap_or_default();
@@ -1068,7 +1086,16 @@ pub async fn analyze_comp_authors(app: AppCtx, request: AuthorAnalysisRequest) -
     vars.insert("genre_context", genre_context.as_str());
     vars.insert("author_summary", author_summary.as_str());
 
-    match crate::prompts::execute_prompt(&database, "author_analysis", &request.provider, &request.api_key, &request.model, vars).await {
+    match crate::prompts::execute_prompt(
+        &app,
+        "author_analysis",
+        &request.provider,
+        &request.api_key,
+        &request.model,
+        vars,
+        Some(&request.story_id),
+    )
+    .await {
         Ok(report) => {
             let json = serde_json::json!({
                 "schema": "author_analysis_v1",
@@ -1076,7 +1103,7 @@ pub async fn analyze_comp_authors(app: AppCtx, request: AuthorAnalysisRequest) -
                 "content": report,
                 "authors_analyzed": author_data,
             }).to_string();
-            let _ = db::save_document(&database.0, &request.story_id, "author_analysis", &json).await;
+            let _ = db::save_document(&database.pool, &request.story_id, "author_analysis", &json).await;
             emit_canopy(&app, "✓ Author catalog analysis saved.");
             AuthorAnalysisResult { success: true, report: json, error: String::new() }
         }
@@ -1245,11 +1272,42 @@ pub struct MarketIntelRequest {
 pub async fn run_market_intel(app: AppCtx, request: MarketIntelRequest) -> GenreResult {
     fn emit(app: &AppCtx, msg: &str) { let _ = app.emit("genre:log", msg); }
 
-    if request.canopy_api_key.is_empty() { return GenreResult { success: false, report: String::new(), error: "No Canopy API key set. Go to Settings.".to_string(), run_ts: String::new() }; }
-    if request.api_key.is_empty() { return GenreResult { success: false, report: String::new(), error: "No AI API key set. Go to Settings.".to_string(), run_ts: String::new() }; }
-    if request.model.is_empty() { return GenreResult { success: false, report: String::new(), error: "No model selected. Go to Settings.".to_string(), run_ts: String::new() }; }
+    if request.canopy_api_key.is_empty() {
+        return GenreResult {
+            success: false,
+            report: String::new(),
+            error: "Platform Canopy API key not configured (Admin).".to_string(),
+            run_ts: String::new(),
+        };
+    }
+    if request.api_key.is_empty() {
+        return GenreResult {
+            success: false,
+            report: String::new(),
+            error: "Platform API keys not configured (Admin).".to_string(),
+            run_ts: String::new(),
+        };
+    }
+    if request.model.is_empty() {
+        return GenreResult {
+            success: false,
+            report: String::new(),
+            error: "No model selected. Go to Settings.".to_string(),
+            run_ts: String::new(),
+        };
+    }
 
     emit(&app, "Running Market Intel (Canopy API)...");
+    let _ = app
+        .usage
+        .record_external(
+            app.user_id(),
+            "canopy",
+            "canopy",
+            "run_market_intel",
+            Some(&request.story_id),
+        )
+        .await;
     emit(&app, "  → Competition analysis");
     emit(&app, "  → Review mining");
     emit(&app, "  → Author catalog analysis");

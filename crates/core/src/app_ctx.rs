@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use crate::db::Db;
+use crate::usage::UsageRecorder;
 
 #[derive(Clone, Debug)]
 pub struct LogEvent {
@@ -14,16 +15,24 @@ pub struct LogEvent {
 #[derive(Clone)]
 pub struct AppCtx {
     pub db: Arc<Db>,
+    pub usage: Arc<UsageRecorder>,
     log_tx: broadcast::Sender<LogEvent>,
 }
 
 impl AppCtx {
     pub fn new(db: Db) -> Self {
+        let usage = Arc::new(UsageRecorder::new(db.pool.clone()));
         let (log_tx, _) = broadcast::channel(512);
         Self {
             db: Arc::new(db),
+            usage,
             log_tx,
         }
+    }
+
+    /// Pre-Clerk: bootstrap admin user id (from `users` table).
+    pub fn user_id(&self) -> uuid::Uuid {
+        self.db.bootstrap_user_id
     }
 
     pub fn subscribe_logs(&self) -> broadcast::Receiver<LogEvent> {

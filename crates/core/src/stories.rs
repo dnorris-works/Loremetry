@@ -44,17 +44,19 @@ fn new_id() -> String {
     format!("{:x}", ts)
 }
 
-async fn load_all(pool: &PgPool) -> Result<Vec<Story>, String> {
+async fn load_all(pool: &PgPool, owner_user_id: uuid::Uuid) -> Result<Vec<Story>, String> {
     sqlx::query_as::<_, Story>(
-        "SELECT id, name, created, bible_path FROM stories ORDER BY created DESC",
+        "SELECT id, name, created, bible_path FROM stories WHERE owner_user_id = $1 OR owner_user_id IS NULL ORDER BY created DESC",
     )
+    .bind(owner_user_id)
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())
 }
 
 pub async fn list_stories(app: AppCtx) -> StoriesResult {
-    match load_all(&app.db.0).await {
+    let owner = app.user_id();
+    match load_all(&app.db.pool, owner).await {
         Ok(stories) => StoriesResult {
             success: true,
             stories,
@@ -80,13 +82,15 @@ pub async fn init_story(app: AppCtx, request: InitStoryRequest) -> StoriesResult
     }
     let id = new_id();
     let created = chrono::Utc::now().to_rfc3339();
+    let owner = app.user_id();
     if let Err(e) = sqlx::query(
-        "INSERT INTO stories (id, name, created, bible_path) VALUES ($1, $2, $3, '')",
+        "INSERT INTO stories (id, name, created, bible_path, owner_user_id) VALUES ($1, $2, $3, '', $4)",
     )
     .bind(&id)
     .bind(&name)
     .bind(&created)
-    .execute(&app.db.0)
+    .bind(owner)
+    .execute(&app.db.pool)
     .await
     {
         return StoriesResult {
@@ -95,7 +99,7 @@ pub async fn init_story(app: AppCtx, request: InitStoryRequest) -> StoriesResult
             error: e.to_string(),
         };
     }
-    match load_all(&app.db.0).await {
+    match load_all(&app.db.pool, owner).await {
         Ok(stories) => StoriesResult {
             success: true,
             stories,
@@ -129,7 +133,7 @@ pub async fn update_story(app: AppCtx, request: UpdateStoryRequest) -> StoriesRe
     .bind(&name)
     .bind(&request.bible_path)
     .bind(&request.id)
-    .execute(&app.db.0)
+    .execute(&app.db.pool)
     .await
     {
         Ok(r) => r.rows_affected(),
@@ -148,7 +152,8 @@ pub async fn update_story(app: AppCtx, request: UpdateStoryRequest) -> StoriesRe
             error: "Story not found".into(),
         };
     }
-    match load_all(&app.db.0).await {
+    let owner = app.user_id();
+    match load_all(&app.db.pool, owner).await {
         Ok(stories) => StoriesResult {
             success: true,
             stories,
@@ -165,13 +170,14 @@ pub async fn update_story(app: AppCtx, request: UpdateStoryRequest) -> StoriesRe
 pub async fn delete_story(app: AppCtx, id: String) -> StoriesResult {
     let _ = sqlx::query("DELETE FROM stories WHERE id = $1")
         .bind(&id)
-        .execute(&app.db.0)
+        .execute(&app.db.pool)
         .await;
     let _ = sqlx::query("DELETE FROM manuscripts WHERE story_id = $1")
         .bind(&id)
-        .execute(&app.db.0)
+        .execute(&app.db.pool)
         .await;
-    match load_all(&app.db.0).await {
+    let owner = app.user_id();
+    match load_all(&app.db.pool, owner).await {
         Ok(stories) => StoriesResult {
             success: true,
             stories,
@@ -188,7 +194,7 @@ pub async fn delete_story(app: AppCtx, id: String) -> StoriesResult {
 pub async fn story_exists(db: &Db, id: &str) -> bool {
     sqlx::query_scalar::<_, i32>("SELECT 1 FROM stories WHERE id = $1 LIMIT 1")
         .bind(id)
-        .fetch_optional(&db.0)
+        .fetch_optional(&db.pool)
         .await
         .ok()
         .flatten()

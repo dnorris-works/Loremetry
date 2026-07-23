@@ -61,17 +61,13 @@ function getSettings() {
   const s = useSettings();
   return {
     provider: s.provider.value,
-    apiKey: s.apiKey.value,
     model: s.model.value,
-    canopyApiKey: s.canopyApiKey.value,
-    dataforseoLogin: s.dataforseoLogin.value,
-    dataforseoPassword: s.dataforseoPassword.value,
   };
 }
 
 async function runAnalyze(folder: string, forceResummarize: boolean, platform: string): Promise<void> {
   if (!folder) { appendLog('✗ No story selected.'); return; }
-  const { provider, apiKey, model, canopyApiKey, dataforseoLogin, dataforseoPassword } = getSettings();
+  const { provider, model } = getSettings();
 
   clearLog();
   isWorking.value = true;
@@ -80,12 +76,9 @@ async function runAnalyze(folder: string, forceResummarize: boolean, platform: s
   try {
     const result = await invoke<GenreResult>('analyze_story', {
       request: {
-        folder, api_key: apiKey, model, provider,
+        folder, model, provider,
         force_resummarize: forceResummarize,
-        canopy_api_key: canopyApiKey,
         platform,
-        dataforseo_login: dataforseoLogin,
-        dataforseo_password: dataforseoPassword,
         run_time: runTime,
       },
     });
@@ -110,7 +103,7 @@ async function runCraftAnalysis(folder: string, selected: string[], continuitySc
   if (!folder) { appendLog('✗ No story selected.'); return; }
 
   const s = useSettings();
-  const { provider, apiKey } = getSettings();
+  const { provider } = getSettings();
   clearLog();
   isWorking.value = true;
 
@@ -120,7 +113,6 @@ async function runCraftAnalysis(folder: string, selected: string[], continuitySc
         folder,
         selected,
         provider,
-        api_key: apiKey,
         model: s.modelFor('default'),
         model_summaries: s.modelFor('summaries'),
         model_continuity: s.modelFor('continuity'),
@@ -143,14 +135,14 @@ async function runCraftAnalysis(folder: string, selected: string[], continuitySc
 
 async function runMarketIntel(folder: string): Promise<void> {
   if (!folder) { appendLog('✗ No story selected.'); return; }
-  const { provider, apiKey, model, canopyApiKey } = getSettings();
+  const { provider, model } = getSettings();
 
   clearLog();
   isWorking.value = true;
 
   try {
     const result = await invoke<GenreResult>('run_market_intel', {
-      request: { folder, provider, api_key: apiKey, model, canopy_api_key: canopyApiKey },
+      request: { folder, provider, model },
     });
     if (!result.success) {
       appendLog('✗ ' + result.error);

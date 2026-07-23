@@ -82,11 +82,7 @@ function setTheme(mode: ThemeMode): void {
 }
 
 const provider = ref(localStorage.getItem('provider') || 'tokenmix');
-const apiKey = ref(localStorage.getItem('apiKey') || '');
 const modelAssignments = ref<ModelAssignments>(loadAssignments());
-const canopyApiKey = ref(localStorage.getItem('canopyApiKey') || '');
-const dataforseoLogin = ref(localStorage.getItem('dataforseoLogin') || '');
-const dataforseoPassword = ref(localStorage.getItem('dataforseoPassword') || '');
 const models = ref<ModelInfo[]>(loadModelsFromStorage());
 const folderStructure = ref<FolderStructure>({ ...DEFAULT_FOLDER_STRUCTURE, acts: [...DEFAULT_FOLDER_STRUCTURE.acts], extra: [...DEFAULT_FOLDER_STRUCTURE.extra] });
 
@@ -107,20 +103,16 @@ const model = computed(() => modelAssignments.value.default);
 const proseModel = computed(() => modelAssignments.value.prose || modelAssignments.value.default);
 
 async function fetchModels(): Promise<{ success: boolean; error: string }> {
-  if (!apiKey.value) {
-    return { success: false, error: 'Enter an API key first.' };
-  }
   try {
     const result = await invoke<ModelsResult>('list_models', {
       provider: provider.value,
-      apiKey: apiKey.value,
     });
     if (result.success && result.models.length > 0) {
       models.value = result.models;
       localStorage.setItem('cachedModels', JSON.stringify(result.models));
       return { success: true, error: '' };
     }
-    return { success: false, error: result.error || 'No models returned.' };
+    return { success: false, error: result.error || 'No models returned. Configure platform API keys in Admin.' };
   } catch (e) {
     return { success: false, error: 'Error: ' + String(e) };
   }
@@ -129,40 +121,9 @@ async function fetchModels(): Promise<{ success: boolean; error: string }> {
 async function saveSettings(): Promise<void> {
   localStorage.setItem('theme', theme.value);
   localStorage.setItem('provider', provider.value);
-  localStorage.setItem('apiKey', apiKey.value.trim());
   localStorage.setItem('modelAssignments', JSON.stringify(modelAssignments.value));
   localStorage.setItem('model', modelAssignments.value.default);
   localStorage.setItem('proseModel', modelAssignments.value.prose);
-  localStorage.setItem('canopyApiKey', canopyApiKey.value.trim());
-  localStorage.setItem('dataforseoLogin', dataforseoLogin.value.trim());
-  localStorage.setItem('dataforseoPassword', dataforseoPassword.value.trim());
-}
-
-async function testCanopy(): Promise<{ success: boolean; error: string }> {
-  const key = canopyApiKey.value.trim();
-  if (!key) {
-    return { success: false, error: 'Enter a key first.' };
-  }
-  try {
-    const result = await invoke<{ success: boolean; error: string }>('test_canopy_connection', { apiKey: key });
-    return result;
-  } catch (e) {
-    return { success: false, error: String(e) };
-  }
-}
-
-async function testDataforseo(): Promise<{ success: boolean; error: string }> {
-  const login = dataforseoLogin.value.trim();
-  const password = dataforseoPassword.value.trim();
-  if (!login || !password) {
-    return { success: false, error: 'Enter login and password first.' };
-  }
-  try {
-    const result = await invoke<{ success: boolean; error: string }>('test_dataforseo_connection', { login, password });
-    return result;
-  } catch (e) {
-    return { success: false, error: String(e) };
-  }
 }
 
 export function useSettings() {
@@ -170,19 +131,13 @@ export function useSettings() {
     theme,
     setTheme,
     provider,
-    apiKey,
     model,
     proseModel,
     modelAssignments,
     modelFor,
-    canopyApiKey,
-    dataforseoLogin,
-    dataforseoPassword,
     models,
     folderStructure,
     fetchModels,
     saveSettings,
-    testCanopy,
-    testDataforseo,
   };
 }

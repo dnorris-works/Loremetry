@@ -50,9 +50,13 @@ cd ui && npm run dev
 Optional env secrets (also used on Miget):
 
 - `DATABASE_URL` — PostgreSQL connection string (required on Miget)
-- `ANTHROPIC_API_KEY` / `TOKENMIX_API_KEY`
+- `SECRETS_ENCRYPTION_KEY` — 32-byte key, base64-encoded (required in production for encrypted platform credentials)
+- `BOOTSTRAP_ADMIN_EMAIL` — email for the first admin user when the database has no users (default `admin@local`)
+- `ANTHROPIC_API_KEY` / `TOKENMIX_API_KEY` — seeded into encrypted storage on first boot if the secrets table is empty
 - `CANOPY_API_KEY`
 - `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`
+
+Platform API keys are stored encrypted in Postgres (`lore.platform_secrets`) and managed in **Admin → Platform credentials**. The browser no longer sends API keys on analysis or chat requests.
 
 ## Production (Miget via GitHub)
 

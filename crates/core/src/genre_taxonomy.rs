@@ -11,12 +11,12 @@ use crate::db::{self, Db, GenreRow};
 /// Everything needed to build the genre-ranking AI prompt: name + description
 /// for every genre currently known to the database.
 pub async fn master_genre_list(db: &Db) -> Result<Vec<GenreRow>, String> {
-    db::list_genres(&db.0).await
+    db::list_genres(&db.pool).await
 }
 
 /// Known KDP path(s) for a genre name, in the given store.
 pub async fn kdp_paths_for_genre(db: &Db, genre_name: &str, store: &str) -> Result<Vec<String>, String> {
-    db::kdp_paths_for_genre(&db.0, genre_name, store).await
+    db::kdp_paths_for_genre(&db.pool, genre_name, store).await
 }
 
 /// Exposed to the frontend for reference/debugging — the live master list a

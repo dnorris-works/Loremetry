@@ -27,7 +27,11 @@ const SEED_PROMPT_TEMPLATES_JSON: &str = include_str!("../data/prompt-templates.
 const SEED_PROVIDER_MODELS_JSON: &str = include_str!("../data/provider-models.json");
 const SEED_LOOKUP_CONFIG_JSON: &str = include_str!("../data/lookup-config.json");
 
-pub struct Db(pub PgPool);
+pub struct Db {
+    pub pool: PgPool,
+    /// Pre-Clerk: single bootstrap admin; all usage attributed here until Clerk middleware.
+    pub bootstrap_user_id: uuid::Uuid,
+}
 
 fn pool_options() -> PgPoolOptions {
     PgPoolOptions::new()
@@ -116,7 +120,12 @@ pub async fn init(database_url: &str) -> Result<Db, String> {
     seed_provider_models(&pool).await?;
     seed_lookup_config(&pool).await?;
 
-    Ok(Db(pool))
+    let bootstrap_user_id = crate::platform_secrets::ensure_bootstrap_user(&pool).await?;
+
+    Ok(Db {
+        pool,
+        bootstrap_user_id,
+    })
 }
 
 async fn seed_if_empty(pool: &PgPool) -> Result<(), String> {
@@ -704,20 +713,20 @@ pub async fn remove_story_from_series(pool: &PgPool, series_id: i64, story_id: &
 }
 
 pub async fn list_series_cmd(db: &Db) -> Result<Vec<SeriesRow>, String> {
-    list_series(&db.0).await
+    list_series(&db.pool).await
 }
 
 pub async fn create_series_cmd(db: &Db, name: String) -> Result<SeriesRow, String> {
     if name.trim().is_empty() { return Err("Series name cannot be empty.".to_string()); }
-    create_series(&db.0, &name).await
+    create_series(&db.pool, &name).await
 }
 
 pub async fn delete_series_cmd(db: &Db, series_id: i64) -> Result<(), String> {
-    delete_series(&db.0, series_id).await
+    delete_series(&db.pool, series_id).await
 }
 
 pub async fn list_series_books_cmd(db: &Db, series_id: i64) -> Result<Vec<SeriesBookRow>, String> {
-    list_series_books(&db.0, series_id).await
+    list_series_books(&db.pool, series_id).await
 }
 
 #[derive(serde::Deserialize)]
@@ -729,11 +738,11 @@ pub struct AddToSeriesRequest {
 }
 
 pub async fn add_story_to_series_cmd(db: &Db, request: AddToSeriesRequest) -> Result<(), String> {
-    add_story_to_series(&db.0, request.series_id, &request.story_id, &request.story_name, request.book_order).await
+    add_story_to_series(&db.pool, request.series_id, &request.story_id, &request.story_name, request.book_order).await
 }
 
 pub async fn remove_story_from_series_cmd(db: &Db, series_id: i64, story_id: String) -> Result<(), String> {
-    remove_story_from_series(&db.0, series_id, &story_id).await
+    remove_story_from_series(&db.pool, series_id, &story_id).await
 }
 
 // ── Continuity Checker (craft platform, AI-assisted) ────────────────────
@@ -837,7 +846,7 @@ pub async fn replace_continuity_findings(pool: &PgPool, scope: &str, scope_key: 
 // ── Tauri commands (for future UI — browsing/editing the genre/category map) ───────────
 
 pub async fn list_genres_cmd(db: &Db) -> Result<Vec<GenreRow>, String> {
-    list_genres(&db.0).await
+    list_genres(&db.pool).await
 }
 
 #[derive(serde::Deserialize)]
@@ -848,7 +857,7 @@ pub struct AddKdpPathRequest {
 }
 
 pub async fn add_kdp_path_cmd(db: &Db, request: AddKdpPathRequest) -> Result<(), String> {
-    upsert_kdp_path(&db.0, &request.genre_name, &request.path, &request.store, "manual", false).await
+    upsert_kdp_path(&db.pool, &request.genre_name, &request.path, &request.store, "manual", false).await
 }
 
 // ── Query helpers used by genre_analyzer.rs / category_finder.rs ──────────────
@@ -1799,7 +1808,7 @@ pub async fn list_report_types_cmd(db: &Db) -> Result<Vec<ReportTypeDef>, String
         "SELECT id, label, description, platforms, depends_on, model_slot, min_tier
          FROM report_types ORDER BY id",
     )
-    .fetch_all(&db.0)
+    .fetch_all(&db.pool)
     .await
     .map_err(|e| e.to_string())?;
 
@@ -1821,12 +1830,12 @@ pub async fn list_report_types_cmd(db: &Db) -> Result<Vec<ReportTypeDef>, String
 }
 
 pub async fn list_reports_cmd(db: &Db, folder: String) -> Result<Vec<DocMeta>, String> {
-    Ok(list_documents(&db.0, &folder).await)
+    Ok(list_documents(&db.pool, &folder).await)
 }
 
 pub async fn save_activity_log_cmd(db: &Db, folder: String, content: String, timestamp: String) -> Result<(), String> {
     let ts = if timestamp.is_empty() { chrono::Utc::now().to_rfc3339() } else { timestamp };
-    save_document_at(&db.0, &folder, "activity_log", &content, &ts).await
+    save_document_at(&db.pool, &folder, "activity_log", &content, &ts).await
 }
 
 pub async fn get_report_cmd(db: &Db, id: i64) -> Result<ReportEnvelope, String> {
@@ -1834,7 +1843,7 @@ pub async fn get_report_cmd(db: &Db, id: i64) -> Result<ReportEnvelope, String> 
         "SELECT doc_type, content, generated_at FROM story_documents WHERE id = $1",
     )
     .bind(id)
-    .fetch_optional(&db.0)
+    .fetch_optional(&db.pool)
     .await
     .map_err(|e| e.to_string())?
     .ok_or_else(|| "Report not found.".to_string())?;
@@ -1843,7 +1852,7 @@ pub async fn get_report_cmd(db: &Db, id: i64) -> Result<ReportEnvelope, String> 
     let content: String = row.try_get(1).map_err(|e| e.to_string())?;
     let generated_at: String = row.try_get(2).map_err(|e| e.to_string())?;
 
-    let label = label_for_doc_type(&db.0, &doc_type).await;
+    let label = label_for_doc_type(&db.pool, &doc_type).await;
 
     let format = if content.starts_with('{') || content.starts_with('[') {
         if serde_json::from_str::<serde_json::Value>(&content).is_ok() { "json" } else { "markdown" }
@@ -1859,7 +1868,7 @@ pub async fn get_report_cmd(db: &Db, id: i64) -> Result<ReportEnvelope, String> 
 pub async fn delete_report_cmd(db: &Db, id: i64) -> Result<(), String> {
     let result = sqlx::query("DELETE FROM story_documents WHERE id = $1")
         .bind(id)
-        .execute(&db.0)
+        .execute(&db.pool)
         .await
         .map_err(|e| e.to_string())?;
     if result.rows_affected() == 0 { return Err("Report not found.".to_string()); }
@@ -1889,7 +1898,7 @@ pub async fn get_sidebar_reports(db: &Db, folder: String, platform: String) -> R
     let all_types: Vec<(String, String, String)> = sqlx::query(
         "SELECT id, label, description FROM report_types ORDER BY id",
     )
-    .fetch_all(&db.0)
+    .fetch_all(&db.pool)
     .await
     .map_err(|e| e.to_string())?
     .into_iter()
@@ -1903,7 +1912,7 @@ pub async fn get_sidebar_reports(db: &Db, folder: String, platform: String) -> R
     .collect();
 
     let plat_rows = sqlx::query("SELECT id, platforms FROM report_types")
-        .fetch_all(&db.0)
+        .fetch_all(&db.pool)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -1917,7 +1926,7 @@ pub async fn get_sidebar_reports(db: &Db, folder: String, platform: String) -> R
         })
         .collect();
 
-    let docs = list_documents(&db.0, &folder).await;
+    let docs = list_documents(&db.pool, &folder).await;
 
     let mut versions_by_type: std::collections::HashMap<String, Vec<SidebarReportVersion>> = std::collections::HashMap::new();
     for doc in &docs {
