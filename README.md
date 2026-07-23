@@ -90,6 +90,7 @@ SELECT COUNT(*) FROM lore.kdp_categories;
 | `cargo: not found` during build | Repo or app vars still on **buildpacks**. Commit root **`Dockerfile`**, restore minimal **`app.json`**, remove `BUILD_COMMAND` / `LANGUAGE=rust` on the Miget app, redeploy from GitHub. |
 | `./app: not found` | Same — buildpack image. Push **`Dockerfile`** + `CMD /app/loremetry-web`; redeploy from GitHub. |
 | `DATABASE_URL` / DB errors | Real `postgres://…` at runtime; check logs for `FATAL` / `Database init failed`. |
+| Pod **CrashLoopBackOff** right after secrets/usage deploy | Release binary **requires** `SECRETS_ENCRYPTION_KEY` (32-byte key, base64). In Miget **Settings → Variables**, add e.g. `SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 32)` (generate once, keep stable). Redeploy. Check pod logs for `Platform secrets init failed` or `Database init failed`. |
 
 Optional local production image:
 

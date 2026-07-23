@@ -47,6 +47,11 @@ async fn main() {
         Err(e) => {
             tracing::error!("Database init failed: {e}");
             eprintln!("Database init failed: {e}");
+            if e.contains("migrations") {
+                eprintln!(
+                    "Hint: Check DATABASE_URL and that Postgres is reachable. New deploys run migration 002 (users, platform_secrets, ai_usage_events)."
+                );
+            }
             std::process::exit(1);
         }
     };
@@ -61,6 +66,15 @@ async fn main() {
         Err(e) => {
             tracing::error!("Platform secrets init failed: {e}");
             eprintln!("Platform secrets init failed: {e}");
+            if e.contains("SECRETS_ENCRYPTION_KEY") {
+                eprintln!(
+                    "Hint: On Miget, add SECRETS_ENCRYPTION_KEY (32 random bytes, base64). Example: openssl rand -base64 32"
+                );
+            } else if e.contains("decrypt failed") {
+                eprintln!(
+                    "Hint: SECRETS_ENCRYPTION_KEY may have changed since credentials were saved. Restore the original key or reset lore.platform_secrets ciphertext in the database."
+                );
+            }
             std::process::exit(1);
         }
     };
