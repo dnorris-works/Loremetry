@@ -171,8 +171,8 @@ pub async fn admin_sql(State(state): State<AppState>, Json(body): Json<SqlBody>)
 
 /// GET /api/admin/platform-secrets
 pub async fn get_platform_secrets(State(state): State<AppState>) -> impl IntoResponse {
-    let status = state.secrets.configured_status().await;
-    ok_json(serde_json::to_value(status).unwrap_or(json!(null)))
+    let view = state.secrets.admin_get().await;
+    ok_json(serde_json::to_value(view).unwrap_or(json!(null)))
 }
 
 /// PUT /api/admin/platform-secrets

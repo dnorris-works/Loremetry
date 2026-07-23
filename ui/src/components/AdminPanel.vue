@@ -29,6 +29,22 @@ const credCanopy = ref('');
 const credDfsLogin = ref('');
 const credDfsPassword = ref('');
 const credDefaultProvider = ref('tokenmix');
+const showCredentialValues = ref(true);
+
+type PlatformSecretsView = {
+  anthropic: boolean;
+  tokenmix: boolean;
+  canopy: boolean;
+  dataforseo: boolean;
+  default_provider: string;
+  anthropic_api_key: string;
+  tokenmix_api_key: string;
+  canopy_api_key: string;
+  dataforseo_login: string;
+  dataforseo_password: string;
+};
+
+const credFieldType = computed(() => (showCredentialValues.value ? 'text' : 'password'));
 
 type UsageSummaryRow = {
   user_id: string;
@@ -133,16 +149,15 @@ function usageRangeFromMonth(ym: string): { from: string; to: string } {
 
 async function loadPlatformSecrets(): Promise<void> {
   try {
-    const status = await adminFetch<{
-      anthropic: boolean;
-      tokenmix: boolean;
-      canopy: boolean;
-      dataforseo: boolean;
-      default_provider: string;
-    }>('/platform-secrets');
-    platformStatus.value = status;
-    if (status.default_provider) {
-      credDefaultProvider.value = status.default_provider;
+    const data = await adminFetch<PlatformSecretsView>('/platform-secrets');
+    platformStatus.value = data;
+    credAnthropic.value = data.anthropic_api_key ?? '';
+    credTokenmix.value = data.tokenmix_api_key ?? '';
+    credCanopy.value = data.canopy_api_key ?? '';
+    credDfsLogin.value = data.dataforseo_login ?? '';
+    credDfsPassword.value = data.dataforseo_password ?? '';
+    if (data.default_provider) {
+      credDefaultProvider.value = data.default_provider;
     }
   } catch {
     platformStatus.value = null;
@@ -179,11 +194,6 @@ async function savePlatformSecrets(): Promise<void> {
     });
     if (result.success) {
       platformSaveMsg.value = '✓ Saved';
-      credAnthropic.value = '';
-      credTokenmix.value = '';
-      credCanopy.value = '';
-      credDfsLogin.value = '';
-      credDfsPassword.value = '';
       await loadPlatformSecrets();
       if (dfsLogin && dfsPassword) {
         platformDfsStatus.value = 'Testing…';
@@ -491,18 +501,22 @@ async function onRemoveStale(): Promise<void> {
         <span>Canopy: {{ configuredLabel(platformStatus.canopy) }}</span>
         <span>DataForSEO: {{ configuredLabel(platformStatus.dataforseo) }}</span>
       </div>
+      <label class="reveal-creds-toggle">
+        <input v-model="showCredentialValues" type="checkbox" />
+        Show credential values
+      </label>
       <label class="field-label">Anthropic API key</label>
-      <input v-model="credAnthropic" type="password" autocomplete="off" placeholder="sk-ant-…" />
+      <input v-model="credAnthropic" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" />
       <label class="field-label">TokenMix API key</label>
-      <input v-model="credTokenmix" type="password" autocomplete="off" placeholder="tm-…" />
+      <input v-model="credTokenmix" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" />
       <label class="field-label">Canopy API key</label>
-      <input v-model="credCanopy" type="password" autocomplete="off" />
+      <input v-model="credCanopy" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" />
       <button type="button" class="btn btn-sm" @click="onTestPlatformCanopy">Test Canopy</button>
       <div class="status-msg">{{ platformCanopyStatus }}</div>
       <label class="field-label">DataForSEO login</label>
-      <input v-model="credDfsLogin" type="text" autocomplete="off" />
+      <input v-model="credDfsLogin" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" />
       <label class="field-label">DataForSEO password</label>
-      <input v-model="credDfsPassword" type="password" autocomplete="off" />
+      <input v-model="credDfsPassword" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" />
       <button type="button" class="btn btn-sm" @click="onTestPlatformDataforseo">Test DataForSEO</button>
       <div class="status-msg">{{ platformDfsStatus }}</div>
       <label class="field-label">Default LLM provider</label>
@@ -704,6 +718,23 @@ async function onRemoveStale(): Promise<void> {
 </template>
 
 <style scoped>
+.reveal-creds-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cred-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
 .platform-status {
   display: flex;
   flex-wrap: wrap;

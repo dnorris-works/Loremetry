@@ -110,6 +110,25 @@ impl PlatformSecrets {
             default_provider: c.default_provider.clone(),
         }
     }
+
+    /// Full values for Admin UI (operator-only route).
+    pub async fn admin_get(&self) -> PlatformSecretsAdminGet {
+        let c = self.get().await;
+        let dp = self.default_provider().await;
+        PlatformSecretsAdminGet {
+            anthropic: !c.anthropic_api_key.trim().is_empty(),
+            tokenmix: !c.tokenmix_api_key.trim().is_empty(),
+            canopy: !c.canopy_api_key.trim().is_empty(),
+            dataforseo: !c.dataforseo_login.trim().is_empty()
+                && !c.dataforseo_password.trim().is_empty(),
+            default_provider: dp,
+            anthropic_api_key: c.anthropic_api_key,
+            tokenmix_api_key: c.tokenmix_api_key,
+            canopy_api_key: c.canopy_api_key,
+            dataforseo_login: c.dataforseo_login,
+            dataforseo_password: c.dataforseo_password,
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -119,6 +138,21 @@ pub struct PlatformSecretsStatus {
     pub canopy: bool,
     pub dataforseo: bool,
     pub default_provider: String,
+}
+
+/// GET /api/admin/platform-secrets — configured flags plus current values for editing.
+#[derive(Debug, serde::Serialize)]
+pub struct PlatformSecretsAdminGet {
+    pub anthropic: bool,
+    pub tokenmix: bool,
+    pub canopy: bool,
+    pub dataforseo: bool,
+    pub default_provider: String,
+    pub anthropic_api_key: String,
+    pub tokenmix_api_key: String,
+    pub canopy_api_key: String,
+    pub dataforseo_login: String,
+    pub dataforseo_password: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
