@@ -1,5 +1,11 @@
 import { ref, computed } from 'vue';
-import { getOperatorBypassToken, setAuthTokenProvider, setOperatorBypassToken, registerAuthRequiredHandler } from '../api';
+import {
+  buildAuthHeaders,
+  getOperatorBypassToken,
+  setAuthTokenProvider,
+  setOperatorBypassToken,
+  registerAuthRequiredHandler,
+} from '../api';
 
 export type MeResponse = {
   id: string;
@@ -29,15 +35,18 @@ export function registerClerkSignOut(fn: () => Promise<void>): void {
 export function useAuth() {
   const breakGlass = computed(() => me.value?.breakGlass === true);
   const isAdmin = computed(() => me.value?.isAdmin === true);
-  const isSignedIn = computed(() => me.value !== null);
+
+  /** True only with a valid operator bypass or Clerk (when Clerk is configured). */
+  const isSignedIn = computed(() => {
+    const m = me.value;
+    if (!m) return false;
+    if (m.breakGlass) return true;
+    return clerkEnabled.value;
+  });
 
   async function loadAuthConfig(): Promise<void> {
     try {
-      const headers = new Headers();
-      const bypass = getOperatorBypassToken();
-      if (bypass) {
-        headers.set('X-Loremetry-Admin-Bypass', bypass);
-      }
+      const headers = await buildAuthHeaders();
       const res = await fetch('/api/auth/config', { headers });
       const data = await res.json();
       clerkEnabled.value = Boolean(data.clerkEnabled);
@@ -49,17 +58,23 @@ export function useAuth() {
 
   async function refreshMe(): Promise<void> {
     try {
-      const headers = new Headers();
       const bypass = getOperatorBypassToken();
-      if (bypass) {
-        headers.set('X-Loremetry-Admin-Bypass', bypass);
+      if (!clerkEnabled.value && !bypass) {
+        me.value = null;
+        return;
       }
+      const headers = await buildAuthHeaders();
       const res = await fetch('/api/me', { headers });
       if (!res.ok) {
         me.value = null;
         return;
       }
-      me.value = await res.json();
+      const data = (await res.json()) as MeResponse;
+      if (!data.breakGlass && !clerkEnabled.value) {
+        me.value = null;
+        return;
+      }
+      me.value = data;
     } catch {
       me.value = null;
     } finally {

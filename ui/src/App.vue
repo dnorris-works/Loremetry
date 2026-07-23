@@ -23,6 +23,7 @@ import NewDocumentForm from './components/NewDocumentForm.vue';
 import ManuscriptViewer from './components/ManuscriptViewer.vue';
 import WritingPanel from './components/WritingPanel.vue';
 import AuthPage from './components/AuthPage.vue';
+import ClerkTokenWire from './components/ClerkTokenWire.vue';
 import { useAuth } from './composables/useAuth';
 import { useReportTypes } from './composables/useReportTypes';
 
@@ -241,6 +242,7 @@ watch(
 </script>
 
 <template>
+  <ClerkTokenWire v-if="props.clerkEnabled" />
   <div v-if="!auth.authReady" class="auth-loading-screen">
     <p>Checking sign-in…</p>
   </div>

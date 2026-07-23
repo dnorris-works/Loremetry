@@ -58,7 +58,7 @@ export function setAuthTokenProvider(fn: () => Promise<string | null>): void {
   authTokenProvider = fn;
 }
 
-async function authHeaders(extra?: HeadersInit): Promise<Headers> {
+export async function buildAuthHeaders(extra?: HeadersInit): Promise<Headers> {
   const headers = new Headers(extra);
   const bypass = getOperatorBypassToken();
   if (bypass) {
@@ -74,7 +74,7 @@ async function authHeaders(extra?: HeadersInit): Promise<Headers> {
 }
 
 export async function invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  const headers = await authHeaders({ 'Content-Type': 'application/json' });
+  const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
   const res = await fetch('/api/invoke', {
     method: 'POST',
     headers,
@@ -113,7 +113,7 @@ export async function uploadChapters(storyId: string, files: FileList | File[]):
   for (const f of Array.from(files)) {
     fd.append('files', f, f.name);
   }
-  const headers = await authHeaders();
+  const headers = await buildAuthHeaders();
   const res = await fetch(`/api/stories/${encodeURIComponent(storyId)}/documents/upload`, {
     method: 'POST',
     headers,
@@ -132,7 +132,7 @@ export async function adminFetch<T = unknown>(
 ): Promise<T> {
   let res: Response;
   try {
-    const headers = await authHeaders(init.headers);
+    const headers = await buildAuthHeaders(init.headers);
     res = await fetch(`/api/admin${path}`, { ...init, headers });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -144,6 +144,7 @@ export async function adminFetch<T = unknown>(
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    maybeNotifyAuthRequired(res.status, (data as { error?: string }).error);
     throw new Error((data as { error?: string }).error || res.statusText || 'Admin request failed');
   }
   if (data && typeof data === 'object' && 'error' in data && data.error && !('success' in data)) {
@@ -160,7 +161,7 @@ export async function adminUploadFile<T = unknown>(
 ): Promise<T> {
   const fd = new FormData();
   fd.append(fieldName, file, file.name);
-  const headers = await authHeaders();
+  const headers = await buildAuthHeaders();
   const res = await fetch(`/api/admin${path}`, { method: 'POST', headers, body: fd });
   const data = await res.json();
   if (!res.ok) {
