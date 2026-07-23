@@ -23,6 +23,9 @@ onMounted(() => {
       await clerk.signOut.value();
     }
   });
+  if (clerk.isSignedIn.value && !auth.breakGlass.value) {
+    void auth.refreshMe();
+  }
 });
 
 watch(

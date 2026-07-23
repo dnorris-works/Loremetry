@@ -32,7 +32,6 @@ watch(
       void auth.refreshMe();
     }
   },
-  { immediate: true },
 );
 </script>
 

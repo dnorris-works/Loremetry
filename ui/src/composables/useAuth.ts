@@ -18,36 +18,70 @@ export type MeResponse = {
 const clerkEnabled = ref(false);
 const publishableKey = ref('');
 const me = ref<MeResponse | null>(null);
-const authReady = ref(false);
+/** Only true after GET /api/me succeeds — gates the main app. */
+const enteredApp = ref(false);
+const restoringSession = ref(false);
 
+let authTokenProvider: (() => Promise<string | null>) | null = null;
 let clerkSignOut: (() => Promise<void>) | null = null;
 
 registerAuthRequiredHandler(() => {
   setOperatorBypassToken('');
   me.value = null;
-  authReady.value = true;
+  enteredApp.value = false;
 });
 
 export function registerClerkSignOut(fn: () => Promise<void>): void {
   clerkSignOut = fn;
 }
 
+async function hasClerkBearer(): Promise<boolean> {
+  if (!authTokenProvider) return false;
+  try {
+    const t = await authTokenProvider();
+    return Boolean(t);
+  } catch {
+    return false;
+  }
+}
+
+/** Validate session with the server; sets `enteredApp` only on success. */
+async function refreshMe(): Promise<boolean> {
+  me.value = null;
+  enteredApp.value = false;
+
+  const bypass = getOperatorBypassToken();
+  const bearer = await hasClerkBearer();
+  if (!bypass && !bearer) {
+    return false;
+  }
+
+  try {
+    const headers = await buildAuthHeaders();
+    const res = await fetch('/api/me', { headers });
+    if (!res.ok) {
+      if (res.status === 401 && bypass) {
+        setOperatorBypassToken('');
+      }
+      return false;
+    }
+    const data = (await res.json()) as MeResponse;
+    me.value = data;
+    enteredApp.value = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function useAuth() {
   const breakGlass = computed(() => me.value?.breakGlass === true);
   const isAdmin = computed(() => me.value?.isAdmin === true);
-
-  /** True only with a valid operator bypass or Clerk (when Clerk is configured). */
-  const isSignedIn = computed(() => {
-    const m = me.value;
-    if (!m) return false;
-    if (m.breakGlass) return true;
-    return clerkEnabled.value;
-  });
+  const isSignedIn = computed(() => enteredApp.value);
 
   async function loadAuthConfig(): Promise<void> {
     try {
-      const headers = await buildAuthHeaders();
-      const res = await fetch('/api/auth/config', { headers });
+      const res = await fetch('/api/auth/config');
       const data = await res.json();
       clerkEnabled.value = Boolean(data.clerkEnabled);
       publishableKey.value = data.publishableKey ?? '';
@@ -56,41 +90,24 @@ export function useAuth() {
     }
   }
 
-  async function refreshMe(): Promise<void> {
+  async function restoreSession(): Promise<void> {
+    restoringSession.value = true;
     try {
-      const bypass = getOperatorBypassToken();
-      if (!clerkEnabled.value && !bypass) {
-        me.value = null;
-        return;
-      }
-      const headers = await buildAuthHeaders();
-      const res = await fetch('/api/me', { headers });
-      if (!res.ok) {
-        me.value = null;
-        return;
-      }
-      const data = (await res.json()) as MeResponse;
-      if (!data.breakGlass && !clerkEnabled.value) {
-        me.value = null;
-        return;
-      }
-      me.value = data;
-    } catch {
-      me.value = null;
+      await refreshMe();
     } finally {
-      authReady.value = true;
+      restoringSession.value = false;
     }
   }
 
-  function applyOperatorBypass(token: string): void {
-    setOperatorBypassToken(token);
-    void refreshMe();
+  async function applyOperatorBypass(token: string): Promise<boolean> {
+    setOperatorBypassToken(token.trim());
+    return refreshMe();
   }
 
   function clearOperatorBypass(): void {
     setOperatorBypassToken('');
     me.value = null;
-    void refreshMe();
+    enteredApp.value = false;
   }
 
   async function signOut(): Promise<void> {
@@ -100,11 +117,11 @@ export function useAuth() {
       await clerkSignOut();
     }
     me.value = null;
-    await refreshMe();
+    enteredApp.value = false;
   }
 
   function wireClerkGetToken(getToken: () => Promise<string | null>): void {
-    setAuthTokenProvider(async () => {
+    const provider = async (): Promise<string | null> => {
       if (getOperatorBypassToken()) {
         return null;
       }
@@ -113,19 +130,23 @@ export function useAuth() {
       } catch {
         return null;
       }
-    });
+    };
+    authTokenProvider = provider;
+    setAuthTokenProvider(provider);
   }
 
   return {
     clerkEnabled,
     publishableKey,
     me,
-    authReady,
+    enteredApp,
+    restoringSession,
     breakGlass,
     isAdmin,
     isSignedIn,
     loadAuthConfig,
     refreshMe,
+    restoreSession,
     applyOperatorBypass,
     clearOperatorBypass,
     signOut,

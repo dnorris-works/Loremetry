@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import AuthClerkSignIn from './AuthClerkSignIn.vue';
 import AuthOperatorForm from './AuthOperatorForm.vue';
+import { useAuth } from '../composables/useAuth';
 
-defineProps<{
-  clerkEnabled: boolean;
-}>();
+const auth = useAuth();
 </script>
 
 <template>
@@ -12,11 +11,13 @@ defineProps<{
     <div class="auth-page-inner">
       <h1 class="auth-title">Loremetry</h1>
 
-      <template v-if="clerkEnabled">
+      <p v-if="auth.restoringSession" class="auth-muted">Checking existing session…</p>
+
+      <template v-if="auth.clerkEnabled">
         <AuthClerkSignIn />
         <hr class="auth-divider" />
       </template>
-      <p v-else class="auth-lead">Clerk is not configured. Use operator access to continue.</p>
+      <p v-else class="auth-lead">Sign in with operator access, or configure Clerk in Admin after unlock.</p>
 
       <AuthOperatorForm />
     </div>
@@ -50,6 +51,13 @@ defineProps<{
   color: var(--text-muted);
   margin: 0 0 20px;
   font-size: 0.95rem;
+}
+
+.auth-muted {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0 0 16px;
 }
 
 .auth-divider {

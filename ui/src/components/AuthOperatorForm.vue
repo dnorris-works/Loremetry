@@ -5,20 +5,24 @@ import { useAuth } from '../composables/useAuth';
 const auth = useAuth();
 const operatorToken = ref('');
 const operatorError = ref('');
+const submitting = ref(false);
 
-function onOperatorSubmit(): void {
+async function onOperatorSubmit(): Promise<void> {
   operatorError.value = '';
   const t = operatorToken.value.trim();
   if (!t) {
     operatorError.value = 'Enter the operator bypass token.';
     return;
   }
-  auth.applyOperatorBypass(t);
-  void auth.refreshMe().then(() => {
-    if (!auth.breakGlass.value) {
+  submitting.value = true;
+  try {
+    const ok = await auth.applyOperatorBypass(t);
+    if (!ok) {
       operatorError.value = 'Invalid operator token.';
     }
-  });
+  } finally {
+    submitting.value = false;
+  }
 }
 </script>
 
@@ -36,8 +40,11 @@ function onOperatorSubmit(): void {
         spellcheck="false"
         class="operator-input"
         placeholder="Operator bypass token"
+        :disabled="submitting"
       />
-      <button type="submit" class="btn">Continue as operator</button>
+      <button type="submit" class="btn" :disabled="submitting">
+        {{ submitting ? 'Signing in…' : 'Continue as operator' }}
+      </button>
       <p v-if="operatorError" class="operator-error">{{ operatorError }}</p>
     </form>
   </section>

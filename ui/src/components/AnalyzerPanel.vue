@@ -17,9 +17,9 @@ const settings = useSettings();
 
 // ── Report types from DB ──────────────────────────────────────────────────────
 
-const { reportTypes, loadReportTypes, loadError, loaded: reportTypesLoaded, getDependants } = useReportTypes();
+const { reportTypes, loadError, loaded: reportTypesLoaded, getDependants } = useReportTypes();
+
 onMounted(() => {
-  void loadReportTypes({ force: true });
   fetchCostEstimates();
 });
 
