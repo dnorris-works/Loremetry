@@ -123,6 +123,52 @@ async fn connect_app_pool(database_url: &str) -> Result<PgPool, String> {
     Err(format!("app pool: failed after 30 attempts: {last_err}"))
 }
 
+async fn run_migrations(pool: &PgPool) -> Result<(), String> {
+    let migrator = sqlx::migrate!("./migrations");
+    match migrator.run(pool).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let msg = e.to_string();
+            if is_migration_2_checksum_mismatch(&msg) {
+                repair_stale_migration_2_record(pool).await?;
+                migrator
+                    .run(pool)
+                    .await
+                    .map_err(|e| format!("while executing migrations: {e}"))?;
+                return Ok(());
+            }
+            Err(format!("while executing migrations: {e}"))
+        }
+    }
+}
+
+fn is_migration_2_checksum_mismatch(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    (m.contains("migration 2") || m.contains("version 2"))
+        && m.contains("has been modified")
+}
+
+/// Migration 002 was edited after first deploy (search_path / idempotent fixes).
+/// Re-run idempotent 002 by dropping the stale ledger row.
+async fn repair_stale_migration_2_record(pool: &PgPool) -> Result<(), String> {
+    log::warn!(
+        "Migration 002 checksum mismatch — removing stale public._sqlx_migrations row and re-applying idempotent migration 002"
+    );
+    eprintln!(
+        "NOTICE: Migration 002 checksum mismatch — re-applying idempotent migration 002 (one-time repair)"
+    );
+    let result = sqlx::query("DELETE FROM public._sqlx_migrations WHERE version = 2")
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    if result.rows_affected() == 0 {
+        return Err(
+            "migration 2 checksum mismatch but no version=2 row in public._sqlx_migrations".into(),
+        );
+    }
+    Ok(())
+}
+
 /// Connect to PostgreSQL, apply migrations, seed on first run.
 pub async fn init(database_url: &str) -> Result<Db, String> {
     let database_url = normalize_database_url(database_url);
@@ -134,10 +180,7 @@ pub async fn init(database_url: &str) -> Result<Db, String> {
 
     // Migrations must run with search_path=public so sqlx can manage public._sqlx_migrations.
     let migrate_pool = connect_migrate_pool(&database_url).await?;
-    sqlx::migrate!("./migrations")
-        .run(&migrate_pool)
-        .await
-        .map_err(|e| format!("while executing migrations: {e}"))?;
+    run_migrations(&migrate_pool).await?;
     migrate_pool.close().await;
 
     log::info!("Migrations complete; opening application pool…");
