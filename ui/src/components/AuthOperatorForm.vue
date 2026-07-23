@@ -30,7 +30,8 @@ async function onOperatorSubmit(): Promise<void> {
   <section class="operator-block">
     <h2 class="operator-heading">Operator access</h2>
     <p class="auth-muted">
-      Bypass token from deploy logs (first boot) or Admin → Platform credentials. Full access without Clerk.
+      Bypass token is printed in server logs on first boot. If you lost it: set
+      <code>LOREMETRY_RESET_OPERATOR_BYPASS=true</code> on the host, redeploy once, copy the new token from logs, then remove that env.
     </p>
     <form class="operator-form" @submit.prevent="onOperatorSubmit">
       <input

@@ -68,11 +68,26 @@ async fn main() {
         }
     };
 
+    if std::env::var("LOREMETRY_RESET_OPERATOR_BYPASS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        tracing::warn!(
+            "LOREMETRY_RESET_OPERATOR_BYPASS is set — clearing operator bypass; a new token will be generated"
+        );
+        if let Err(e) =
+            loremetry_core::platform_secrets::clear_operator_bypass_token(&database.pool).await
+        {
+            tracing::error!("Could not clear operator bypass token: {e}");
+        }
+    }
+
     match loremetry_core::platform_secrets::ensure_operator_bypass_token(&database.pool).await {
         Ok(Some(token)) => {
             tracing::warn!(
                 "Operator bypass token was empty — generated a new one (copy from logs now)"
             );
+            tracing::warn!("OPERATOR BYPASS TOKEN: {token}");
             eprintln!();
             eprintln!("══════════════════════════════════════════════════════════════");
             eprintln!("  OPERATOR BYPASS TOKEN (first-time — copy now)");
@@ -84,7 +99,18 @@ async fn main() {
             eprintln!("══════════════════════════════════════════════════════════════");
             eprintln!();
         }
-        Ok(None) => {}
+        Ok(None) => {
+            if loremetry_core::platform_secrets::operator_bypass_is_set(&database.pool)
+                .await
+                .unwrap_or(false)
+            {
+                tracing::warn!(
+                    "Operator bypass token is already set in the database (not shown again). \
+                     Lost it? Set env LOREMETRY_RESET_OPERATOR_BYPASS=true and redeploy once, \
+                     or SQL: UPDATE lore.platform_secrets SET admin_bypass_token = '' WHERE id = 1; then restart."
+                );
+            }
+        }
         Err(e) => {
             tracing::error!("Could not ensure operator bypass token: {e}");
         }

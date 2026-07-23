@@ -81,7 +81,11 @@ These are **infrastructure** settings only. Provider API keys, Clerk, and bootst
    ```
 
 3. All Clerk users are **subscribers** in Postgres — no admin roles in Clerk metadata.
-4. **Operator bypass** — on **first boot**, if no token is stored, the server **generates one and prints it in deploy logs** (container stdout). Copy it from your host log viewer, then **Sign-in → Operator access** and paste. After that, view or rotate the token in **Admin → Platform credentials**. Optional header for scripts: `X-Loremetry-Admin-Bypass`. Clerk users cannot open Admin; only this token grants operator mode.
+4. **Operator bypass** — on **first boot**, if no token is stored, the server **generates one and logs it** as `OPERATOR BYPASS TOKEN: …` (tracing WARN — visible in Miget logs). Copy it, then **Sign-in → Operator access** and paste. After that, view or rotate the token in **Admin → Platform credentials**. Optional header for scripts: `X-Loremetry-Admin-Bypass`. Clerk users cannot open Admin; only this token grants operator mode.
+
+   **Lost the token?** It is not re-printed on later restarts. Either:
+   - Set **`LOREMETRY_RESET_OPERATOR_BYPASS=true`** on the host, redeploy **once**, copy the new token from logs, then **remove** that env; or
+   - SQL: `UPDATE lore.platform_secrets SET admin_bypass_token = '' WHERE id = 1;` and restart the container.
 
 5. Sign in via Clerk for normal use; API calls send `Authorization: Bearer <session token>` automatically.
 

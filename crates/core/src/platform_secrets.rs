@@ -409,6 +409,27 @@ fn generate_operator_bypass_token() -> String {
     STANDARD.encode(bytes)
 }
 
+/// Clear stored operator bypass (next `ensure_operator_bypass_token` will mint a new one).
+pub async fn clear_operator_bypass_token(pool: &PgPool) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE platform_secrets SET admin_bypass_token = '', updated_at = now() WHERE id = 1",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// True when a non-empty bypass token is stored.
+pub async fn operator_bypass_is_set(pool: &PgPool) -> Result<bool, String> {
+    let current: Option<String> =
+        sqlx::query_scalar("SELECT admin_bypass_token FROM platform_secrets WHERE id = 1")
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(current.as_deref().unwrap_or("").trim().len() > 0)
+}
+
 /// If no operator bypass is configured, generate one and persist (plaintext). Returns the new token.
 pub async fn ensure_operator_bypass_token(pool: &PgPool) -> Result<Option<String>, String> {
     let current: Option<String> =
