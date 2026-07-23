@@ -4,13 +4,18 @@ import type { ReportTypeDef } from '../types';
 
 const reportTypes = ref<ReportTypeDef[]>([]);
 const loaded = ref(false);
+const loadError = ref('');
 
-async function loadReportTypes(): Promise<void> {
-  if (loaded.value) return;
+async function loadReportTypes(options?: { force?: boolean }): Promise<void> {
+  if (loaded.value && !options?.force) return;
+  loadError.value = '';
   try {
-    reportTypes.value = await invoke<ReportTypeDef[]>('list_report_types_cmd');
+    const rows = await invoke<ReportTypeDef[]>('list_report_types_cmd');
+    reportTypes.value = Array.isArray(rows) ? rows : [];
     loaded.value = true;
   } catch (e) {
+    loaded.value = false;
+    loadError.value = e instanceof Error ? e.message : String(e);
     console.error('Failed to load report types:', e);
   }
 }
@@ -27,6 +32,8 @@ function getDependants(id: string): string[] {
 export function useReportTypes() {
   return {
     reportTypes,
+    loaded,
+    loadError,
     loadReportTypes,
     getDependants,
   };

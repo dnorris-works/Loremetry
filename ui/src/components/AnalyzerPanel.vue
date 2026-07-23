@@ -17,9 +17,9 @@ const settings = useSettings();
 
 // ── Report types from DB ──────────────────────────────────────────────────────
 
-const { reportTypes, loadReportTypes, getDependants } = useReportTypes();
+const { reportTypes, loadReportTypes, loadError, loaded: reportTypesLoaded, getDependants } = useReportTypes();
 onMounted(() => {
-  loadReportTypes();
+  void loadReportTypes({ force: true });
   fetchCostEstimates();
 });
 
@@ -284,7 +284,18 @@ function onStop(): void {
     </div>
 
     <!-- Report cards -->
-    <div class="report-cards">
+    <div v-if="!reportTypesLoaded && !loadError" class="report-cards-empty">
+      Loading report catalog…
+    </div>
+    <div v-else-if="loadError" class="report-cards-empty report-cards-error">
+      Could not load report catalog: {{ loadError }}.
+      Sign in with Clerk or use <strong>Enter passphrase</strong> in the title bar, then reload.
+    </div>
+    <div v-else-if="visibleReports.length === 0" class="report-cards-empty">
+      No report types for the {{ platformCtx.platform.value }} tab. If this persists, check Admin → SQL:
+      <code>SELECT COUNT(*) FROM lore.report_types;</code>
+    </div>
+    <div v-else class="report-cards">
       <div
         v-for="report in visibleReports"
         :key="report.id"
@@ -383,6 +394,19 @@ function onStop(): void {
   margin-bottom: 14px;
   padding-right: 4px;
   align-content: start;
+}
+
+.report-cards-empty {
+  flex: 1;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 12px 0;
+  margin-bottom: 14px;
+}
+
+.report-cards-error {
+  color: var(--danger, #c44);
 }
 
 .report-card {

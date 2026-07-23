@@ -25,6 +25,7 @@ import WritingPanel from './components/WritingPanel.vue';
 import ClerkGate from './components/ClerkGate.vue';
 import OperatorSignIn from './components/OperatorSignIn.vue';
 import { useAuth } from './composables/useAuth';
+import { useReportTypes } from './composables/useReportTypes';
 
 const props = defineProps<{
   clerkEnabled?: boolean;
@@ -33,6 +34,8 @@ const props = defineProps<{
 
 const auth = useAuth();
 provide('isAdmin', auth.isAdmin);
+
+const { loadReportTypes } = useReportTypes();
 
 const storiesCtx = useStories();
 const analysisCtx = useAnalysis();
@@ -214,6 +217,14 @@ onMounted(() => {
 });
 
 watch(
+  () => auth.authReady.value && auth.isSignedIn.value,
+  (ok) => {
+    if (ok) void loadReportTypes({ force: true });
+  },
+  { immediate: true },
+);
+
+watch(
   () => auth.isSignedIn.value,
   (signedIn) => {
     if (!signedIn) return;
@@ -231,7 +242,10 @@ watch(
 </script>
 
 <template>
-  <div v-if="auth.isSignedIn" id="app-root">
+  <div v-if="!auth.authReady" class="auth-loading-screen">
+    <p>Checking sign-in…</p>
+  </div>
+  <div v-else-if="auth.isSignedIn" id="app-root">
     <TitleBar />
     <Sidebar @open-story-form="openStoryForm" @open-series-form="openSeriesForm" />
     <main id="main">
@@ -270,6 +284,13 @@ watch(
 </template>
 
 <style scoped>
+.auth-loading-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: var(--text-muted);
+}
 #app-root {
   display: grid;
   grid-template-rows: var(--titlebar-h, 28px) 1fr;
