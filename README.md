@@ -92,6 +92,7 @@ SELECT COUNT(*) FROM lore.kdp_categories;
 | `DATABASE_URL` / DB errors | Real `postgres://…` at runtime; check logs for `FATAL` / `Database init failed`. |
 | Pod **CrashLoopBackOff** right after secrets/usage deploy | Release binary **requires** `SECRETS_ENCRYPTION_KEY` (32-byte key, base64). In Miget **Settings → Variables**, add e.g. `SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 32)` (generate once, keep stable). Redeploy. Check pod logs for `Platform secrets init failed` or `Database init failed`. |
 | `relation "_sqlx_migrations" does not exist` during `Database init failed` | Usually migration 002 left `search_path` on `lore` so sqlx could not see `public._sqlx_migrations`. Deploy the fix (migrate pool forces `public` search_path; migration 002 no longer sets `search_path`). If the DB is stuck, ensure `public._sqlx_migrations` exists (redeploy) or create it from a working sqlx migrate on another env. |
+| `migration … was previously applied but has been modified` | Migration 002 was recorded, then the file in git changed. If `lore.users` already exists: `DELETE FROM public._sqlx_migrations WHERE version = 2;` then redeploy (002 is idempotent). Otherwise ask support before deleting migration rows. |
 
 Optional local production image:
 

@@ -1,4 +1,5 @@
-CREATE TABLE lore.users (
+-- Idempotent: safe if a prior deploy failed mid-migration.
+CREATE TABLE IF NOT EXISTS lore.users (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     clerk_id            TEXT UNIQUE,
     email               TEXT NOT NULL UNIQUE,
@@ -9,7 +10,7 @@ CREATE TABLE lore.users (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE lore.platform_secrets (
+CREATE TABLE IF NOT EXISTS lore.platform_secrets (
     id                  SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     anthropic_api_key   BYTEA NOT NULL DEFAULT ''::bytea,
     tokenmix_api_key    BYTEA NOT NULL DEFAULT ''::bytea,
@@ -23,7 +24,7 @@ CREATE TABLE lore.platform_secrets (
 INSERT INTO lore.platform_secrets (id) VALUES (1)
 ON CONFLICT (id) DO NOTHING;
 
-CREATE TABLE lore.ai_usage_events (
+CREATE TABLE IF NOT EXISTS lore.ai_usage_events (
     id              BIGSERIAL PRIMARY KEY,
     user_id         UUID NOT NULL REFERENCES lore.users(id) ON DELETE CASCADE,
     occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -38,8 +39,8 @@ CREATE TABLE lore.ai_usage_events (
     metadata        JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX idx_ai_usage_user_time ON lore.ai_usage_events(user_id, occurred_at DESC);
-CREATE INDEX idx_ai_usage_occurred ON lore.ai_usage_events(occurred_at);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_user_time ON lore.ai_usage_events(user_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_occurred ON lore.ai_usage_events(occurred_at);
 
 ALTER TABLE lore.stories
     ADD COLUMN IF NOT EXISTS owner_user_id UUID REFERENCES lore.users(id) ON DELETE SET NULL;

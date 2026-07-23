@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::config::Config;
-use crate::secrets::{decrypt_field, encrypt_field, encryption_key_or_dev_default};
+use crate::secrets::{decrypt_field, encrypt_field, resolve_encryption_key};
 
 #[derive(Clone, Debug, Default)]
 pub struct PlatformCredentials {
@@ -23,17 +23,23 @@ pub struct PlatformCredentials {
 pub struct PlatformSecrets {
     inner: Arc<RwLock<PlatformCredentials>>,
     pool: PgPool,
-    key: [u8; 32],
+    key: Option<[u8; 32]>,
 }
 
 impl PlatformSecrets {
     pub async fn load(pool: PgPool, config: &Config) -> Result<Self, String> {
-        let key = encryption_key_or_dev_default()?;
-        let creds = load_from_db(&pool, &key).await?;
+        let key = resolve_encryption_key()?;
+        let creds = load_from_db(&pool, key.as_ref()).await?;
         let creds = if creds.is_empty() {
             let from_env = credentials_from_config(config);
             if !from_env.is_empty() {
-                save_to_db(&pool, &key, &from_env).await?;
+                if let Some(ref k) = key {
+                    save_to_db(&pool, k, &from_env).await?;
+                } else {
+                    log::warn!(
+                        "SECRETS_ENCRYPTION_KEY not set; using API keys from environment only (not persisted). Set SECRETS_ENCRYPTION_KEY to store encrypted credentials in the database."
+                    );
+                }
                 from_env
             } else {
                 from_env
@@ -49,7 +55,7 @@ impl PlatformSecrets {
     }
 
     pub async fn reload(&self) -> Result<(), String> {
-        let creds = load_from_db(&self.pool, &self.key).await?;
+        let creds = load_from_db(&self.pool, self.key.as_ref()).await?;
         *self.inner.write().await = creds;
         Ok(())
     }
@@ -70,7 +76,14 @@ impl PlatformSecrets {
                 creds.default_provider = v;
             }
         }
-        save_to_db(&self.pool, &self.key, &creds).await?;
+        save_to_db(
+            &self.pool,
+            self.key
+                .as_ref()
+                .ok_or("SECRETS_ENCRYPTION_KEY must be set to update platform credentials")?,
+            &creds,
+        )
+        .await?;
         *self.inner.write().await = creds;
         Ok(())
     }
@@ -163,7 +176,10 @@ fn credentials_from_config(config: &Config) -> PlatformCredentials {
     }
 }
 
-async fn load_from_db(pool: &PgPool, key: &[u8; 32]) -> Result<PlatformCredentials, String> {
+async fn load_from_db(
+    pool: &PgPool,
+    key: Option<&[u8; 32]>,
+) -> Result<PlatformCredentials, String> {
     let row: Option<(
         Vec<u8>,
         Vec<u8>,
@@ -183,17 +199,29 @@ async fn load_from_db(pool: &PgPool, key: &[u8; 32]) -> Result<PlatformCredentia
     };
 
     Ok(PlatformCredentials {
-        anthropic_api_key: decrypt_field(&a, key)?,
-        tokenmix_api_key: decrypt_field(&t, key)?,
-        canopy_api_key: decrypt_field(&c, key)?,
-        dataforseo_login: decrypt_field(&l, key)?,
-        dataforseo_password: decrypt_field(&p, key)?,
+        anthropic_api_key: decrypt_optional(&a, key)?,
+        tokenmix_api_key: decrypt_optional(&t, key)?,
+        canopy_api_key: decrypt_optional(&c, key)?,
+        dataforseo_login: decrypt_optional(&l, key)?,
+        dataforseo_password: decrypt_optional(&p, key)?,
         default_provider: if dp.is_empty() {
             "claude".into()
         } else {
             dp
         },
     })
+}
+
+fn decrypt_optional(blob: &[u8], key: Option<&[u8; 32]>) -> Result<String, String> {
+    if blob.is_empty() {
+        return Ok(String::new());
+    }
+    let Some(k) = key else {
+        return Err(
+            "SECRETS_ENCRYPTION_KEY is not set but encrypted platform credentials exist in the database (set the key or reset lore.platform_secrets)".into(),
+        );
+    };
+    decrypt_field(blob, k)
 }
 
 async fn save_to_db(

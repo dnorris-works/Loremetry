@@ -27,16 +27,23 @@ pub fn encryption_key_from_env() -> Result<[u8; 32], String> {
     Ok(key)
 }
 
-/// Dev-only fallback when env is unset (local). Production should set SECRETS_ENCRYPTION_KEY.
-pub fn encryption_key_or_dev_default() -> Result<[u8; 32], String> {
+/// Dev-only fallback when env is unset (local). Production may omit until credentials are persisted.
+pub fn resolve_encryption_key() -> Result<Option<[u8; 32]>, String> {
     match encryption_key_from_env() {
-        Ok(k) => Ok(k),
+        Ok(k) => Ok(Some(k)),
         Err(_) if cfg!(debug_assertions) => {
             log::warn!("Using dev-only default SECRETS_ENCRYPTION_KEY; set a real key in production");
-            Ok([0x4c; 32]) // dev-only; set SECRETS_ENCRYPTION_KEY in production
+            Ok(Some([0x4c; 32]))
         }
-        Err(e) => Err(e),
+        Err(_) => Ok(None),
     }
+}
+
+/// Requires a key (dev default or env). Used when encryption is mandatory.
+pub fn encryption_key_or_dev_default() -> Result<[u8; 32], String> {
+    resolve_encryption_key()?.ok_or_else(|| {
+        "SECRETS_ENCRYPTION_KEY is not set (32-byte key, base64-encoded)".to_string()
+    })
 }
 
 pub fn encrypt_field(plaintext: &str, key: &[u8; 32]) -> Vec<u8> {

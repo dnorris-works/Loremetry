@@ -42,6 +42,8 @@ async fn main() {
         database_env
     );
 
+    tracing::info!("Boot: connecting to database and running migrations…");
+
     let database = match db::init(&database_url).await {
         Ok(d) => d,
         Err(e) => {
@@ -52,10 +54,19 @@ async fn main() {
                     "Hint: Check DATABASE_URL and Postgres reachability. If you see _sqlx_migrations does not exist, redeploy the latest image (migrate connection must use public search_path for sqlx)."
                 );
             }
+            if e.contains("previously applied but has been modified") {
+                eprintln!(
+                    "Hint: A migration file changed after it was applied. In SQL: SELECT * FROM public._sqlx_migrations; — contact support or fix checksum only if you know the schema is already correct."
+                );
+            }
+            if e.contains("does not exist") && e.contains("users") {
+                eprintln!("Hint: Migration 002 may not have completed. Redeploy the latest image (idempotent migration 002).");
+            }
             std::process::exit(1);
         }
     };
 
+    tracing::info!("Boot: loading platform secrets…");
     let secrets = match loremetry_core::platform_secrets::PlatformSecrets::load(
         database.pool.clone(),
         &config,
@@ -68,7 +79,7 @@ async fn main() {
             eprintln!("Platform secrets init failed: {e}");
             if e.contains("SECRETS_ENCRYPTION_KEY") {
                 eprintln!(
-                    "Hint: On Miget, add SECRETS_ENCRYPTION_KEY (32 random bytes, base64). Example: openssl rand -base64 32"
+                    "Hint: On Miget, add SECRETS_ENCRYPTION_KEY (32 random bytes, base64). Example: openssl rand -base64 32 — or rely on ANTHROPIC_API_KEY / TOKENMIX_API_KEY env vars until you set it."
                 );
             } else if e.contains("decrypt failed") {
                 eprintln!(
