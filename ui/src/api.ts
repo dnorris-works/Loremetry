@@ -3,6 +3,35 @@
 const BYPASS_STORAGE_KEY = 'loremetry_admin_bypass';
 
 let authTokenProvider: (() => Promise<string | null>) | null = null;
+let onAuthRequired: (() => void) | null = null;
+
+export function registerAuthRequiredHandler(fn: () => void): void {
+  onAuthRequired = fn;
+}
+
+function maybeNotifyAuthRequired(status: number, errorText: string | undefined): void {
+  const msg = (errorText ?? '').toLowerCase();
+  const authRelated =
+    status === 401
+    || msg.includes('clerk is not configured')
+    || msg.includes('missing authorization')
+    || msg.includes('jwt invalid')
+    || msg.includes('operator access required');
+    if (authRelated) {
+    onAuthRequired?.();
+  }
+}
+
+/** True when the API indicates the session is not valid (show login page). */
+export function isAuthFailureMessage(message: string): boolean {
+  const msg = message.toLowerCase();
+  return (
+    msg.includes('clerk is not configured')
+    || msg.includes('missing authorization')
+    || msg.includes('jwt invalid')
+    || msg.includes('operator access required')
+  );
+}
 
 export function getOperatorBypassToken(): string {
   try {
@@ -53,10 +82,12 @@ export async function invoke<T = unknown>(cmd: string, args?: Record<string, unk
   });
   const data = await res.json();
   if (!res.ok) {
+    maybeNotifyAuthRequired(res.status, data?.error);
     throw new Error(data?.error || res.statusText || 'Request failed');
   }
   // Error payloads are { error: string } without a success field (command results use success + error)
   if (data && typeof data === 'object' && 'error' in data && data.error && !('success' in data)) {
+    maybeNotifyAuthRequired(res.status, String(data.error));
     throw new Error(String(data.error));
   }
   return data as T;

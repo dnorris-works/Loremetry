@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue';
-import { getOperatorBypassToken, setAuthTokenProvider, setOperatorBypassToken } from '../api';
+import { getOperatorBypassToken, setAuthTokenProvider, setOperatorBypassToken, registerAuthRequiredHandler } from '../api';
 
 export type MeResponse = {
   id: string;
@@ -15,6 +15,12 @@ const me = ref<MeResponse | null>(null);
 const authReady = ref(false);
 
 let clerkSignOut: (() => Promise<void>) | null = null;
+
+registerAuthRequiredHandler(() => {
+  setOperatorBypassToken('');
+  me.value = null;
+  authReady.value = true;
+});
 
 export function registerClerkSignOut(fn: () => Promise<void>): void {
   clerkSignOut = fn;

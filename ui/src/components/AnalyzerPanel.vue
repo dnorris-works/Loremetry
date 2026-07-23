@@ -289,7 +289,6 @@ function onStop(): void {
     </div>
     <div v-else-if="loadError" class="report-cards-empty report-cards-error">
       Could not load report catalog: {{ loadError }}.
-      Sign in with Clerk or use operator access on the login page, then reload.
     </div>
     <div v-else-if="visibleReports.length === 0" class="report-cards-empty">
       No report types for the {{ platformCtx.platform.value }} tab. If this persists, check Admin → SQL:
