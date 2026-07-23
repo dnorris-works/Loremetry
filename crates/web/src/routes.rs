@@ -86,7 +86,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/admin/winningcat/import", post(admin::winningcat_import_json))
         .route("/admin/winningcat/upload", post(admin::winningcat_import_upload))
         .route("/admin/winningcat/remove-stale", post(admin::winningcat_remove_stale))
-        .route("/admin/platform-secrets", get(admin::get_platform_secrets).put(admin::put_platform_secrets))
+        .route(
+            "/admin/platform-secrets",
+            get(admin::get_platform_secrets)
+                .put(admin::put_platform_secrets)
+                .post(admin::put_platform_secrets),
+        )
         .route("/admin/platform-secrets/test-canopy", post(admin::test_platform_canopy))
         .route("/admin/platform-secrets/test-dataforseo", post(admin::test_platform_dataforseo))
         .route("/admin/test-canopy", post(admin::test_platform_canopy))

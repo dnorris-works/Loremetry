@@ -60,9 +60,11 @@ impl PlatformSecrets {
         }
         save_to_db(
             &self.pool,
-            self.key
-                .as_ref()
-                .ok_or("SECRETS_ENCRYPTION_KEY must be set to update platform credentials")?,
+        self.key
+            .as_ref()
+            .ok_or(
+                "Cannot save credentials: set a valid SECRETS_ENCRYPTION_KEY on the server (paste the output of `openssl rand -base64 32`, not the command text). Miget → Variables → redeploy → save again.",
+            )?,
             &creds,
         )
         .await?;
@@ -238,15 +240,18 @@ async fn save_to_db(
         creds.default_provider.as_str()
     };
     sqlx::query(
-        "UPDATE platform_secrets SET
-            anthropic_api_key = $1,
-            tokenmix_api_key = $2,
-            canopy_api_key = $3,
-            dataforseo_login = $4,
-            dataforseo_password = $5,
-            default_provider = $6,
-            updated_at = now()
-         WHERE id = 1",
+        "INSERT INTO platform_secrets (
+            id, anthropic_api_key, tokenmix_api_key, canopy_api_key,
+            dataforseo_login, dataforseo_password, default_provider
+         ) VALUES (1, $1, $2, $3, $4, $5, $6)
+         ON CONFLICT (id) DO UPDATE SET
+            anthropic_api_key = EXCLUDED.anthropic_api_key,
+            tokenmix_api_key = EXCLUDED.tokenmix_api_key,
+            canopy_api_key = EXCLUDED.canopy_api_key,
+            dataforseo_login = EXCLUDED.dataforseo_login,
+            dataforseo_password = EXCLUDED.dataforseo_password,
+            default_provider = EXCLUDED.default_provider,
+            updated_at = now()",
     )
     .bind(encrypt_field(&creds.anthropic_api_key, key))
     .bind(encrypt_field(&creds.tokenmix_api_key, key))

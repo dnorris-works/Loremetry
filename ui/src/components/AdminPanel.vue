@@ -147,20 +147,29 @@ function usageRangeFromMonth(ym: string): { from: string; to: string } {
   return { from: from.toISOString(), to: to.toISOString() };
 }
 
+function applyPlatformSecrets(data: PlatformSecretsView): void {
+  platformStatus.value = data;
+  credAnthropic.value = data.anthropic_api_key ?? '';
+  credTokenmix.value = data.tokenmix_api_key ?? '';
+  credCanopy.value = data.canopy_api_key ?? '';
+  credDfsLogin.value = data.dataforseo_login ?? '';
+  credDfsPassword.value = data.dataforseo_password ?? '';
+  if (data.default_provider) {
+    credDefaultProvider.value = data.default_provider;
+  }
+}
+
 async function loadPlatformSecrets(): Promise<void> {
   try {
-    const data = await adminFetch<PlatformSecretsView>('/platform-secrets');
-    platformStatus.value = data;
-    credAnthropic.value = data.anthropic_api_key ?? '';
-    credTokenmix.value = data.tokenmix_api_key ?? '';
-    credCanopy.value = data.canopy_api_key ?? '';
-    credDfsLogin.value = data.dataforseo_login ?? '';
-    credDfsPassword.value = data.dataforseo_password ?? '';
-    if (data.default_provider) {
-      credDefaultProvider.value = data.default_provider;
-    }
+    const data = await invoke<PlatformSecretsView>('get_platform_credentials');
+    applyPlatformSecrets(data);
   } catch {
-    platformStatus.value = null;
+    try {
+      const data = await adminFetch<PlatformSecretsView>('/platform-secrets');
+      applyPlatformSecrets(data);
+    } catch {
+      platformStatus.value = null;
+    }
   }
 }
 
@@ -187,14 +196,18 @@ async function savePlatformSecrets(): Promise<void> {
   if (dfsLogin) body.dataforseo_login = dfsLogin;
   if (dfsPassword) body.dataforseo_password = dfsPassword;
   try {
-    const result = await adminFetch<{ success: boolean; error?: string }>('/platform-secrets', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const result = await invoke<{
+      success: boolean;
+      error?: string;
+      credentials?: PlatformSecretsView;
+    }>('update_platform_credentials', body);
     if (result.success) {
-      platformSaveMsg.value = '✓ Saved';
-      await loadPlatformSecrets();
+      platformSaveMsg.value = '✓ Saved to database';
+      if (result.credentials) {
+        applyPlatformSecrets(result.credentials);
+      } else {
+        await loadPlatformSecrets();
+      }
       if (dfsLogin && dfsPassword) {
         platformDfsStatus.value = 'Testing…';
         try {
@@ -213,7 +226,8 @@ async function savePlatformSecrets(): Promise<void> {
   } catch (e) {
     platformSaveMsg.value = '✗ ' + String(e);
   }
-  setTimeout(() => { platformSaveMsg.value = ''; }, 5000);
+  const hideMs = platformSaveMsg.value.includes('SECRETS_ENCRYPTION_KEY') ? 15000 : 8000;
+  setTimeout(() => { platformSaveMsg.value = ''; }, hideMs);
 }
 
 async function onTestPlatformCanopy(): Promise<void> {
@@ -484,7 +498,7 @@ async function onRemoveStale(): Promise<void> {
 
     <h3 class="section-title">Platform credentials</h3>
     <div class="settings-form">
-      <p class="panel-desc">Enter values below, then <strong>Save platform credentials</strong>. Test buttons use what you typed; if fields are empty, they use what is already saved on the server.</p>
+      <p class="panel-desc">Enter values below, then <strong>Save platform credentials</strong> (stored encrypted in Postgres). Miget variable <code>SECRETS_ENCRYPTION_KEY</code> must be the <strong>output</strong> of <code>openssl rand -base64 32</code> (one line like <code>K7gNU3sdo+OL0wNhqoVWhr3g6sZxWo3+/bOVc4OGtjo=</code>) — not the command itself. Generate once, keep stable across deploys.</p>
       <div v-if="platformStatus" class="platform-status">
         <span>Anthropic: {{ configuredLabel(platformStatus.anthropic) }}</span>
         <span>TokenMix: {{ configuredLabel(platformStatus.tokenmix) }}</span>

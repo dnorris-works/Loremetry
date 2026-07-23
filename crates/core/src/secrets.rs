@@ -13,12 +13,25 @@ pub fn encryption_key_from_env() -> Result<[u8; 32], String> {
     let raw = std::env::var("SECRETS_ENCRYPTION_KEY").map_err(|_| {
         "SECRETS_ENCRYPTION_KEY is not set (32-byte key, base64-encoded)".to_string()
     })?;
+    parse_encryption_key_value(&raw)
+}
+
+/// Decode `SECRETS_ENCRYPTION_KEY` (32 raw bytes, standard base64).
+pub fn parse_encryption_key_value(raw: &str) -> Result<[u8; 32], String> {
+    let trimmed = raw.trim();
+    if trimmed.contains("openssl") || trimmed.contains("rand -base64") {
+        return Err(
+            "SECRETS_ENCRYPTION_KEY looks like the openssl command, not a key. In a terminal run: openssl rand -base64 32 — then paste that one-line output (e.g. K7gNU3sdo+OL0wNhqoVWhr3g6sZxWo3+/bOVc4OGtjo=) as the Miget variable value, redeploy, and save credentials again.".into(),
+        );
+    }
     let bytes = B64
-        .decode(raw.trim())
-        .map_err(|e| format!("SECRETS_ENCRYPTION_KEY invalid base64: {e}"))?;
+        .decode(trimmed)
+        .map_err(|e| format!(
+            "SECRETS_ENCRYPTION_KEY invalid base64: {e}. Generate a key with: openssl rand -base64 32 (paste the output, not the command)."
+        ))?;
     if bytes.len() != 32 {
         return Err(format!(
-            "SECRETS_ENCRYPTION_KEY must decode to 32 bytes, got {}",
+            "SECRETS_ENCRYPTION_KEY must decode to 32 bytes, got {}. Use: openssl rand -base64 32 and paste the full output.",
             bytes.len()
         ));
     }
@@ -29,13 +42,16 @@ pub fn encryption_key_from_env() -> Result<[u8; 32], String> {
 
 /// Dev-only fallback when env is unset (local). Production may omit until credentials are persisted.
 pub fn resolve_encryption_key() -> Result<Option<[u8; 32]>, String> {
-    match encryption_key_from_env() {
-        Ok(k) => Ok(Some(k)),
-        Err(_) if cfg!(debug_assertions) => {
-            log::warn!("Using dev-only default SECRETS_ENCRYPTION_KEY; set a real key in production");
-            Ok(Some([0x4c; 32]))
+    match std::env::var("SECRETS_ENCRYPTION_KEY") {
+        Err(_) => {
+            if cfg!(debug_assertions) {
+                log::warn!("SECRETS_ENCRYPTION_KEY unset; using dev-only default (debug build only)");
+                Ok(Some([0x4c; 32]))
+            } else {
+                Ok(None)
+            }
         }
-        Err(_) => Ok(None),
+        Ok(raw) => parse_encryption_key_value(&raw).map(Some),
     }
 }
 

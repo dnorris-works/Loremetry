@@ -14,6 +14,7 @@ use loremetry_core::documents::{self, UpsertDocumentRequest};
 use loremetry_core::series::{self, CreateSeriesRequest, UpdateSeriesRequest};
 use loremetry_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
 use loremetry_core::cancel_operation;
+use loremetry_core::platform_secrets::PlatformCredentialsPatch;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -35,7 +36,10 @@ pub async fn invoke_handler(
     // Connection tests may pass unsaved form values; do not strip or replace them.
     let skip_credential_inject = matches!(
         body.cmd.as_str(),
-        "test_canopy_connection" | "test_dataforseo_connection"
+        "test_canopy_connection"
+            | "test_dataforseo_connection"
+            | "get_platform_credentials"
+            | "update_platform_credentials"
     );
     if !skip_credential_inject {
         inject_platform_credentials(&state, &mut args).await;
@@ -200,6 +204,13 @@ async fn dispatch(state: &AppState, cmd: &str, mut args: Value) -> Result<Value,
                 _ => state.secrets.dataforseo().await,
             };
             to_val(dataforseo::test_dataforseo_connection(login, password).await)
+        }
+        "get_platform_credentials" => to_val(state.secrets.admin_get().await),
+        "update_platform_credentials" => {
+            let patch: PlatformCredentialsPatch = take_request(&args)?;
+            state.secrets.update(patch).await?;
+            let credentials = state.secrets.admin_get().await;
+            Ok(json!({ "success": true, "credentials": credentials }))
         }
         "import_winningcat_csv" | "remove_stale_kdp_categories" => {
             Err("WinningCat import is admin-only. Use /api/admin/winningcat or the Admin panel.".into())
