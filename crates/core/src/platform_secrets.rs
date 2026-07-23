@@ -29,24 +29,21 @@ pub struct PlatformSecrets {
 impl PlatformSecrets {
     pub async fn load(pool: PgPool, config: &Config) -> Result<Self, String> {
         let key = resolve_encryption_key()?;
-        let creds = load_from_db(&pool, key.as_ref()).await?;
-        let creds = if creds.is_empty() {
-            let from_env = credentials_from_config(config);
-            if !from_env.is_empty() {
+        let mut creds = load_from_db(&pool, key.as_ref()).await?;
+        if creds.is_empty() {
+            creds = credentials_from_config(config);
+            if !creds.is_empty() {
                 if let Some(ref k) = key {
-                    save_to_db(&pool, k, &from_env).await?;
+                    save_to_db(&pool, k, &creds).await?;
                 } else {
                     log::warn!(
                         "SECRETS_ENCRYPTION_KEY not set; using API keys from environment only (not persisted). Set SECRETS_ENCRYPTION_KEY to store encrypted credentials in the database."
                     );
                 }
-                from_env
-            } else {
-                from_env
             }
         } else {
-            creds
-        };
+            overlay_missing_from_env(&mut creds, config);
+        }
         Ok(Self {
             inner: Arc::new(RwLock::new(creds)),
             pool,
@@ -55,7 +52,7 @@ impl PlatformSecrets {
     }
 
     pub async fn reload(&self) -> Result<(), String> {
-        let creds = load_from_db(&self.pool, self.key.as_ref()).await?;
+        let mut creds = load_from_db(&self.pool, self.key.as_ref()).await?;
         *self.inner.write().await = creds;
         Ok(())
     }
@@ -102,7 +99,10 @@ impl PlatformSecrets {
 
     pub async fn dataforseo(&self) -> (String, String) {
         let c = self.inner.read().await;
-        (c.dataforseo_login.clone(), c.dataforseo_password.clone())
+        (
+            c.dataforseo_login.trim().to_string(),
+            c.dataforseo_password.trim().to_string(),
+        )
     }
 
     pub async fn default_provider(&self) -> String {
@@ -173,6 +173,28 @@ fn credentials_from_config(config: &Config) -> PlatformCredentials {
         dataforseo_login: config.dataforseo_login.clone(),
         dataforseo_password: config.dataforseo_password.clone(),
         default_provider: config.default_provider.clone(),
+    }
+}
+
+/// Fill any empty stored fields from process env (Miget DATAFORSEO_*, etc.).
+fn overlay_missing_from_env(creds: &mut PlatformCredentials, config: &Config) {
+    if creds.anthropic_api_key.trim().is_empty() && !config.anthropic_api_key.trim().is_empty() {
+        creds.anthropic_api_key = config.anthropic_api_key.clone();
+    }
+    if creds.tokenmix_api_key.trim().is_empty() && !config.tokenmix_api_key.trim().is_empty() {
+        creds.tokenmix_api_key = config.tokenmix_api_key.clone();
+    }
+    if creds.canopy_api_key.trim().is_empty() && !config.canopy_api_key.trim().is_empty() {
+        creds.canopy_api_key = config.canopy_api_key.clone();
+    }
+    if creds.dataforseo_login.trim().is_empty() && !config.dataforseo_login.trim().is_empty() {
+        creds.dataforseo_login = config.dataforseo_login.clone();
+    }
+    if creds.dataforseo_password.trim().is_empty() && !config.dataforseo_password.trim().is_empty() {
+        creds.dataforseo_password = config.dataforseo_password.clone();
+    }
+    if creds.default_provider.trim().is_empty() && !config.default_provider.trim().is_empty() {
+        creds.default_provider = config.default_provider.clone();
     }
 }
 

@@ -19,6 +19,10 @@ use super::keywords::{
     generate_discovery_keywords, generate_mi_search_terms, render_kdp_keywords, render_search_terms,
 };
 
+fn has_dataforseo_creds(login: &str, password: &str) -> bool {
+    !login.trim().is_empty() && !password.trim().is_empty()
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
@@ -715,10 +719,10 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
             Vec::new()
         } else {
             emit(&app, &format!("  Seeds: {:?}", seeds));
-            if !request.dataforseo_login.is_empty() && !request.dataforseo_password.is_empty() {
+            if has_dataforseo_creds(&request.dataforseo_login, &request.dataforseo_password) {
                 run_keyword_searches_dataforseo(&app, &request.story_id, &seeds, &request.dataforseo_login, &request.dataforseo_password).await
-            } else if !request.canopy_api_key.is_empty() {
-                emit(&app, "⚠ DataForSEO credentials not set — falling back to Canopy for keyword search. Add DataForSEO login/password in Settings for real Amazon search volume data.");
+            } else if !request.canopy_api_key.trim().is_empty() {
+                emit(&app, "⚠ DataForSEO credentials not set — falling back to Canopy for keyword search. Add DataForSEO in Admin → Platform credentials (or DATAFORSEO_LOGIN/PASSWORD on the server).");
                 run_keyword_searches_canopy(&app, &request.story_id, &seeds, &request.canopy_api_key).await
             } else {
                 emit(&app, "  ⚠ No DataForSEO or Canopy credentials — skipping keyword search.");
@@ -773,7 +777,7 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
         match res {
             Ok(entries) => {
                 // Enrich with Google search volume from DataForSEO if credentials available
-                let enriched = if !request.dataforseo_login.is_empty() && !request.dataforseo_password.is_empty() && !entries.is_empty() {
+                let enriched = if has_dataforseo_creds(&request.dataforseo_login, &request.dataforseo_password) && !entries.is_empty() {
                     emit(&app, "  Enriching with Google search volume via DataForSEO...");
                     let phrases: Vec<String> = entries.iter().map(|e| e.phrase.clone()).collect();
                     let client = crate::dataforseo::DataForSeoClient::new(&request.dataforseo_login, &request.dataforseo_password);
