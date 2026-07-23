@@ -190,14 +190,49 @@ pub async fn put_platform_secrets(
 }
 
 /// POST /api/admin/platform-secrets/test-canopy
-pub async fn test_platform_canopy(State(state): State<AppState>) -> impl IntoResponse {
-    let key = state.secrets.canopy_key().await;
+#[derive(Deserialize, Default)]
+pub struct TestCanopyBody {
+    #[serde(default)]
+    pub canopy_api_key: Option<String>,
+}
+
+pub async fn test_platform_canopy(
+    State(state): State<AppState>,
+    body: Option<Json<TestCanopyBody>>,
+) -> impl IntoResponse {
+    let key = match body {
+        Some(Json(b)) => match b.canopy_api_key.filter(|s| !s.trim().is_empty()) {
+            Some(k) => k,
+            None => state.secrets.canopy_key().await,
+        },
+        None => state.secrets.canopy_key().await,
+    };
     ok_json(serde_json::to_value(canopy::test_canopy_connection(key).await).unwrap_or(json!(null)))
 }
 
 /// POST /api/admin/platform-secrets/test-dataforseo
-pub async fn test_platform_dataforseo(State(state): State<AppState>) -> impl IntoResponse {
-    let (login, password) = state.secrets.dataforseo().await;
+#[derive(Deserialize, Default)]
+pub struct TestDataforseoBody {
+    #[serde(default)]
+    pub dataforseo_login: Option<String>,
+    #[serde(default)]
+    pub dataforseo_password: Option<String>,
+}
+
+pub async fn test_platform_dataforseo(
+    State(state): State<AppState>,
+    body: Option<Json<TestDataforseoBody>>,
+) -> impl IntoResponse {
+    let (login, password) = match body {
+        Some(Json(b)) => match (
+            b.dataforseo_login.filter(|s| !s.trim().is_empty()),
+            b.dataforseo_password.filter(|s| !s.trim().is_empty()),
+        ) {
+            (Some(l), Some(p)) => (l, p),
+            _ => state.secrets.dataforseo().await,
+        },
+        None => state.secrets.dataforseo().await,
+    };
     ok_json(
         serde_json::to_value(dataforseo::test_dataforseo_connection(login, password).await)
             .unwrap_or(json!(null)),

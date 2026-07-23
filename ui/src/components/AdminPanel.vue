@@ -150,6 +150,18 @@ async function loadPlatformSecrets(): Promise<void> {
 }
 
 async function savePlatformSecrets(): Promise<void> {
+  const dfsLogin = credDfsLogin.value.trim();
+  const dfsPassword = credDfsPassword.value.trim();
+  if (dfsLogin && !dfsPassword) {
+    platformSaveMsg.value = '✗ Enter DataForSEO password (login and password are both required).';
+    setTimeout(() => { platformSaveMsg.value = ''; }, 5000);
+    return;
+  }
+  if (dfsPassword && !dfsLogin) {
+    platformSaveMsg.value = '✗ Enter DataForSEO login (login and password are both required).';
+    setTimeout(() => { platformSaveMsg.value = ''; }, 5000);
+    return;
+  }
   platformSaveMsg.value = 'Saving…';
   const body: Record<string, string> = {
     default_provider: credDefaultProvider.value,
@@ -157,8 +169,8 @@ async function savePlatformSecrets(): Promise<void> {
   if (credAnthropic.value.trim()) body.anthropic_api_key = credAnthropic.value.trim();
   if (credTokenmix.value.trim()) body.tokenmix_api_key = credTokenmix.value.trim();
   if (credCanopy.value.trim()) body.canopy_api_key = credCanopy.value.trim();
-  if (credDfsLogin.value.trim()) body.dataforseo_login = credDfsLogin.value.trim();
-  if (credDfsPassword.value.trim()) body.dataforseo_password = credDfsPassword.value.trim();
+  if (dfsLogin) body.dataforseo_login = dfsLogin;
+  if (dfsPassword) body.dataforseo_password = dfsPassword;
   try {
     const result = await adminFetch<{ success: boolean; error?: string }>('/platform-secrets', {
       method: 'PUT',
@@ -173,20 +185,39 @@ async function savePlatformSecrets(): Promise<void> {
       credDfsLogin.value = '';
       credDfsPassword.value = '';
       await loadPlatformSecrets();
+      if (dfsLogin && dfsPassword) {
+        platformDfsStatus.value = 'Testing…';
+        try {
+          const testResult = await adminFetch<{ success: boolean; error: string }>(
+            '/platform-secrets/test-dataforseo',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ dataforseo_login: dfsLogin, dataforseo_password: dfsPassword }),
+            },
+          );
+          platformDfsStatus.value = testResult.success ? '✓ Connected' : '✗ ' + testResult.error;
+        } catch (e) {
+          platformDfsStatus.value = '✗ ' + String(e);
+        }
+      }
     } else {
-      platformSaveMsg.value = result.error || 'Save failed';
+      platformSaveMsg.value = '✗ ' + (result.error || 'Save failed');
     }
   } catch (e) {
-    platformSaveMsg.value = String(e);
+    platformSaveMsg.value = '✗ ' + String(e);
   }
-  setTimeout(() => { platformSaveMsg.value = ''; }, 3000);
+  setTimeout(() => { platformSaveMsg.value = ''; }, 5000);
 }
 
 async function onTestPlatformCanopy(): Promise<void> {
   platformCanopyStatus.value = 'Testing…';
+  const key = credCanopy.value.trim();
   try {
     const result = await adminFetch<{ success: boolean; error: string }>('/platform-secrets/test-canopy', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(key ? { canopy_api_key: key } : {}),
     });
     platformCanopyStatus.value = result.success ? '✓ Connected' : '✗ ' + result.error;
   } catch (e) {
@@ -196,9 +227,17 @@ async function onTestPlatformCanopy(): Promise<void> {
 
 async function onTestPlatformDataforseo(): Promise<void> {
   platformDfsStatus.value = 'Testing…';
+  const login = credDfsLogin.value.trim();
+  const password = credDfsPassword.value.trim();
   try {
     const result = await adminFetch<{ success: boolean; error: string }>('/platform-secrets/test-dataforseo', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(
+        login && password
+          ? { dataforseo_login: login, dataforseo_password: password }
+          : {},
+      ),
     });
     platformDfsStatus.value = result.success ? '✓ Connected' : '✗ ' + result.error;
   } catch (e) {
@@ -445,7 +484,7 @@ async function onRemoveStale(): Promise<void> {
 
     <h3 class="section-title">Platform credentials</h3>
     <div class="settings-form">
-      <p class="panel-desc">Stored encrypted on the server. Leave a field blank to keep the current value.</p>
+      <p class="panel-desc">Enter values below, then <strong>Save platform credentials</strong>. Test buttons use what you typed; if fields are empty, they use what is already saved on the server.</p>
       <div v-if="platformStatus" class="platform-status">
         <span>Anthropic: {{ configuredLabel(platformStatus.anthropic) }}</span>
         <span>TokenMix: {{ configuredLabel(platformStatus.tokenmix) }}</span>
