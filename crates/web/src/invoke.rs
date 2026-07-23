@@ -212,6 +212,7 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
         "update_platform_credentials" => {
             let patch: PlatformCredentialsPatch = take_request(&args)?;
             state.secrets.update(patch).await?;
+            state.jwt.reset_cache().await;
             let credentials = state.secrets.admin_get().await;
             Ok(json!({ "success": true, "credentials": credentials }))
         }

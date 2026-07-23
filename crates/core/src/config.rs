@@ -38,7 +38,7 @@ impl Config {
     }
 }
 
-/// Read Postgres URL from env (Miget may inject `DATABASE_URL`, `POSTGRES_*_URL`, etc.).
+/// Read Postgres URL from env (`DATABASE_URL`, `POSTGRES_*_URL`, etc.).
 pub fn resolve_database_url() -> Option<String> {
     resolve_database_url_with_source().map(|(url, _)| url)
 }
@@ -47,7 +47,6 @@ pub fn resolve_database_url() -> Option<String> {
 pub fn resolve_database_url_with_source() -> Option<(String, String)> {
     for key in [
         "DATABASE_URL",
-        "POSTGRES_DBWEI_URL",
         "POSTGRES_URL",
         "POSTGRESQL_URL",
     ] {
@@ -57,8 +56,8 @@ pub fn resolve_database_url_with_source() -> Option<(String, String)> {
             }
         }
     }
-    // Miget shared/project DB addons often use POSTGRES_<name>_URL (e.g. POSTGRES_DBWEI_URL).
-    let mut miget_keys: Vec<String> = env::vars()
+    // Hosted Postgres addons often expose POSTGRES_<service>_URL.
+    let mut postgres_url_keys: Vec<String> = env::vars()
         .filter_map(|(key, value)| {
             if key.starts_with("POSTGRES_") && key.ends_with("_URL") && !value.trim().is_empty() {
                 Some(key)
@@ -67,8 +66,8 @@ pub fn resolve_database_url_with_source() -> Option<(String, String)> {
             }
         })
         .collect();
-    miget_keys.sort();
-    for key in miget_keys {
+    postgres_url_keys.sort();
+    for key in postgres_url_keys {
         if let Ok(url) = env::var(&key) {
             if let Some(normalized) = normalize_resolved_url(&url) {
                 return Some((normalized, key));
@@ -78,7 +77,7 @@ pub fn resolve_database_url_with_source() -> Option<(String, String)> {
     None
 }
 
-/// Reject empty values and Miget placeholder IDs that are not connection strings.
+/// Reject empty values and placeholder IDs that are not connection strings.
 fn normalize_resolved_url(raw: &str) -> Option<String> {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -102,7 +101,6 @@ pub fn database_url_diagnostics() -> String {
     ];
     for key in [
         "DATABASE_URL",
-        "POSTGRES_DBWEI_URL",
         "POSTGRES_URL",
         "POSTGRESQL_URL",
     ] {
@@ -118,7 +116,7 @@ pub fn database_url_diagnostics() -> String {
             Err(_) => lines.push(format!("{key} is not set.")),
         }
     }
-    let mut miget_keys: Vec<String> = env::vars()
+    let mut postgres_url_keys: Vec<String> = env::vars()
         .filter_map(|(key, value)| {
             if key.starts_with("POSTGRES_") && key.ends_with("_URL") && !value.trim().is_empty() {
                 Some(key)
@@ -127,12 +125,9 @@ pub fn database_url_diagnostics() -> String {
             }
         })
         .collect();
-    miget_keys.sort();
-    for key in miget_keys {
-        if matches!(
-            key.as_str(),
-            "POSTGRES_DBWEI_URL" | "POSTGRES_URL" | "POSTGRESQL_URL"
-        ) {
+    postgres_url_keys.sort();
+    for key in postgres_url_keys {
+        if matches!(key.as_str(), "POSTGRES_URL" | "POSTGRESQL_URL") {
             continue;
         }
         match env::var(&key) {
@@ -160,7 +155,7 @@ pub fn database_url_host(url: &str) -> String {
         .to_string()
 }
 
-/// Prepare a Miget/Heroku-style URL for sqlx (rustls).
+/// Prepare a postgres URL for sqlx (rustls), including sslmode when missing.
 pub fn normalize_database_url(url: &str) -> String {
     let mut out = url.trim().replace("postgres://", "postgresql://");
     if !out.contains("sslmode=") {

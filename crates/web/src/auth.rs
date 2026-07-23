@@ -24,16 +24,12 @@ pub struct ClerkConfig {
 }
 
 impl ClerkConfig {
-    pub fn from_env() -> Option<Self> {
-        let jwt_issuer = std::env::var("CLERK_JWT_ISSUER")
-            .ok()
-            .filter(|s| !s.trim().is_empty())?;
-        let publishable_key = std::env::var("CLERK_PUBLISHABLE_KEY")
-            .or_else(|_| std::env::var("VITE_CLERK_PUBLISHABLE_KEY"))
-            .unwrap_or_default();
+    pub fn from_credentials(creds: &loremetry_core::platform_secrets::PlatformCredentials) -> Option<Self> {
+        let (publishable_key, jwt_issuer) =
+            loremetry_core::platform_secrets::PlatformSecrets::clerk_config(creds)?;
         Some(Self {
             publishable_key,
-            jwt_issuer: jwt_issuer.trim_end_matches('/').to_string(),
+            jwt_issuer,
         })
     }
 }
@@ -111,22 +107,42 @@ impl JwksCache {
     }
 }
 
-#[derive(Clone)]
-pub struct AuthState {
-    pub clerk: Option<ClerkConfig>,
-    pub jwks: Option<JwksCache>,
+#[derive(Clone, Default)]
+pub struct JwtVerifier {
+    cache: Arc<RwLock<Option<(String, JwksCache)>>>,
 }
 
-impl AuthState {
-    pub fn from_env() -> Self {
-        let clerk = ClerkConfig::from_env();
-        let jwks = clerk.as_ref().map(|c| JwksCache::new(c.jwt_issuer.clone()));
-        Self { clerk, jwks }
+impl JwtVerifier {
+    pub fn new() -> Self {
+        Self {
+            cache: Arc::new(RwLock::new(None)),
+        }
     }
 
-    pub fn enabled(&self) -> bool {
-        self.clerk.is_some()
+    pub async fn reset_cache(&self) {
+        *self.cache.write().await = None;
     }
+
+    async fn jwks_for_issuer(&self, issuer: &str) -> Result<JwksCache, String> {
+        let mut guard = self.cache.write().await;
+        if let Some((iss, cache)) = guard.as_ref() {
+            if iss == issuer {
+                return Ok(cache.clone());
+            }
+        }
+        let cache = JwksCache::new(issuer.to_string());
+        *guard = Some((issuer.to_string(), cache.clone()));
+        Ok(cache)
+    }
+}
+
+async fn clerk_config_from_state(state: &AppState) -> Option<ClerkConfig> {
+    let creds = state.secrets.get().await;
+    ClerkConfig::from_credentials(&creds)
+}
+
+pub async fn clerk_auth_enabled(state: &AppState) -> bool {
+    clerk_config_from_state(state).await.is_some()
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,13 +183,11 @@ fn bearer_from_headers(headers: &HeaderMap) -> Option<String> {
 }
 
 async fn verify_clerk_token(
-    auth: &AuthState,
+    state: &AppState,
+    clerk: &ClerkConfig,
     token: &str,
 ) -> Result<ClerkJwtClaims, String> {
-    let jwks = auth
-        .jwks
-        .as_ref()
-        .ok_or("Clerk JWKS not configured")?;
+    let jwks = state.jwt.jwks_for_issuer(&clerk.jwt_issuer).await?;
     let header = decode_header(token).map_err(|e| format!("JWT header: {e}"))?;
     let kid = header.kid.ok_or("JWT missing kid")?;
     let set = jwks.jwks().await?;
@@ -181,25 +195,19 @@ async fn verify_clerk_token(
         .find(&kid)
         .ok_or_else(|| format!("JWKS missing key {kid}"))?;
     let dec_key = DecodingKey::from_jwk(jwk).map_err(|e| format!("JWK: {e}"))?;
-    let issuer = auth
-        .clerk
-        .as_ref()
-        .map(|c| c.jwt_issuer.clone())
-        .ok_or("Clerk issuer not configured")?;
     let mut validation = Validation::new(Algorithm::RS256);
-    validation.set_issuer(&[issuer.as_str()]);
+    validation.set_issuer(&[clerk.jwt_issuer.as_str()]);
     let token_data = decode::<ClerkJwtClaims>(token, &dec_key, &validation)
         .map_err(|e| format!("JWT invalid: {e}"))?;
     Ok(token_data.claims)
 }
 
 pub async fn resolve_auth_user(state: &AppState, headers: &HeaderMap) -> Result<AuthUser, String> {
-    let auth = &state.auth;
-    if !auth.enabled() {
+    let Some(clerk) = clerk_config_from_state(state).await else {
         return Ok(AuthUser::bootstrap(state));
-    }
+    };
     let token = bearer_from_headers(headers).ok_or("Missing Authorization: Bearer session token")?;
-    let claims = verify_clerk_token(auth, &token).await?;
+    let claims = verify_clerk_token(state, &clerk, &token).await?;
     let clerk_role = clerk_role_from_claims(&claims);
     let email = claims.email.unwrap_or_default();
     let (db_user_id, role) =
@@ -256,7 +264,7 @@ impl FromRequestParts<AppState> for Authenticated {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        if !state.auth.enabled() {
+        if !clerk_auth_enabled(state).await {
             return Ok(Authenticated {
                 state: state.clone(),
                 user: AuthUser::bootstrap(state),
@@ -278,16 +286,11 @@ impl FromRequestParts<AppState> for Authenticated {
 
 /// GET /api/auth/config — public Clerk settings for the SPA.
 pub async fn auth_config(State(state): State<AppState>) -> impl IntoResponse {
-    let enabled = state.auth.enabled();
-    let publishable_key = state
-        .auth
-        .clerk
-        .as_ref()
-        .map(|c| c.publishable_key.clone())
-        .unwrap_or_default();
+    let creds = state.secrets.get().await;
+    let clerk = ClerkConfig::from_credentials(&creds);
     ok_json(json!({
-        "clerkEnabled": enabled,
-        "publishableKey": publishable_key,
+        "clerkEnabled": clerk.is_some(),
+        "publishableKey": clerk.map(|c| c.publishable_key).unwrap_or_default(),
     }))
 }
 

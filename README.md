@@ -1,6 +1,6 @@
 # Loremetry
 
-Single-user Vue + Rust (Axum) app for fiction market/craft analysis. Deployed on Miget.
+Single-user Vue + Rust (Axum) app for fiction market/craft analysis. Ships as a **Docker image**; run it on any host that provides Postgres and a few server env vars.
 
 ## Local development
 
@@ -47,20 +47,32 @@ cargo run -p loremetry-web
 cd ui && npm run dev
 ```
 
-Runtime environment (Miget):
+### Server environment (any host)
 
-- `DATABASE_URL` — PostgreSQL connection string (required on Miget)
-- `SECRETS_ENCRYPTION_KEY` — 32-byte key, base64-encoded (required in production to encrypt/decrypt platform credentials in the DB)
-- `BOOTSTRAP_ADMIN_EMAIL` — email for the first admin user when the database has no users (default `admin@local`)
-- `CLERK_PUBLISHABLE_KEY` — Clerk publishable key (`pk_…`) for the sign-in UI
-- `CLERK_JWT_ISSUER` — Clerk JWT issuer URL (e.g. `https://your-app.clerk.accounts.dev`) — enables auth; when unset, the app runs in local open mode
-- `PORT`, `STATIC_DIR` — HTTP server (set by the container image on Miget)
+These are **infrastructure** settings only. Provider API keys, Clerk, and other operator config live in **Postgres** (`lore.platform_secrets`) via **Admin → Platform credentials**.
 
-Provider API keys (Anthropic, TokenMix, Canopy, DataForSEO) are **only** stored encrypted in Postgres (`lore.platform_secrets`) via **Admin → Platform credentials**. They are not read from Miget env vars.
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | PostgreSQL connection string (`postgres://…`). Also accepts `POSTGRES_URL`, `POSTGRESQL_URL`, or any `POSTGRES_<name>_URL` from a managed addon. |
+| `SECRETS_ENCRYPTION_KEY` | Base64-encoded 32-byte key (`openssl rand -base64 32`). Required in production to encrypt API secrets in the DB. **Keep this with your database backup** when you change hosts. |
+| `BOOTSTRAP_ADMIN_EMAIL` | Optional. First admin user when the DB has no users and Clerk is not configured (default `admin@local`). |
+| `PORT` | HTTP listen port (default `8080`; many platforms set this automatically). |
+| `STATIC_DIR` | Path to built Vue assets (default `./ui/dist`; set in the Docker image). |
+| `DATABASE_SSLMODE` | Optional. `prefer` (default for remote hosts), `disable` for localhost. |
+| `MAX_BODY_MB` | Optional upload limit (default 256). |
+
+### Moving to another host
+
+1. **Database** — `pg_dump` / restore (or attach the same Postgres from the new network). Migrations run on boot.
+2. **`SECRETS_ENCRYPTION_KEY`** — set the **same** value on the new host before serving traffic. Without it, encrypted credentials in `lore.platform_secrets` cannot be decrypted.
+3. **Operator config** — already in the DB (API keys, Clerk issuer/publishable key, stories, usage). No Miget- or host-specific secrets to re-enter if the DB moved intact.
+4. **`DATABASE_URL`** — point at the database from the new runtime.
+5. **Clerk** — add the new app URL to Clerk **allowed origins** / redirect URLs if the domain changed.
+6. **Deploy** — build from the repo `Dockerfile` (or pull your image) and set the env vars above.
 
 ### Clerk (sign-in + admin role)
 
-1. Create a Clerk application and add **CLERK_PUBLISHABLE_KEY** and **CLERK_JWT_ISSUER** to Miget (issuer is on Clerk → **API keys** → “Frontend API URL”, without a trailing slash).
+1. Create a Clerk application. In Loremetry **Admin → Platform credentials**, set **Clerk publishable key** and **JWT issuer** (Clerk → **API keys** → “Frontend API URL”, without a trailing slash). Save, then reload the app so sign-in initializes with the publishable key.
 2. **Your user (admin):** Clerk Dashboard → **Users** → your user → **Public metadata**:
 
    ```json
@@ -80,21 +92,26 @@ Provider API keys (Anthropic, TokenMix, Canopy, DataForSEO) are **only** stored 
 
 5. Redeploy. Sign in via Clerk; API calls send `Authorization: Bearer <session token>` automatically.
 
-## Production (Miget via GitHub)
+## Production deploy
 
-You should only need **GitHub → this repo → deploy** (same as your other app). Miget builds from what’s **in the repo** — you don’t run Docker locally or pick a separate “Dockerfile deploy” product in the UI.
+**Portable:** root **`Dockerfile`** + `cargo run` target **`loremetry-web`**. Entrypoint listens on **`$PORT`** and serves the UI from **`STATIC_DIR`** baked into the image.
 
-What worked before: a root **`Dockerfile`** in git plus a minimal **`app.json`** (`LANGUAGE=dockerfile`). Miget builds that image on push.
+```bash
+docker build -t loremetry .
+docker run -p 8080:8080 \
+  -e DATABASE_URL=postgres://… \
+  -e SECRETS_ENCRYPTION_KEY=… \
+  -e PORT=8080 \
+  loremetry
+```
 
-What broke **Loremetry** on `main`: the **`Dockerfile` was deleted** and **`app.json` pointed at Rust + Node buildpacks** (`BUILD_COMMAND`, `Procfile`, root `package.json`). That’s when you started seeing `./app: not found` and `cargo: not found` — not because the app name changed.
+### Miget (current host)
 
-After you push the fix ( **`Dockerfile` back**, buildpack cruft removed):
+GitHub → repo → deploy with **`app.json`** (`LANGUAGE=dockerfile`). Miget builds the Dockerfile on push.
 
-1. **GitHub app** → Loremetry repo → deploy / auto-deploy on push (same flow as the working app).
-2. If this app still fails but the other one doesn’t, open **Settings → Variables** on Loremetry and **delete leftovers** from the bad period: `BUILD_COMMAND`, `LANGUAGE=rust`, anything forcing buildpacks.
-3. **Postgres:** DB addon on the app (`DATABASE_URL`) or project `POSTGRES_*_URL` — the server accepts both.
-
-The container runs **`/app/loremetry-web`** on Miget’s **`$PORT`**.
+1. **GitHub app** → Loremetry repo → deploy / auto-deploy on push.
+2. If builds fail with `cargo: not found` or `./app: not found`, remove leftover buildpack vars (`BUILD_COMMAND`, `LANGUAGE=rust`) and ensure the **`Dockerfile`** is on `main`.
+3. **Postgres:** `DATABASE_URL` on the app or a project `POSTGRES_*_URL` — the server discovers any of these automatically.
 
 ### Inspecting the database (SQL, schema)
 
@@ -109,16 +126,10 @@ SELECT COUNT(*) FROM lore.kdp_categories;
 
 | Symptom | Fix |
 |---------|-----|
-| `cargo: not found` during build | Repo or app vars still on **buildpacks**. Commit root **`Dockerfile`**, restore minimal **`app.json`**, remove `BUILD_COMMAND` / `LANGUAGE=rust` on the Miget app, redeploy from GitHub. |
-| `./app: not found` | Same — buildpack image. Push **`Dockerfile`** + `CMD /app/loremetry-web`; redeploy from GitHub. |
+| `cargo: not found` during build | Host still using **buildpacks**. Deploy via the repo **`Dockerfile`**; remove `BUILD_COMMAND` / `LANGUAGE=rust` if set. |
+| `./app: not found` | Same — use Docker image with `CMD /app/loremetry-web`. |
 | `DATABASE_URL` / DB errors | Real `postgres://…` at runtime; check logs for `FATAL` / `Database init failed`. |
-| Pod **CrashLoopBackOff** right after secrets/usage deploy | `SECRETS_ENCRYPTION_KEY` must be a **base64 key**, not the text `openssl rand -base64 32`. On your laptop run `openssl rand -base64 32`, copy the single line of output into Miget **Variables** as the value, redeploy. If the var is set but invalid, the pod will fail fast with a clear error in logs. |
+| Pod **CrashLoopBackOff** right after secrets deploy | `SECRETS_ENCRYPTION_KEY` must be a **base64 key**, not the text `openssl rand -base64 32`. Run `openssl rand -base64 32` locally, set that one line in the server environment, redeploy. |
 | `relation "_sqlx_migrations" does not exist` during `Database init failed` | Usually migration 002 left `search_path` on `lore` so sqlx could not see `public._sqlx_migrations`. Deploy the fix (migrate pool forces `public` search_path; migration 002 no longer sets `search_path`). If the DB is stuck, ensure `public._sqlx_migrations` exists (redeploy) or create it from a working sqlx migrate on another env. |
-| `migration … was previously applied but has been modified` | Migration 002 was recorded, then the file in git changed. If `lore.users` already exists: `DELETE FROM public._sqlx_migrations WHERE version = 2;` then redeploy (002 is idempotent). Otherwise ask support before deleting migration rows. |
+| `migration … was previously applied but has been modified` | Migration 002 was recorded, then the file in git changed. If `lore.users` already exists: `DELETE FROM public._sqlx_migrations WHERE version = 2;` then redeploy (002 is idempotent). Otherwise fix migration rows only if you know the schema is already correct. |
 
-Optional local production image:
-
-```bash
-docker build -t loremetry .
-docker run -p 5000:5000 -e DATABASE_URL=... -e PORT=5000 loremetry
-```

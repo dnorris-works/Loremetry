@@ -181,6 +181,7 @@ pub async fn put_platform_secrets(
 ) -> impl IntoResponse {
     match auth.state.secrets.update(patch).await {
         Ok(()) => {
+            auth.state.jwt.reset_cache().await;
             let status = auth.state.secrets.configured_status().await;
             ok_json(json!({ "success": true, "configured": status }))
         }

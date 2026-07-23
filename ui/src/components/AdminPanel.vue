@@ -19,6 +19,7 @@ const platformStatus = ref<{
   canopy: boolean;
   dataforseo: boolean;
   default_provider: string;
+  clerk_enabled?: boolean;
 } | null>(null);
 const platformSaveMsg = ref('');
 const platformCanopyStatus = ref('');
@@ -28,6 +29,8 @@ const credTokenmix = ref('');
 const credCanopy = ref('');
 const credDfsLogin = ref('');
 const credDfsPassword = ref('');
+const credClerkPublishable = ref('');
+const credClerkIssuer = ref('');
 const credDefaultProvider = ref('tokenmix');
 const showCredentialValues = ref(true);
 
@@ -42,6 +45,9 @@ type PlatformSecretsView = {
   canopy_api_key: string;
   dataforseo_login: string;
   dataforseo_password: string;
+  clerk_publishable_key: string;
+  clerk_jwt_issuer: string;
+  clerk_enabled: boolean;
 };
 
 const credFieldType = computed(() => (showCredentialValues.value ? 'text' : 'password'));
@@ -158,6 +164,8 @@ function applyPlatformSecrets(data: PlatformSecretsView): void {
   if (data.default_provider) {
     credDefaultProvider.value = data.default_provider;
   }
+  credClerkPublishable.value = data.clerk_publishable_key ?? '';
+  credClerkIssuer.value = data.clerk_jwt_issuer ?? '';
 }
 
 async function loadPlatformSecrets(): Promise<void> {
@@ -196,6 +204,10 @@ async function savePlatformSecrets(): Promise<void> {
   if (credCanopy.value.trim()) body.canopy_api_key = credCanopy.value.trim();
   if (dfsLogin) body.dataforseo_login = dfsLogin;
   if (dfsPassword) body.dataforseo_password = dfsPassword;
+  const clerkPk = credClerkPublishable.value.trim();
+  const clerkIss = credClerkIssuer.value.trim();
+  if (clerkPk) body.clerk_publishable_key = clerkPk;
+  if (clerkIss) body.clerk_jwt_issuer = clerkIss;
   try {
     const result = await invoke<{
       success: boolean;
@@ -523,12 +535,13 @@ async function onRemoveStale(): Promise<void> {
 
     <h3 class="section-title">Platform credentials</h3>
     <div class="settings-form">
-      <p class="panel-desc">Enter values below, then <strong>Save platform credentials</strong> (stored encrypted in Postgres). Miget variable <code>SECRETS_ENCRYPTION_KEY</code> must be the <strong>output</strong> of <code>openssl rand -base64 32</code> (one line like <code>K7gNU3sdo+OL0wNhqoVWhr3g6sZxWo3+/bOVc4OGtjo=</code>) — not the command itself. Generate once, keep stable across deploys.</p>
+      <p class="panel-desc">Enter values below, then <strong>Save platform credentials</strong> (stored encrypted in Postgres). The server must have <code>SECRETS_ENCRYPTION_KEY</code> set to the <strong>output</strong> of <code>openssl rand -base64 32</code> (one line like <code>K7gNU3sdo+OL0wNhqoVWhr3g6sZxWo3+/bOVc4OGtjo=</code>) — not the command itself. Use the same key on every deploy and when you move hosts if you keep the same database.</p>
       <div v-if="platformStatus" class="platform-status">
         <span>Anthropic: {{ configuredLabel(platformStatus.anthropic) }}</span>
         <span>TokenMix: {{ configuredLabel(platformStatus.tokenmix) }}</span>
         <span>Canopy: {{ configuredLabel(platformStatus.canopy) }}</span>
         <span>DataForSEO: {{ configuredLabel(platformStatus.dataforseo) }}</span>
+        <span v-if="platformStatus.clerk_enabled !== undefined">Clerk: {{ configuredLabel(platformStatus.clerk_enabled) }}</span>
       </div>
       <label class="reveal-creds-toggle">
         <input v-model="showCredentialValues" type="checkbox" />
@@ -548,6 +561,13 @@ async function onRemoveStale(): Promise<void> {
       <input v-model="credDfsPassword" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" />
       <button type="button" class="btn btn-sm" @click="onTestPlatformDataforseo">Test DataForSEO</button>
       <div class="status-msg">{{ platformDfsStatus }}</div>
+      <div class="settings-section-divider"></div>
+      <h4 class="subsection-title">Clerk (sign-in)</h4>
+      <p class="panel-desc">Stored in the database like other platform settings — not deploy env vars. Issuer is Clerk → API keys → Frontend API URL (no trailing slash). After saving, reload the app so the sign-in UI picks up the publishable key.</p>
+      <label class="field-label">Clerk publishable key</label>
+      <input v-model="credClerkPublishable" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" placeholder="pk_live_… or pk_test_…" />
+      <label class="field-label">Clerk JWT issuer (Frontend API URL)</label>
+      <input v-model="credClerkIssuer" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" placeholder="https://your-app.clerk.accounts.dev" />
       <label class="field-label">Default LLM provider</label>
       <div class="provider-options">
         <label class="provider-option">

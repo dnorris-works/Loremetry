@@ -16,7 +16,7 @@ use loremetry_core::config::{
 };
 use tracing_subscriber::EnvFilter;
 
-use crate::auth::AuthState;
+use crate::auth::JwtVerifier;
 use crate::state::AppState;
 
 #[tokio::main]
@@ -32,7 +32,7 @@ async fn main() {
     let Some((database_url, database_env)) = resolve_database_url_with_source() else {
         let diag = database_url_diagnostics();
         tracing::error!("No valid Postgres URL in environment. {diag}");
-        eprintln!("FATAL: Set DATABASE_URL (or POSTGRES_*_URL from Miget) to a postgres:// connection string at runtime.");
+        eprintln!("FATAL: Set DATABASE_URL (or POSTGRES_*_URL) to a postgres:// connection string at runtime.");
         eprintln!("{diag}");
         std::process::exit(1);
     };
@@ -80,7 +80,7 @@ async fn main() {
             eprintln!("Platform secrets init failed: {e}");
             if e.contains("SECRETS_ENCRYPTION_KEY") {
                 eprintln!(
-                    "Hint: SECRETS_ENCRYPTION_KEY must be the base64 output of `openssl rand -base64 32`, not the command. Run it locally, paste the one-line result into Miget Variables, redeploy."
+                    "Hint: SECRETS_ENCRYPTION_KEY must be the base64 output of `openssl rand -base64 32`, not the command. Generate once, set it in the server environment, and keep the same value across deploys and host moves."
                 );
             } else if e.contains("decrypt failed") {
                 eprintln!(
@@ -96,15 +96,15 @@ async fn main() {
         ctx,
         config: Arc::new(config),
         secrets,
-        auth: AuthState::from_env(),
+        jwt: JwtVerifier::new(),
     };
 
-    if state.auth.enabled() {
-        tracing::info!("Clerk auth enabled (issuer configured)");
-    } else {
+    if state.secrets.get().await.clerk_jwt_issuer.trim().is_empty() {
         tracing::warn!(
-            "Clerk auth disabled — set CLERK_JWT_ISSUER (and CLERK_PUBLISHABLE_KEY for the UI). Using bootstrap admin for API access."
+            "Clerk not configured in DB — set JWT issuer + publishable key in Admin → Platform credentials. Using open local mode until then."
         );
+    } else {
+        tracing::info!("Clerk auth enabled from platform settings in database");
     }
 
     let port = state.config.port;

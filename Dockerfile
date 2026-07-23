@@ -1,4 +1,4 @@
-# Multi-stage: Vue SPA + Rust Axum binary for Miget (Builder → Dockerfile)
+# Multi-stage: Vue SPA + Rust Axum binary (portable container image)
 
 FROM node:22-bookworm AS ui
 WORKDIR /ui

@@ -16,6 +16,8 @@ pub struct PlatformCredentials {
     pub dataforseo_login: String,
     pub dataforseo_password: String,
     pub default_provider: String,
+    pub clerk_publishable_key: String,
+    pub clerk_jwt_issuer: String,
 }
 
 #[derive(Clone)]
@@ -53,6 +55,8 @@ impl PlatformSecrets {
         apply_patch_field(&mut creds.canopy_api_key, patch.canopy_api_key);
         apply_patch_field(&mut creds.dataforseo_login, patch.dataforseo_login);
         apply_patch_field(&mut creds.dataforseo_password, patch.dataforseo_password);
+        apply_patch_field(&mut creds.clerk_publishable_key, patch.clerk_publishable_key);
+        apply_patch_field(&mut creds.clerk_jwt_issuer, patch.clerk_jwt_issuer);
         if let Some(v) = patch.default_provider {
             if !v.is_empty() {
                 creds.default_provider = v;
@@ -63,7 +67,7 @@ impl PlatformSecrets {
         self.key
             .as_ref()
             .ok_or(
-                "Cannot save credentials: set a valid SECRETS_ENCRYPTION_KEY on the server (paste the output of `openssl rand -base64 32`, not the command text). Miget → Variables → redeploy → save again.",
+                "Cannot save credentials: set a valid SECRETS_ENCRYPTION_KEY in the server environment (paste the output of `openssl rand -base64 32`, not the command text), redeploy, then save again.",
             )?,
             &creds,
         )
@@ -129,7 +133,21 @@ impl PlatformSecrets {
             canopy_api_key: c.canopy_api_key,
             dataforseo_login: c.dataforseo_login,
             dataforseo_password: c.dataforseo_password,
+            clerk_publishable_key: c.clerk_publishable_key.clone(),
+            clerk_jwt_issuer: c.clerk_jwt_issuer.clone(),
+            clerk_enabled: !c.clerk_jwt_issuer.trim().is_empty(),
         }
+    }
+
+    pub fn clerk_config(creds: &PlatformCredentials) -> Option<(String, String)> {
+        let issuer = creds.clerk_jwt_issuer.trim().trim_end_matches('/');
+        if issuer.is_empty() {
+            return None;
+        }
+        Some((
+            creds.clerk_publishable_key.trim().to_string(),
+            issuer.to_string(),
+        ))
     }
 }
 
@@ -155,6 +173,9 @@ pub struct PlatformSecretsAdminGet {
     pub canopy_api_key: String,
     pub dataforseo_login: String,
     pub dataforseo_password: String,
+    pub clerk_publishable_key: String,
+    pub clerk_jwt_issuer: String,
+    pub clerk_enabled: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -171,6 +192,10 @@ pub struct PlatformCredentialsPatch {
     pub dataforseo_password: Option<String>,
     #[serde(default)]
     pub default_provider: Option<String>,
+    #[serde(default)]
+    pub clerk_publishable_key: Option<String>,
+    #[serde(default)]
+    pub clerk_jwt_issuer: Option<String>,
 }
 
 fn apply_patch_field(current: &mut String, patch: Option<String>) {
@@ -192,14 +217,16 @@ async fn load_from_db(
         Vec<u8>,
         Vec<u8>,
         String,
+        String,
+        String,
     )> = sqlx::query_as(
-        "SELECT anthropic_api_key, tokenmix_api_key, canopy_api_key, dataforseo_login, dataforseo_password, default_provider FROM platform_secrets WHERE id = 1",
+        "SELECT anthropic_api_key, tokenmix_api_key, canopy_api_key, dataforseo_login, dataforseo_password, default_provider, clerk_publishable_key, clerk_jwt_issuer FROM platform_secrets WHERE id = 1",
     )
     .fetch_optional(pool)
     .await
     .map_err(|e| e.to_string())?;
 
-    let Some((a, t, c, l, p, dp)) = row else {
+    let Some((a, t, c, l, p, dp, clerk_pk, clerk_iss)) = row else {
         return Ok(PlatformCredentials::default());
     };
 
@@ -214,6 +241,8 @@ async fn load_from_db(
         } else {
             dp
         },
+        clerk_publishable_key: clerk_pk,
+        clerk_jwt_issuer: clerk_iss,
     })
 }
 
@@ -242,8 +271,9 @@ async fn save_to_db(
     sqlx::query(
         "INSERT INTO platform_secrets (
             id, anthropic_api_key, tokenmix_api_key, canopy_api_key,
-            dataforseo_login, dataforseo_password, default_provider
-         ) VALUES (1, $1, $2, $3, $4, $5, $6)
+            dataforseo_login, dataforseo_password, default_provider,
+            clerk_publishable_key, clerk_jwt_issuer
+         ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (id) DO UPDATE SET
             anthropic_api_key = EXCLUDED.anthropic_api_key,
             tokenmix_api_key = EXCLUDED.tokenmix_api_key,
@@ -251,6 +281,8 @@ async fn save_to_db(
             dataforseo_login = EXCLUDED.dataforseo_login,
             dataforseo_password = EXCLUDED.dataforseo_password,
             default_provider = EXCLUDED.default_provider,
+            clerk_publishable_key = EXCLUDED.clerk_publishable_key,
+            clerk_jwt_issuer = EXCLUDED.clerk_jwt_issuer,
             updated_at = now()",
     )
     .bind(encrypt_field(&creds.anthropic_api_key, key))
@@ -259,6 +291,8 @@ async fn save_to_db(
     .bind(encrypt_field(&creds.dataforseo_login, key))
     .bind(encrypt_field(&creds.dataforseo_password, key))
     .bind(dp)
+    .bind(creds.clerk_publishable_key.trim())
+    .bind(creds.clerk_jwt_issuer.trim().trim_end_matches('/'))
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;

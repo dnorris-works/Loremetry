@@ -21,7 +21,7 @@ pub fn parse_encryption_key_value(raw: &str) -> Result<[u8; 32], String> {
     let trimmed = raw.trim();
     if trimmed.contains("openssl") || trimmed.contains("rand -base64") {
         return Err(
-            "SECRETS_ENCRYPTION_KEY looks like the openssl command, not a key. In a terminal run: openssl rand -base64 32 — then paste that one-line output (e.g. K7gNU3sdo+OL0wNhqoVWhr3g6sZxWo3+/bOVc4OGtjo=) as the Miget variable value, redeploy, and save credentials again.".into(),
+            "SECRETS_ENCRYPTION_KEY looks like the openssl command, not a key. Run `openssl rand -base64 32`, paste the one-line output into the server environment as SECRETS_ENCRYPTION_KEY, redeploy, then save credentials again.".into(),
         );
     }
     let bytes = B64
