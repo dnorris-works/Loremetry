@@ -78,7 +78,7 @@ async fn main() {
             eprintln!("Platform secrets init failed: {e}");
             if e.contains("SECRETS_ENCRYPTION_KEY") {
                 eprintln!(
-                    "Hint: On Miget, add SECRETS_ENCRYPTION_KEY (32 random bytes, base64). Example: openssl rand -base64 32 — then set provider API keys in Admin → Platform credentials."
+                    "Hint: SECRETS_ENCRYPTION_KEY must be the base64 output of `openssl rand -base64 32`, not the command. Run it locally, paste the one-line result into Miget Variables, redeploy."
                 );
             } else if e.contains("decrypt failed") {
                 eprintln!(

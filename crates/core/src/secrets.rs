@@ -100,6 +100,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rejects_openssl_command_as_value() {
+        let err = parse_encryption_key_value("openssl rand -base64 32").unwrap_err();
+        assert!(err.contains("not a key"));
+    }
+
+    #[test]
     fn round_trip() {
         let key = [7u8; 32];
         let enc = encrypt_field("sk-ant-test", &key);
