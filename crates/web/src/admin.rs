@@ -82,16 +82,14 @@ pub async fn winningcat_remove_stale(
     )
 }
 
-/// GET /api/admin/tables — tables in `lore` and `public` schemas.
+/// GET /api/admin/tables — all application tables in `lore` and `public` (including lookup/config).
 pub async fn admin_tables(State(state): State<AppState>) -> impl IntoResponse {
     let pool = &state.ctx.db.pool;
     let result = sqlx::query_as::<_, (String, String)>(
-        "SELECT table_schema, table_name
-         FROM information_schema.tables
-         WHERE table_schema IN ('lore', 'public')
-           AND table_type = 'BASE TABLE'
-           AND table_name NOT LIKE '\\_%' ESCAPE '\\'
-         ORDER BY table_schema, table_name",
+        "SELECT schemaname::text, tablename::text
+         FROM pg_catalog.pg_tables
+         WHERE schemaname IN ('lore', 'public')
+         ORDER BY schemaname, tablename",
     )
     .fetch_all(pool)
     .await;

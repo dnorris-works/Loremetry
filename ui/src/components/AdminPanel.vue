@@ -68,6 +68,7 @@ let lastImportedAt = '';
 
 type DbTable = { schema: string; name: string; qualified: string };
 const dbTables = ref<DbTable[]>([]);
+const dbTablesError = ref('');
 const sqlQuery = ref('SELECT * FROM lore.stories LIMIT 50');
 const sqlRunning = ref(false);
 const sqlError = ref('');
@@ -309,11 +310,18 @@ function configuredLabel(ok: boolean): string {
 }
 
 async function loadDbTables(): Promise<void> {
+  dbTablesError.value = '';
   try {
-    const data = await adminFetch<{ success?: boolean; tables?: DbTable[] }>('/tables');
+    const data = await adminFetch<{ success?: boolean; tables?: DbTable[]; error?: string }>('/tables');
+    if (data.success === false) {
+      dbTables.value = [];
+      dbTablesError.value = data.error ?? 'Could not load table list';
+      return;
+    }
     dbTables.value = data.tables ?? [];
-  } catch {
+  } catch (e) {
     dbTables.value = [];
+    dbTablesError.value = String(e);
   }
 }
 
@@ -446,20 +454,37 @@ async function onRemoveStale(): Promise<void> {
     <!-- SQL console -->
     <h3 class="section-title">SQL console</h3>
     <div class="settings-form sql-section">
-      <p class="panel-desc">Run queries against the Postgres database. App data lives in the <code>lore</code> schema.</p>
+      <p class="panel-desc">Run queries against the Postgres database. App data lives in the <code>lore</code> schema (including lookup/config tables such as <code>lookup_config</code>, <code>provider_models</code>, <code>report_types</code>, <code>genres</code>, <code>kdp_categories</code>).</p>
+      <div v-if="dbTablesError" class="sql-error">{{ dbTablesError }}</div>
       <div v-if="dbTables.length > 0" class="table-picker">
-        <span class="table-picker-label">Tables</span>
-        <div class="table-chips">
-          <button
-            v-for="t in dbTables"
-            :key="t.qualified"
-            type="button"
-            class="table-chip"
-            :title="t.qualified"
-            @click="insertTableQuery(t)"
-          >
-            {{ t.qualified }}
-          </button>
+        <div class="table-picker-header">
+          <span class="table-picker-label">Tables ({{ dbTables.length }})</span>
+          <button type="button" class="btn btn-sm" @click="loadDbTables">Refresh</button>
+        </div>
+        <div class="table-list-wrap">
+          <table class="sql-results table-list">
+            <thead>
+              <tr>
+                <th>Schema</th>
+                <th>Table</th>
+                <th>Qualified name</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="t in dbTables"
+                :key="t.qualified"
+                class="table-list-row"
+                tabindex="0"
+                @click="insertTableQuery(t)"
+                @keydown.enter.prevent="insertTableQuery(t)"
+              >
+                <td>{{ t.schema }}</td>
+                <td>{{ t.name }}</td>
+                <td class="table-list-qualified">{{ t.qualified }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
       <textarea
@@ -864,33 +889,45 @@ async function onRemoveStale(): Promise<void> {
   gap: 6px;
 }
 
+.table-list-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.table-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.table-list {
+  margin: 0;
+}
+
+.table-list-row {
+  cursor: pointer;
+}
+
+.table-list-row:hover td {
+  background: var(--surface2);
+}
+
+.table-list-qualified {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.table-list td:not(.table-list-qualified) {
+  font-family: inherit;
+}
+
 .table-picker-label {
   font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-}
-
-.table-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.table-chip {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-muted);
-  cursor: pointer;
-  font-family: var(--mono);
-  font-size: 11px;
-  padding: 4px 8px;
-}
-
-.table-chip:hover {
-  border-color: var(--accent);
-  color: var(--text);
 }
 
 .section-title {
