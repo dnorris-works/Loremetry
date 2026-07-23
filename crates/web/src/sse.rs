@@ -1,6 +1,9 @@
 use std::convert::Infallible;
+use std::time::Duration;
 
 use axum::extract::State;
+use axum::http::header;
+use axum::http::HeaderValue;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use futures::stream::Stream;
 use tokio::sync::broadcast::error::RecvError;
@@ -10,7 +13,7 @@ use crate::state::AppState;
 /// GET /api/events — stream LogEvent as SSE (`event: <channel>\ndata: <message>`).
 pub async fn events_handler(
     State(state): State<AppState>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> impl axum::response::IntoResponse {
     let rx = state.ctx.subscribe_logs();
 
     let stream = futures::stream::unfold(rx, |mut rx| async move {
@@ -26,5 +29,21 @@ pub async fn events_handler(
         }
     });
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    let sse = Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    );
+
+    (
+        [
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-cache, no-transform")),
+            (header::CONNECTION, HeaderValue::from_static("keep-alive")),
+            (
+                header::HeaderName::from_static("x-accel-buffering"),
+                HeaderValue::from_static("no"),
+            ),
+        ],
+        sse,
+    )
 }

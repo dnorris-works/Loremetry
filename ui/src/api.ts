@@ -8,6 +8,9 @@ let appSessionActive = false;
 
 export function setAppSessionActive(active: boolean): void {
   appSessionActive = active;
+  if (!active) {
+    closeSharedEventSource();
+  }
 }
 
 function assertAppSession(): void {
@@ -106,18 +109,131 @@ export async function invoke<T = unknown>(cmd: string, args?: Record<string, unk
 }
 
 type Unlisten = () => void;
+type SseHandler = (event: { payload: string }) => void;
+
+const sseSubscriptions = new Map<string, Set<SseHandler>>();
+const sseWiredChannels = new Set<string>();
+let sharedEventSource: EventSource | null = null;
+let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+function sseSubscriberCount(): number {
+  let n = 0;
+  for (const set of sseSubscriptions.values()) {
+    n += set.size;
+  }
+  return n;
+}
+
+function closeSharedEventSource(): void {
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer);
+    sseReconnectTimer = null;
+  }
+  sharedEventSource?.close();
+  sharedEventSource = null;
+  sseWiredChannels.clear();
+}
+
+function dispatchSse(channel: string, data: string): void {
+  const handlers = sseSubscriptions.get(channel);
+  if (!handlers) return;
+  for (const h of handlers) {
+    h({ payload: data });
+  }
+}
+
+function wireChannelOnSource(channel: string): void {
+  if (!sharedEventSource || sseWiredChannels.has(channel)) return;
+  sseWiredChannels.add(channel);
+  sharedEventSource.addEventListener(channel, (e: Event) => {
+    const msg = e as MessageEvent;
+    dispatchSse(channel, String(msg.data ?? ''));
+  });
+}
+
+function wireAllChannelsOnSource(): void {
+  for (const channel of sseSubscriptions.keys()) {
+    wireChannelOnSource(channel);
+  }
+}
+
+function scheduleSseReconnect(): void {
+  if (sseReconnectTimer || sseSubscriberCount() === 0 || !appSessionActive) return;
+  sseReconnectTimer = setTimeout(() => {
+    sseReconnectTimer = null;
+    openSharedEventSource();
+  }, 4000);
+}
+
+function openSharedEventSource(): void {
+  if (!appSessionActive || sseSubscriberCount() === 0) return;
+  if (sharedEventSource) return;
+
+  const es = new EventSource('/api/events');
+  sharedEventSource = es;
+  es.onerror = () => {
+    closeSharedEventSource();
+    scheduleSseReconnect();
+  };
+  wireAllChannelsOnSource();
+}
+
+function ensureSseSubscription(channel: string, handler: SseHandler): void {
+  let set = sseSubscriptions.get(channel);
+  if (!set) {
+    set = new Set();
+    sseSubscriptions.set(channel, set);
+  }
+  set.add(handler);
+  if (sharedEventSource) {
+    wireChannelOnSource(channel);
+  } else {
+    openSharedEventSource();
+  }
+}
+
+function removeSseSubscription(channel: string, handler: SseHandler): void {
+  const set = sseSubscriptions.get(channel);
+  if (!set) return;
+  set.delete(handler);
+  if (set.size === 0) {
+    sseSubscriptions.delete(channel);
+    sseWiredChannels.delete(channel);
+  }
+  if (sseSubscriberCount() === 0) {
+    closeSharedEventSource();
+  }
+}
 
 /**
- * Subscribe to server log events.
+ * Subscribe to server log events (single shared SSE connection).
  * SSE format: `event: <channel>\ndata: <message>` (see crates/web/src/sse.rs).
  */
-export function listen(event: string, handler: (event: { payload: string }) => void): Promise<Unlisten> {
-  const es = new EventSource('/api/events');
-  const onMsg = (e: MessageEvent) => {
-    handler({ payload: e.data });
+export function listen(event: string, handler: SseHandler): Unlisten {
+  ensureSseSubscription(event, handler);
+  return () => {
+    removeSseSubscription(event, handler);
   };
-  es.addEventListener(event, onMsg as EventListener);
-  return Promise.resolve(() => es.close());
+}
+
+/** Analysis log channels — connect only while a job is running (avoids idle SSE through proxies). */
+let analysisLogUnsubs: Unlisten[] | null = null;
+
+export function connectAnalysisLogStream(onLine: (message: string) => void): void {
+  if (analysisLogUnsubs) return;
+  const handler = (e: { payload: string }) => onLine(e.payload);
+  analysisLogUnsubs = [
+    listen('genre:log', handler),
+    listen('cdp:log', handler),
+  ];
+}
+
+export function disconnectAnalysisLogStream(): void {
+  if (!analysisLogUnsubs) return;
+  for (const u of analysisLogUnsubs) {
+    u();
+  }
+  analysisLogUnsubs = null;
 }
 
 export async function uploadChapters(storyId: string, files: FileList | File[]): Promise<void> {

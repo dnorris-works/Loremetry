@@ -1,5 +1,5 @@
-import { ref } from 'vue';
-import { invoke, listen } from '../api';
+import { ref, watch } from 'vue';
+import { invoke, connectAnalysisLogStream, disconnectAnalysisLogStream } from '../api';
 import type { AnalysisState, GenreResult, LogLine } from '../types';
 
 import { useSettings } from './useSettings';
@@ -174,9 +174,13 @@ async function saveLog(folder: string, timestamp: string): Promise<void> {
   }
 }
 
-// SSE listeners (module scope — no unlisten needed)
-listen('genre:log', (event) => { appendLog(event.payload); });
-listen('cdp:log', (event) => { appendLog(event.payload); });
+watch(isWorking, (working) => {
+  if (working) {
+    connectAnalysisLogStream(appendLog);
+  } else {
+    disconnectAnalysisLogStream();
+  }
+});
 
 export function useAnalysis() {
   return {
