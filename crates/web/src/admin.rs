@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use axum::extract::{Multipart, Query, State};
+use axum::extract::{Multipart, Query};
 use axum::response::IntoResponse;
 use axum::Json;
 use loremetry_core::platform_secrets::PlatformCredentialsPatch;
@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::json;
 use sqlx::{Column, Row, ValueRef};
 
+use crate::auth::AdminAuthenticated;
 use crate::error::{json_error, ok_json};
 use crate::state::AppState;
 
@@ -27,18 +28,18 @@ pub struct WinningCatJsonBody {
 
 /// POST /api/admin/winningcat/import — JSON `{ csv_text }`.
 pub async fn winningcat_import_json(
-    State(state): State<AppState>,
+    auth: AdminAuthenticated,
     Json(body): Json<WinningCatJsonBody>,
 ) -> impl IntoResponse {
     ok_json(
-        serde_json::to_value(winningcat::import_winningcat_csv(state.ctx, body.csv_text).await)
+        serde_json::to_value(winningcat::import_winningcat_csv(auth.ctx(), body.csv_text).await)
             .unwrap_or(json!(null)),
     )
 }
 
 /// POST /api/admin/winningcat/upload — multipart CSV file.
 pub async fn winningcat_import_upload(
-    State(state): State<AppState>,
+    auth: AdminAuthenticated,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
     let csv_text = match read_csv_from_multipart(&mut multipart).await {
@@ -46,7 +47,7 @@ pub async fn winningcat_import_upload(
         Err(r) => return r,
     };
     ok_json(
-        serde_json::to_value(winningcat::import_winningcat_csv(state.ctx, csv_text).await)
+        serde_json::to_value(winningcat::import_winningcat_csv(auth.ctx(), csv_text).await)
             .unwrap_or(json!(null)),
     )
 }
@@ -73,18 +74,18 @@ pub struct StaleBody {
 
 /// POST /api/admin/winningcat/remove-stale
 pub async fn winningcat_remove_stale(
-    State(state): State<AppState>,
+    auth: AdminAuthenticated,
     Json(body): Json<StaleBody>,
 ) -> impl IntoResponse {
     ok_json(
-        serde_json::to_value(winningcat::remove_stale_kdp_categories(state.ctx, body.since).await)
+        serde_json::to_value(winningcat::remove_stale_kdp_categories(auth.ctx(), body.since).await)
             .unwrap_or(json!(null)),
     )
 }
 
 /// GET /api/admin/tables — all application tables in `lore` and `public` (including lookup/config).
-pub async fn admin_tables(State(state): State<AppState>) -> impl IntoResponse {
-    let pool = &state.ctx.db.pool;
+pub async fn admin_tables(auth: AdminAuthenticated) -> impl IntoResponse {
+    let pool = &auth.ctx().db.pool;
     let result = sqlx::query_as::<_, (String, String)>(
         "SELECT schemaname::text, tablename::text
          FROM pg_catalog.pg_tables
@@ -118,13 +119,13 @@ pub struct SqlBody {
 }
 
 /// POST /api/admin/sql — run arbitrary SQL (operator tool).
-pub async fn admin_sql(State(state): State<AppState>, Json(body): Json<SqlBody>) -> impl IntoResponse {
+pub async fn admin_sql(auth: AdminAuthenticated, Json(body): Json<SqlBody>) -> impl IntoResponse {
     let sql = body.sql.trim().trim_end_matches(';');
     if sql.is_empty() {
         return ok_json(json!({ "success": false, "error": "Empty query" }));
     }
 
-    let pool = &state.ctx.db.pool;
+    let pool = &auth.ctx().db.pool;
     let started = Instant::now();
     let lower = sql.to_lowercase();
     let returns_rows = lower.starts_with("select")
@@ -168,19 +169,19 @@ pub async fn admin_sql(State(state): State<AppState>, Json(body): Json<SqlBody>)
 }
 
 /// GET /api/admin/platform-secrets
-pub async fn get_platform_secrets(State(state): State<AppState>) -> impl IntoResponse {
-    let view = state.secrets.admin_get().await;
+pub async fn get_platform_secrets(auth: AdminAuthenticated) -> impl IntoResponse {
+    let view = auth.state.secrets.admin_get().await;
     ok_json(serde_json::to_value(view).unwrap_or(json!(null)))
 }
 
 /// PUT /api/admin/platform-secrets
 pub async fn put_platform_secrets(
-    State(state): State<AppState>,
+    auth: AdminAuthenticated,
     Json(patch): Json<PlatformCredentialsPatch>,
 ) -> impl IntoResponse {
-    match state.secrets.update(patch).await {
+    match auth.state.secrets.update(patch).await {
         Ok(()) => {
-            let status = state.secrets.configured_status().await;
+            let status = auth.state.secrets.configured_status().await;
             ok_json(json!({ "success": true, "configured": status }))
         }
         Err(e) => ok_json(json!({ "success": false, "error": e })),
@@ -195,7 +196,7 @@ pub struct TestCanopyBody {
 }
 
 pub async fn test_platform_canopy(
-    State(state): State<AppState>,
+    auth: AdminAuthenticated,
     Json(body): Json<TestCanopyBody>,
 ) -> impl IntoResponse {
     let key = match body
@@ -205,7 +206,7 @@ pub async fn test_platform_canopy(
         .filter(|s| !s.is_empty())
     {
         Some(k) => k.to_string(),
-        None => state.secrets.canopy_key().await,
+        None => auth.state.secrets.canopy_key().await,
     };
     ok_json(serde_json::to_value(canopy::test_canopy_connection(key).await).unwrap_or(json!(null)))
 }
@@ -220,7 +221,7 @@ pub struct TestDataforseoBody {
 }
 
 pub async fn test_platform_dataforseo(
-    State(state): State<AppState>,
+    auth: AdminAuthenticated,
     Json(body): Json<TestDataforseoBody>,
 ) -> impl IntoResponse {
     let (login, password) = match (
@@ -234,7 +235,7 @@ pub async fn test_platform_dataforseo(
             .filter(|s| !s.is_empty()),
     ) {
         (Some(l), Some(p)) => (l.to_string(), p.to_string()),
-        _ => state.secrets.dataforseo().await,
+        _ => auth.state.secrets.dataforseo().await,
     };
     ok_json(
         serde_json::to_value(dataforseo::test_dataforseo_connection(login, password).await)
@@ -250,7 +251,7 @@ pub struct UsageQuery {
 
 /// GET /api/admin/usage/summary
 pub async fn admin_usage_summary(
-    State(state): State<AppState>,
+    auth: AdminAuthenticated,
     Query(q): Query<UsageQuery>,
 ) -> impl IntoResponse {
     let now = chrono::Utc::now();
@@ -267,7 +268,7 @@ pub async fn admin_usage_summary(
         .map(|d| d.with_timezone(&chrono::Utc))
         .unwrap_or(now);
 
-    match usage_summary(&state.ctx.db.pool, from, to).await {
+    match usage_summary(&auth.ctx().db.pool, from, to).await {
         Ok(rows) => ok_json(json!({ "success": true, "from": from, "to": to, "users": rows })),
         Err(e) => ok_json(json!({ "success": false, "error": e, "users": [] })),
     }
@@ -286,10 +287,10 @@ fn default_limit() -> i64 {
 
 /// GET /api/admin/usage/events
 pub async fn admin_usage_events(
-    State(state): State<AppState>,
+    auth: AdminAuthenticated,
     Query(q): Query<UsageEventsQuery>,
 ) -> impl IntoResponse {
-    match usage_events(&state.ctx.db.pool, q.user_id, q.limit.min(500)).await {
+    match usage_events(&auth.ctx().db.pool, q.user_id, q.limit.min(500)).await {
         Ok(events) => ok_json(json!({ "success": true, "events": events })),
         Err(e) => ok_json(json!({ "success": false, "error": e, "events": [] })),
     }

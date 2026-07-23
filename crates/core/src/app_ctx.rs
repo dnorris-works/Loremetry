@@ -17,6 +17,8 @@ pub struct AppCtx {
     pub db: Arc<Db>,
     pub usage: Arc<UsageRecorder>,
     log_tx: broadcast::Sender<LogEvent>,
+    /// When set (web + Clerk), overrides bootstrap for `user_id()`.
+    effective_user_id: Option<uuid::Uuid>,
 }
 
 impl AppCtx {
@@ -27,12 +29,20 @@ impl AppCtx {
             db: Arc::new(db),
             usage,
             log_tx,
+            effective_user_id: None,
         }
     }
 
-    /// Pre-Clerk: bootstrap admin user id (from `users` table).
+    pub fn with_user_id(&self, user_id: uuid::Uuid) -> Self {
+        let mut ctx = self.clone();
+        ctx.effective_user_id = Some(user_id);
+        ctx
+    }
+
+    /// Authenticated user id, or bootstrap admin when Clerk is not in use.
     pub fn user_id(&self) -> uuid::Uuid {
-        self.db.bootstrap_user_id
+        self.effective_user_id
+            .unwrap_or(self.db.bootstrap_user_id)
     }
 
     pub fn subscribe_logs(&self) -> broadcast::Receiver<LogEvent> {

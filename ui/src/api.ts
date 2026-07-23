@@ -1,9 +1,27 @@
 /** Drop-in replacement for Tauri invoke + event listen. */
 
+let authTokenProvider: (() => Promise<string | null>) | null = null;
+
+export function setAuthTokenProvider(fn: () => Promise<string | null>): void {
+  authTokenProvider = fn;
+}
+
+async function authHeaders(extra?: HeadersInit): Promise<Headers> {
+  const headers = new Headers(extra);
+  if (authTokenProvider) {
+    const token = await authTokenProvider();
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+  }
+  return headers;
+}
+
 export async function invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const headers = await authHeaders({ 'Content-Type': 'application/json' });
   const res = await fetch('/api/invoke', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ cmd, args: args ?? {} }),
   });
   const data = await res.json();
@@ -37,8 +55,10 @@ export async function uploadChapters(storyId: string, files: FileList | File[]):
   for (const f of Array.from(files)) {
     fd.append('files', f, f.name);
   }
+  const headers = await authHeaders();
   const res = await fetch(`/api/stories/${encodeURIComponent(storyId)}/documents/upload`, {
     method: 'POST',
+    headers,
     body: fd,
   });
   if (!res.ok) {
@@ -54,7 +74,8 @@ export async function adminFetch<T = unknown>(
 ): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`/api/admin${path}`, init);
+    const headers = await authHeaders(init.headers);
+    res = await fetch(`/api/admin${path}`, { ...init, headers });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(
@@ -81,7 +102,8 @@ export async function adminUploadFile<T = unknown>(
 ): Promise<T> {
   const fd = new FormData();
   fd.append(fieldName, file, file.name);
-  const res = await fetch(`/api/admin${path}`, { method: 'POST', body: fd });
+  const headers = await authHeaders();
+  const res = await fetch(`/api/admin${path}`, { method: 'POST', headers, body: fd });
   const data = await res.json();
   if (!res.ok) {
     throw new Error((data as { error?: string }).error || res.statusText || 'Upload failed');

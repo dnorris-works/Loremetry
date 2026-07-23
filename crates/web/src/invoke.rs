@@ -3,6 +3,7 @@
 use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::Json;
+use crate::auth::Authenticated;
 use loremetry_core::analysis::{
     ai_isms, continuity, pipeline, show_dont_tell, AnalyzeStoryRequest, FolderRequest,
 };
@@ -29,9 +30,11 @@ pub struct InvokeBody {
 }
 
 pub async fn invoke_handler(
-    State(state): State<AppState>,
+    auth: Authenticated,
     Json(body): Json<InvokeBody>,
 ) -> impl IntoResponse {
+    let state = &auth.state;
+    let ctx = auth.ctx();
     let mut args = normalize_args(body.args);
     // Connection tests may pass unsaved form values; do not strip or replace them.
     let skip_credential_inject = matches!(
@@ -44,14 +47,14 @@ pub async fn invoke_handler(
     if !skip_credential_inject {
         inject_platform_credentials(&state, &mut args).await;
     }
-    match dispatch(&state, &body.cmd, args).await {
+    match dispatch(state, &ctx, &body.cmd, args).await {
         Ok(v) => ok_json(v),
         Err(e) => json_error(e),
     }
 }
 
-async fn dispatch(state: &AppState, cmd: &str, mut args: Value) -> Result<Value, String> {
-    let app = state.ctx.clone();
+async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut args: Value) -> Result<Value, String> {
+    let app = app.clone();
     let db = app.db.clone();
 
     match cmd {

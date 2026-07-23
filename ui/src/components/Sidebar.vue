@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, ref, watch, type Ref } from 'vue';
+import { inject, ref, watch, type ComputedRef, type Ref } from 'vue';
 import { invoke, uploadChapters } from '../api';
 import { storiesKey, reportsKey, platformKey, showPanelKey, openManuscriptEditorKey, seriesKey } from '../injectionKeys';
 import type { Story, Series } from '../types';
@@ -20,6 +20,7 @@ const openInWritingMode = inject<(filePath: string, title: string) => void>('ope
 const openNewDocumentForm = inject<(location?: string) => void>('openNewDocumentForm')!;
 const fileTreeTick = inject<Ref<number>>('fileTreeTick')!;
 const bumpFileTree = inject<() => void>('bumpFileTree')!;
+const isAdmin = inject<ComputedRef<boolean>>('isAdmin')!;
 
 // ── Emits ─────────────────────────────────────────────────────────────────────
 
@@ -351,7 +352,7 @@ function formatTimestamp(ts: string): string {
     </div>
 
     <div class="nav-section settings-section">
-      <button class="nav-item nav-item-muted" @click="showPanel('admin')">
+      <button v-if="isAdmin" class="nav-item nav-item-muted" @click="showPanel('admin')">
         Admin
       </button>
     </div>

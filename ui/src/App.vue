@@ -22,8 +22,16 @@ import SeriesForm from './components/SeriesForm.vue';
 import NewDocumentForm from './components/NewDocumentForm.vue';
 import ManuscriptViewer from './components/ManuscriptViewer.vue';
 import WritingPanel from './components/WritingPanel.vue';
+import ClerkGate from './components/ClerkGate.vue';
+import { useAuth } from './composables/useAuth';
 
-// ── Composables ───────────────────────────────────────────────────────────────
+const props = defineProps<{
+  clerkEnabled?: boolean;
+  publishableKey?: string;
+}>();
+
+const auth = useAuth();
+provide('isAdmin', auth.isAdmin);
 
 const storiesCtx = useStories();
 const analysisCtx = useAnalysis();
@@ -209,11 +217,48 @@ onMounted(() => {
     }
   });
   seriesCtx.loadSeries();
+  void auth.loadAuthConfig().then(() => auth.refreshMe());
 });
 </script>
 
 <template>
-  <div id="app-root">
+  <ClerkGate v-if="props.clerkEnabled">
+    <div id="app-root">
+      <TitleBar />
+      <Sidebar @open-story-form="openStoryForm" @open-series-form="openSeriesForm" />
+      <main id="main">
+        <NewDocumentForm
+          v-if="activePanel === 'new-document'"
+          :initial-location="newDocLocation"
+          @created="onDocumentCreated"
+          @cancel="onDocumentFormCancel"
+        />
+
+        <WritingPanel
+          v-else-if="appMode === 'writing'"
+          :file-path="writingFilePath"
+          :chapter-title="writingChapterTitle"
+          :story-folder="storiesCtx.activeFolder.value"
+        />
+
+        <template v-else-if="appMode === 'analyzer'">
+          <AnalyzerPanel v-if="activePanel === 'analyzer'" />
+          <ReportsViewer v-if="activePanel === 'reports'" />
+          <AdminPanel v-if="activePanel === 'admin'" />
+          <StoryForm v-if="activePanel === 'story-form'" :story="editingStory" />
+          <SeriesForm v-if="activePanel === 'series'" :series="editingSeries" />
+          <ManuscriptViewer
+            v-if="activePanel === 'manuscript'"
+            :findings="manuscriptFindings"
+            :start-index="manuscriptStartIndex"
+            :story-folder="storiesCtx.activeFolder.value"
+            @close="closeManuscriptEditor"
+          />
+        </template>
+      </main>
+    </div>
+  </ClerkGate>
+  <div v-else id="app-root">
     <TitleBar />
     <Sidebar @open-story-form="openStoryForm" @open-series-form="openSeriesForm" />
     <main id="main">

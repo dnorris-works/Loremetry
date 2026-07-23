@@ -1,3 +1,4 @@
+mod auth;
 mod admin;
 mod error;
 mod invoke;
@@ -15,6 +16,7 @@ use loremetry_core::config::{
 };
 use tracing_subscriber::EnvFilter;
 
+use crate::auth::AuthState;
 use crate::state::AppState;
 
 #[tokio::main]
@@ -94,7 +96,16 @@ async fn main() {
         ctx,
         config: Arc::new(config),
         secrets,
+        auth: AuthState::from_env(),
     };
+
+    if state.auth.enabled() {
+        tracing::info!("Clerk auth enabled (issuer configured)");
+    } else {
+        tracing::warn!(
+            "Clerk auth disabled — set CLERK_JWT_ISSUER (and CLERK_PUBLISHABLE_KEY for the UI). Using bootstrap admin for API access."
+        );
+    }
 
     let port = state.config.port;
     let app = routes::build_router(state);

@@ -1,5 +1,6 @@
-use axum::extract::DefaultBodyLimit;
-use axum::extract::{Path, Query, State};
+use axum::middleware;
+use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{Path, Query};
 use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
@@ -19,6 +20,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
 use crate::admin;
+use crate::auth::{self, Authenticated};
 use crate::error::{json_error, ok_json, result_to_response};
 use crate::invoke;
 use crate::sse;
@@ -29,7 +31,28 @@ pub fn build_router(state: AppState) -> Router {
     let static_dir = state.config.static_dir.clone();
     let spa_index = static_dir.join("index.html");
 
-    let api = Router::new()
+    let admin = Router::new()
+        .route("/status", get(admin::admin_status))
+        .route("/tables", get(admin::admin_tables))
+        .route("/sql", post(admin::admin_sql))
+        .route("/winningcat/import", post(admin::winningcat_import_json))
+        .route("/winningcat/upload", post(admin::winningcat_import_upload))
+        .route("/winningcat/remove-stale", post(admin::winningcat_remove_stale))
+        .route(
+            "/platform-secrets",
+            get(admin::get_platform_secrets)
+                .put(admin::put_platform_secrets)
+                .post(admin::put_platform_secrets),
+        )
+        .route("/platform-secrets/test-canopy", post(admin::test_platform_canopy))
+        .route("/platform-secrets/test-dataforseo", post(admin::test_platform_dataforseo))
+        .route("/test-canopy", post(admin::test_platform_canopy))
+        .route("/test-dataforseo", post(admin::test_platform_dataforseo))
+        .route("/usage/summary", get(admin::admin_usage_summary))
+        .route("/usage/events", get(admin::admin_usage_events));
+
+    let protected = Router::new()
+        .route("/me", get(auth::auth_me))
         // Primary: generic invoke bridge
         .route("/invoke", post(invoke::invoke_handler))
         // SSE
@@ -79,31 +102,18 @@ pub fn build_router(state: AppState) -> Router {
         .route("/models", get(list_models))
         .route("/settings/test-canopy", post(test_canopy))
         .route("/settings/test-dataforseo", post(test_dataforseo))
-        // Admin (operator — open, no auth)
-        .route("/admin/status", get(admin::admin_status))
-        .route("/admin/tables", get(admin::admin_tables))
-        .route("/admin/sql", post(admin::admin_sql))
-        .route("/admin/winningcat/import", post(admin::winningcat_import_json))
-        .route("/admin/winningcat/upload", post(admin::winningcat_import_upload))
-        .route("/admin/winningcat/remove-stale", post(admin::winningcat_remove_stale))
-        .route(
-            "/admin/platform-secrets",
-            get(admin::get_platform_secrets)
-                .put(admin::put_platform_secrets)
-                .post(admin::put_platform_secrets),
-        )
-        .route("/admin/platform-secrets/test-canopy", post(admin::test_platform_canopy))
-        .route("/admin/platform-secrets/test-dataforseo", post(admin::test_platform_dataforseo))
-        .route("/admin/test-canopy", post(admin::test_platform_canopy))
-        .route("/admin/test-dataforseo", post(admin::test_platform_dataforseo))
-        .route("/admin/usage/summary", get(admin::admin_usage_summary))
-        .route("/admin/usage/events", get(admin::admin_usage_events))
+        .nest("/admin", admin)
         // Chat / costs / suggests
         .route("/chat", post(chat))
         .route("/costs/estimate", post(estimate_costs))
         .route("/suggest/sdt", post(suggest_sdt))
         .route("/suggest/ai-isms", post(suggest_ai_isms))
         .route("/suggest/continuity", post(suggest_continuity));
+
+    let api = Router::new()
+        .route("/auth/config", get(auth::auth_config))
+        .merge(protected)
+        .with_state(state.clone());
 
     let static_service = ServeDir::new(&static_dir)
         .not_found_service(ServeFile::new(spa_index));

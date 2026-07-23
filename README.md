@@ -52,9 +52,33 @@ Runtime environment (Miget):
 - `DATABASE_URL` — PostgreSQL connection string (required on Miget)
 - `SECRETS_ENCRYPTION_KEY` — 32-byte key, base64-encoded (required in production to encrypt/decrypt platform credentials in the DB)
 - `BOOTSTRAP_ADMIN_EMAIL` — email for the first admin user when the database has no users (default `admin@local`)
+- `CLERK_PUBLISHABLE_KEY` — Clerk publishable key (`pk_…`) for the sign-in UI
+- `CLERK_JWT_ISSUER` — Clerk JWT issuer URL (e.g. `https://your-app.clerk.accounts.dev`) — enables auth; when unset, the app runs in local open mode
 - `PORT`, `STATIC_DIR` — HTTP server (set by the container image on Miget)
 
 Provider API keys (Anthropic, TokenMix, Canopy, DataForSEO) are **only** stored encrypted in Postgres (`lore.platform_secrets`) via **Admin → Platform credentials**. They are not read from Miget env vars.
+
+### Clerk (sign-in + admin role)
+
+1. Create a Clerk application and add **CLERK_PUBLISHABLE_KEY** and **CLERK_JWT_ISSUER** to Miget (issuer is on Clerk → **API keys** → “Frontend API URL”, without a trailing slash).
+2. **Your user (admin):** Clerk Dashboard → **Users** → your user → **Public metadata**:
+
+   ```json
+   { "role": "admin" }
+   ```
+
+3. **Session token** (required so the API sees role/email): Clerk → **Sessions** → **Customize session token** → add:
+
+   ```json
+   {
+     "role": "{{user.public_metadata.role}}",
+     "email": "{{user.primary_email_address}}"
+   }
+   ```
+
+4. Everyone else: leave public metadata empty or `{ "role": "user" }` — they get `subscriber` in Postgres and **cannot** open Admin (platform secrets, SQL, WinningCat, usage).
+
+5. Redeploy. Sign in via Clerk; API calls send `Authorization: Bearer <session token>` automatically.
 
 ## Production (Miget via GitHub)
 
