@@ -454,9 +454,11 @@ async fn list_models(
     State(state): State<AppState>,
     Query(q): Query<ModelsQuery>,
 ) -> impl IntoResponse {
-    let provider = q
-        .provider
-        .unwrap_or_else(|| state.config.default_provider.clone());
+    let provider = if let Some(p) = q.provider {
+        p
+    } else {
+        state.secrets.default_provider().await
+    };
     let api_key = state.secrets.resolve_api_key(&provider).await;
     match commands::list_models(&state.ctx.db, provider, api_key).await {
         Ok(r) => ok_json(serde_json::to_value(r).unwrap_or(json!(null))),

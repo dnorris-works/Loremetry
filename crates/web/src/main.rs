@@ -69,7 +69,6 @@ async fn main() {
     tracing::info!("Boot: loading platform secrets…");
     let secrets = match loremetry_core::platform_secrets::PlatformSecrets::load(
         database.pool.clone(),
-        &config,
     )
     .await
     {
@@ -79,7 +78,7 @@ async fn main() {
             eprintln!("Platform secrets init failed: {e}");
             if e.contains("SECRETS_ENCRYPTION_KEY") {
                 eprintln!(
-                    "Hint: On Miget, add SECRETS_ENCRYPTION_KEY (32 random bytes, base64). Example: openssl rand -base64 32 — or rely on ANTHROPIC_API_KEY / TOKENMIX_API_KEY env vars until you set it."
+                    "Hint: On Miget, add SECRETS_ENCRYPTION_KEY (32 random bytes, base64). Example: openssl rand -base64 32 — then set provider API keys in Admin → Platform credentials."
                 );
             } else if e.contains("decrypt failed") {
                 eprintln!(

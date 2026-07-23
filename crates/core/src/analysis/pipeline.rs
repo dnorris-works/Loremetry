@@ -722,7 +722,7 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
             if has_dataforseo_creds(&request.dataforseo_login, &request.dataforseo_password) {
                 run_keyword_searches_dataforseo(&app, &request.story_id, &seeds, &request.dataforseo_login, &request.dataforseo_password).await
             } else if !request.canopy_api_key.trim().is_empty() {
-                emit(&app, "⚠ DataForSEO credentials not set — falling back to Canopy for keyword search. Add DataForSEO in Admin → Platform credentials (or DATAFORSEO_LOGIN/PASSWORD on the server).");
+                emit(&app, "⚠ DataForSEO credentials not set — falling back to Canopy for keyword search. Add DataForSEO in Admin → Platform credentials.");
                 run_keyword_searches_canopy(&app, &request.story_id, &seeds, &request.canopy_api_key).await
             } else {
                 emit(&app, "  ⚠ No DataForSEO or Canopy credentials — skipping keyword search.");

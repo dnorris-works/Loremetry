@@ -47,16 +47,14 @@ cargo run -p loremetry-web
 cd ui && npm run dev
 ```
 
-Optional env secrets (also used on Miget):
+Runtime environment (Miget):
 
 - `DATABASE_URL` — PostgreSQL connection string (required on Miget)
-- `SECRETS_ENCRYPTION_KEY` — 32-byte key, base64-encoded (required in production for encrypted platform credentials)
+- `SECRETS_ENCRYPTION_KEY` — 32-byte key, base64-encoded (required in production to encrypt/decrypt platform credentials in the DB)
 - `BOOTSTRAP_ADMIN_EMAIL` — email for the first admin user when the database has no users (default `admin@local`)
-- `ANTHROPIC_API_KEY` / `TOKENMIX_API_KEY` — seeded into encrypted storage on first boot if the secrets table is empty
-- `CANOPY_API_KEY`
-- `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`
+- `PORT`, `STATIC_DIR` — HTTP server (set by the container image on Miget)
 
-Platform API keys are stored encrypted in Postgres (`lore.platform_secrets`) and managed in **Admin → Platform credentials**. The browser no longer sends API keys on analysis or chat requests.
+Provider API keys (Anthropic, TokenMix, Canopy, DataForSEO) are **only** stored encrypted in Postgres (`lore.platform_secrets`) via **Admin → Platform credentials**. They are not read from Miget env vars.
 
 ## Production (Miget via GitHub)
 

@@ -30,7 +30,7 @@ impl DataForSeoClient {
         let password = password.trim();
         if login.is_empty() || password.is_empty() {
             return Err(
-                "DataForSEO login and API password are not configured (Admin → Platform credentials or DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD).".into(),
+                "DataForSEO login and API password are not configured. Set them in Admin → Platform credentials.".into(),
             );
         }
 

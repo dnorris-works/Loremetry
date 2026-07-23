@@ -6,7 +6,6 @@ use tokio::sync::RwLock;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::config::Config;
 use crate::secrets::{decrypt_field, encrypt_field, resolve_encryption_key};
 
 #[derive(Clone, Debug, Default)]
@@ -27,23 +26,9 @@ pub struct PlatformSecrets {
 }
 
 impl PlatformSecrets {
-    pub async fn load(pool: PgPool, config: &Config) -> Result<Self, String> {
+    pub async fn load(pool: PgPool) -> Result<Self, String> {
         let key = resolve_encryption_key()?;
-        let mut creds = load_from_db(&pool, key.as_ref()).await?;
-        if creds.is_empty() {
-            creds = credentials_from_config(config);
-            if !creds.is_empty() {
-                if let Some(ref k) = key {
-                    save_to_db(&pool, k, &creds).await?;
-                } else {
-                    log::warn!(
-                        "SECRETS_ENCRYPTION_KEY not set; using API keys from environment only (not persisted). Set SECRETS_ENCRYPTION_KEY to store encrypted credentials in the database."
-                    );
-                }
-            }
-        } else {
-            overlay_missing_from_env(&mut creds, config);
-        }
+        let creds = load_from_db(&pool, key.as_ref()).await?;
         Ok(Self {
             inner: Arc::new(RwLock::new(creds)),
             pool,
@@ -106,7 +91,12 @@ impl PlatformSecrets {
     }
 
     pub async fn default_provider(&self) -> String {
-        self.inner.read().await.default_provider.clone()
+        let c = self.inner.read().await;
+        if c.default_provider.trim().is_empty() {
+            "claude".into()
+        } else {
+            c.default_provider.clone()
+        }
     }
 
     pub async fn configured_status(&self) -> PlatformSecretsStatus {
@@ -119,16 +109,6 @@ impl PlatformSecrets {
                 && !c.dataforseo_password.trim().is_empty(),
             default_provider: c.default_provider.clone(),
         }
-    }
-}
-
-impl PlatformCredentials {
-    fn is_empty(&self) -> bool {
-        self.anthropic_api_key.is_empty()
-            && self.tokenmix_api_key.is_empty()
-            && self.canopy_api_key.is_empty()
-            && self.dataforseo_login.is_empty()
-            && self.dataforseo_password.is_empty()
     }
 }
 
@@ -162,39 +142,6 @@ fn apply_patch_field(current: &mut String, patch: Option<String>) {
         if !v.is_empty() {
             *current = v;
         }
-    }
-}
-
-fn credentials_from_config(config: &Config) -> PlatformCredentials {
-    PlatformCredentials {
-        anthropic_api_key: config.anthropic_api_key.clone(),
-        tokenmix_api_key: config.tokenmix_api_key.clone(),
-        canopy_api_key: config.canopy_api_key.clone(),
-        dataforseo_login: config.dataforseo_login.clone(),
-        dataforseo_password: config.dataforseo_password.clone(),
-        default_provider: config.default_provider.clone(),
-    }
-}
-
-/// Fill any empty stored fields from process env (Miget DATAFORSEO_*, etc.).
-fn overlay_missing_from_env(creds: &mut PlatformCredentials, config: &Config) {
-    if creds.anthropic_api_key.trim().is_empty() && !config.anthropic_api_key.trim().is_empty() {
-        creds.anthropic_api_key = config.anthropic_api_key.clone();
-    }
-    if creds.tokenmix_api_key.trim().is_empty() && !config.tokenmix_api_key.trim().is_empty() {
-        creds.tokenmix_api_key = config.tokenmix_api_key.clone();
-    }
-    if creds.canopy_api_key.trim().is_empty() && !config.canopy_api_key.trim().is_empty() {
-        creds.canopy_api_key = config.canopy_api_key.clone();
-    }
-    if creds.dataforseo_login.trim().is_empty() && !config.dataforseo_login.trim().is_empty() {
-        creds.dataforseo_login = config.dataforseo_login.clone();
-    }
-    if creds.dataforseo_password.trim().is_empty() && !config.dataforseo_password.trim().is_empty() {
-        creds.dataforseo_password = config.dataforseo_password.clone();
-    }
-    if creds.default_provider.trim().is_empty() && !config.default_provider.trim().is_empty() {
-        creds.default_provider = config.default_provider.clone();
     }
 }
 
