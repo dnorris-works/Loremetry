@@ -18,6 +18,8 @@ pub struct PlatformCredentials {
     pub default_provider: String,
     pub clerk_publishable_key: String,
     pub clerk_jwt_issuer: String,
+    pub bootstrap_admin_email: String,
+    pub admin_bypass_token: String,
 }
 
 #[derive(Clone)]
@@ -57,6 +59,9 @@ impl PlatformSecrets {
         apply_patch_field(&mut creds.dataforseo_password, patch.dataforseo_password);
         apply_patch_field(&mut creds.clerk_publishable_key, patch.clerk_publishable_key);
         apply_patch_field(&mut creds.clerk_jwt_issuer, patch.clerk_jwt_issuer);
+        apply_patch_field(&mut creds.bootstrap_admin_email, patch.bootstrap_admin_email);
+        apply_patch_field(&mut creds.admin_bypass_token, patch.admin_bypass_token);
+        creds.bootstrap_admin_email = normalize_bootstrap_email(&creds.bootstrap_admin_email);
         if let Some(v) = patch.default_provider {
             if !v.is_empty() {
                 creds.default_provider = v;
@@ -72,6 +77,7 @@ impl PlatformSecrets {
             &creds,
         )
         .await?;
+        sync_local_admin_email(&self.pool, &creds.bootstrap_admin_email).await?;
         *self.inner.write().await = creds;
         Ok(())
     }
@@ -136,7 +142,19 @@ impl PlatformSecrets {
             clerk_publishable_key: c.clerk_publishable_key.clone(),
             clerk_jwt_issuer: c.clerk_jwt_issuer.clone(),
             clerk_enabled: !c.clerk_jwt_issuer.trim().is_empty(),
+            bootstrap_admin_email: normalize_bootstrap_email(&c.bootstrap_admin_email),
+            admin_bypass_token: c.admin_bypass_token.clone(),
         }
+    }
+
+    pub fn admin_bypass_valid(stored: &str, presented: &str) -> bool {
+        use subtle::ConstantTimeEq;
+        let a = stored.trim();
+        let b = presented.trim();
+        if a.is_empty() || b.is_empty() {
+            return false;
+        }
+        a.as_bytes().ct_eq(b.as_bytes()).into()
     }
 
     pub fn clerk_config(creds: &PlatformCredentials) -> Option<(String, String)> {
@@ -176,6 +194,8 @@ pub struct PlatformSecretsAdminGet {
     pub clerk_publishable_key: String,
     pub clerk_jwt_issuer: String,
     pub clerk_enabled: bool,
+    pub bootstrap_admin_email: String,
+    pub admin_bypass_token: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -196,6 +216,10 @@ pub struct PlatformCredentialsPatch {
     pub clerk_publishable_key: Option<String>,
     #[serde(default)]
     pub clerk_jwt_issuer: Option<String>,
+    #[serde(default)]
+    pub bootstrap_admin_email: Option<String>,
+    #[serde(default)]
+    pub admin_bypass_token: Option<String>,
 }
 
 fn apply_patch_field(current: &mut String, patch: Option<String>) {
@@ -204,6 +228,37 @@ fn apply_patch_field(current: &mut String, patch: Option<String>) {
             *current = v;
         }
     }
+}
+
+/// Email for the first local admin (`users` row) when Clerk is off; stored in `platform_secrets`.
+pub fn normalize_bootstrap_email(raw: &str) -> String {
+    let t = raw.trim();
+    if t.is_empty() {
+        "admin@local".into()
+    } else {
+        t.to_string()
+    }
+}
+
+pub async fn bootstrap_admin_email_from_db(pool: &PgPool) -> Result<String, String> {
+    let row: Option<String> =
+        sqlx::query_scalar("SELECT bootstrap_admin_email FROM platform_secrets WHERE id = 1")
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(normalize_bootstrap_email(row.as_deref().unwrap_or("")))
+}
+
+async fn sync_local_admin_email(pool: &PgPool, email: &str) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE users SET email = $1
+         WHERE clerk_id IS NULL OR clerk_id = ''",
+    )
+    .bind(email)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 async fn load_from_db(
@@ -219,14 +274,16 @@ async fn load_from_db(
         String,
         String,
         String,
+        String,
+        String,
     )> = sqlx::query_as(
-        "SELECT anthropic_api_key, tokenmix_api_key, canopy_api_key, dataforseo_login, dataforseo_password, default_provider, clerk_publishable_key, clerk_jwt_issuer FROM platform_secrets WHERE id = 1",
+        "SELECT anthropic_api_key, tokenmix_api_key, canopy_api_key, dataforseo_login, dataforseo_password, default_provider, clerk_publishable_key, clerk_jwt_issuer, bootstrap_admin_email, admin_bypass_token FROM platform_secrets WHERE id = 1",
     )
     .fetch_optional(pool)
     .await
     .map_err(|e| e.to_string())?;
 
-    let Some((a, t, c, l, p, dp, clerk_pk, clerk_iss)) = row else {
+    let Some((a, t, c, l, p, dp, clerk_pk, clerk_iss, bootstrap_email, bypass)) = row else {
         return Ok(PlatformCredentials::default());
     };
 
@@ -243,6 +300,8 @@ async fn load_from_db(
         },
         clerk_publishable_key: clerk_pk,
         clerk_jwt_issuer: clerk_iss,
+        bootstrap_admin_email: normalize_bootstrap_email(&bootstrap_email),
+        admin_bypass_token: bypass,
     })
 }
 
@@ -268,12 +327,13 @@ async fn save_to_db(
     } else {
         creds.default_provider.as_str()
     };
+    let bootstrap_email = normalize_bootstrap_email(&creds.bootstrap_admin_email);
     sqlx::query(
         "INSERT INTO platform_secrets (
             id, anthropic_api_key, tokenmix_api_key, canopy_api_key,
             dataforseo_login, dataforseo_password, default_provider,
-            clerk_publishable_key, clerk_jwt_issuer
-         ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8)
+            clerk_publishable_key, clerk_jwt_issuer, bootstrap_admin_email, admin_bypass_token
+         ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (id) DO UPDATE SET
             anthropic_api_key = EXCLUDED.anthropic_api_key,
             tokenmix_api_key = EXCLUDED.tokenmix_api_key,
@@ -283,6 +343,8 @@ async fn save_to_db(
             default_provider = EXCLUDED.default_provider,
             clerk_publishable_key = EXCLUDED.clerk_publishable_key,
             clerk_jwt_issuer = EXCLUDED.clerk_jwt_issuer,
+            bootstrap_admin_email = EXCLUDED.bootstrap_admin_email,
+            admin_bypass_token = EXCLUDED.admin_bypass_token,
             updated_at = now()",
     )
     .bind(encrypt_field(&creds.anthropic_api_key, key))
@@ -293,28 +355,31 @@ async fn save_to_db(
     .bind(dp)
     .bind(creds.clerk_publishable_key.trim())
     .bind(creds.clerk_jwt_issuer.trim().trim_end_matches('/'))
+    .bind(&bootstrap_email)
+    .bind(creds.admin_bypass_token.trim())
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// First admin user for pre-Clerk bootstrap.
+/// Operator user row (no Clerk) for break-glass sessions and usage attribution.
 pub async fn ensure_bootstrap_user(pool: &PgPool) -> Result<Uuid, String> {
-    let existing: Option<Uuid> =
-        sqlx::query_scalar("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1")
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| e.to_string())?;
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM users WHERE clerk_id IS NULL OR clerk_id = '' ORDER BY created_at LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
     if let Some(id) = existing {
         backfill_story_owners(pool, id).await?;
         return Ok(id);
     }
 
-    let email = std::env::var("BOOTSTRAP_ADMIN_EMAIL").unwrap_or_else(|_| "admin@local".into());
+    let email = bootstrap_admin_email_from_db(pool).await?;
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO users (email, role, plan_label, monthly_fee_cents)
-         VALUES ($1, 'admin', 'admin', 0)
+         VALUES ($1, 'subscriber', 'operator', 0)
          RETURNING id",
     )
     .bind(&email)
@@ -323,7 +388,7 @@ pub async fn ensure_bootstrap_user(pool: &PgPool) -> Result<Uuid, String> {
     .map_err(|e| e.to_string())?;
 
     backfill_story_owners(pool, id).await?;
-    log::info!("Bootstrap admin user created: {email} ({id})");
+    log::info!("Operator user created for break-glass: {email} ({id})");
     Ok(id)
 }
 
@@ -334,4 +399,48 @@ async fn backfill_story_owners(pool: &PgPool, user_id: Uuid) -> Result<(), Strin
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn generate_operator_bypass_token() -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use rand::RngCore;
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    STANDARD.encode(bytes)
+}
+
+/// If no operator bypass is configured, generate one and persist (plaintext). Returns the new token.
+pub async fn ensure_operator_bypass_token(pool: &PgPool) -> Result<Option<String>, String> {
+    let current: Option<String> =
+        sqlx::query_scalar("SELECT admin_bypass_token FROM platform_secrets WHERE id = 1")
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    if current.as_deref().unwrap_or("").trim().len() > 0 {
+        return Ok(None);
+    }
+
+    let token = generate_operator_bypass_token();
+    let result = sqlx::query(
+        "UPDATE platform_secrets SET admin_bypass_token = $1, updated_at = now() WHERE id = 1",
+    )
+    .bind(&token)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if result.rows_affected() == 0 {
+        sqlx::query(
+            "INSERT INTO platform_secrets (id, admin_bypass_token) VALUES (1, $1)
+             ON CONFLICT (id) DO UPDATE SET
+                admin_bypass_token = EXCLUDED.admin_bypass_token,
+                updated_at = now()",
+        )
+        .bind(&token)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(Some(token))
 }

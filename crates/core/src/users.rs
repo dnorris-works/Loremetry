@@ -3,23 +3,13 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Map Clerk role claim to DB `users.role` (`admin` | `subscriber`).
-pub fn role_from_clerk_claim(claim: &str) -> &'static str {
-    if claim.eq_ignore_ascii_case("admin") {
-        "admin"
-    } else {
-        "subscriber"
-    }
-}
-
-/// Upsert a user row from Clerk identity; returns `(id, role)`.
+/// Upsert a user row from Clerk identity; returns `(id, role)` (`subscriber` only).
 pub async fn upsert_clerk_user(
     pool: &PgPool,
     clerk_id: &str,
     email: &str,
-    clerk_role: &str,
 ) -> Result<(Uuid, String), String> {
-    let role = role_from_clerk_claim(clerk_role);
+    let role = "subscriber";
     if clerk_id.trim().is_empty() {
         return Err("missing clerk user id".into());
     }
@@ -36,8 +26,7 @@ pub async fn upsert_clerk_user(
         "INSERT INTO users (clerk_id, email, role, plan_label, monthly_fee_cents)
          VALUES ($1, $2, $3, '', 0)
          ON CONFLICT (clerk_id) DO UPDATE SET
-            email = EXCLUDED.email,
-            role = EXCLUDED.role
+            email = EXCLUDED.email
          RETURNING id",
     )
     .bind(clerk_id)
@@ -50,15 +39,11 @@ pub async fn upsert_clerk_user(
     Ok((id, role.to_string()))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::role_from_clerk_claim;
-
-    #[test]
-    fn admin_role_claim() {
-        assert_eq!(role_from_clerk_claim("admin"), "admin");
-        assert_eq!(role_from_clerk_claim("Admin"), "admin");
-        assert_eq!(role_from_clerk_claim("subscriber"), "subscriber");
-        assert_eq!(role_from_clerk_claim("user"), "subscriber");
-    }
+pub async fn email_by_id(pool: &PgPool, id: Uuid) -> Option<String> {
+    sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
 }

@@ -9,6 +9,7 @@ use axum::http::request::Parts;
 use axum::http::{header::AUTHORIZATION, StatusCode};
 use axum::response::{IntoResponse, Response};
 use jsonwebtoken::{decode, decode_header, jwk::JwkSet, Algorithm, DecodingKey, Validation};
+use loremetry_core::platform_secrets::PlatformSecrets;
 use loremetry_core::users;
 use serde::Deserialize;
 use serde_json::json;
@@ -17,6 +18,8 @@ use tokio::sync::RwLock;
 use crate::error::ok_json;
 use crate::state::AppState;
 
+pub const ADMIN_BYPASS_HEADER: &str = "x-loremetry-admin-bypass";
+
 #[derive(Clone, Debug)]
 pub struct ClerkConfig {
     pub publishable_key: String,
@@ -24,9 +27,10 @@ pub struct ClerkConfig {
 }
 
 impl ClerkConfig {
-    pub fn from_credentials(creds: &loremetry_core::platform_secrets::PlatformCredentials) -> Option<Self> {
-        let (publishable_key, jwt_issuer) =
-            loremetry_core::platform_secrets::PlatformSecrets::clerk_config(creds)?;
+    pub fn from_credentials(
+        creds: &loremetry_core::platform_secrets::PlatformCredentials,
+    ) -> Option<Self> {
+        let (publishable_key, jwt_issuer) = PlatformSecrets::clerk_config(creds)?;
         Some(Self {
             publishable_key,
             jwt_issuer,
@@ -40,19 +44,28 @@ pub struct AuthUser {
     pub db_user_id: uuid::Uuid,
     pub email: String,
     pub role: String,
+    /// Operator break-glass (admin UI + platform secrets); not stored on Clerk users.
+    pub break_glass: bool,
 }
 
 impl AuthUser {
     pub fn is_admin(&self) -> bool {
-        self.role == "admin"
+        self.break_glass
     }
 
-    pub fn bootstrap(state: &AppState) -> Self {
+    pub async fn break_glass_user(state: &AppState) -> Self {
+        let id = state.ctx.user_id();
+        let email = users::email_by_id(&state.ctx.db.pool, id)
+            .await
+            .unwrap_or_else(|| {
+                loremetry_core::platform_secrets::normalize_bootstrap_email("")
+            });
         Self {
             clerk_id: String::new(),
-            db_user_id: state.ctx.user_id(),
-            email: std::env::var("BOOTSTRAP_ADMIN_EMAIL").unwrap_or_else(|_| "admin@local".into()),
-            role: "admin".into(),
+            db_user_id: id,
+            email,
+            role: "subscriber".into(),
+            break_glass: true,
         }
     }
 }
@@ -145,31 +158,30 @@ pub async fn clerk_auth_enabled(state: &AppState) -> bool {
     clerk_config_from_state(state).await.is_some()
 }
 
+fn bypass_token_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(ADMIN_BYPASS_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+pub async fn try_break_glass(state: &AppState, headers: &HeaderMap) -> Option<AuthUser> {
+    let presented = bypass_token_from_headers(headers)?;
+    let creds = state.secrets.get().await;
+    if !PlatformSecrets::admin_bypass_valid(&creds.admin_bypass_token, &presented) {
+        return None;
+    }
+    tracing::info!("Operator break-glass session");
+    Some(AuthUser::break_glass_user(state).await)
+}
+
 #[derive(Debug, Deserialize)]
 struct ClerkJwtClaims {
     sub: String,
     #[serde(default)]
     email: Option<String>,
-    #[serde(default)]
-    role: Option<String>,
-    #[serde(default)]
-    metadata: Option<serde_json::Value>,
-    #[serde(default)]
-    public_metadata: Option<serde_json::Value>,
-}
-
-fn clerk_role_from_claims(claims: &ClerkJwtClaims) -> String {
-    if claims.role.as_deref() == Some("admin") {
-        return "admin".into();
-    }
-    for meta in [&claims.public_metadata, &claims.metadata] {
-        if let Some(v) = meta {
-            if v.get("role").and_then(|r| r.as_str()) == Some("admin") {
-                return "admin".into();
-            }
-        }
-    }
-    "subscriber".into()
 }
 
 fn bearer_from_headers(headers: &HeaderMap) -> Option<String> {
@@ -203,20 +215,23 @@ async fn verify_clerk_token(
 }
 
 pub async fn resolve_auth_user(state: &AppState, headers: &HeaderMap) -> Result<AuthUser, String> {
-    let Some(clerk) = clerk_config_from_state(state).await else {
-        return Ok(AuthUser::bootstrap(state));
-    };
+    if let Some(user) = try_break_glass(state, headers).await {
+        return Ok(user);
+    }
+    let clerk = clerk_config_from_state(state)
+        .await
+        .ok_or("Clerk is not configured. Sign in is unavailable until Clerk is set in platform credentials.")?;
     let token = bearer_from_headers(headers).ok_or("Missing Authorization: Bearer session token")?;
     let claims = verify_clerk_token(state, &clerk, &token).await?;
-    let clerk_role = clerk_role_from_claims(&claims);
     let email = claims.email.unwrap_or_default();
     let (db_user_id, role) =
-        users::upsert_clerk_user(&state.ctx.db.pool, &claims.sub, &email, &clerk_role).await?;
+        users::upsert_clerk_user(&state.ctx.db.pool, &claims.sub, &email).await?;
     Ok(AuthUser {
         clerk_id: claims.sub,
         db_user_id,
         email,
         role,
+        break_glass: false,
     })
 }
 
@@ -233,7 +248,7 @@ impl Authenticated {
     }
 }
 
-/// Admin-only authenticated request.
+/// Admin-only authenticated request (operator break-glass only).
 #[derive(Clone)]
 pub struct AdminAuthenticated(pub Authenticated);
 
@@ -252,7 +267,7 @@ impl FromRequestParts<AppState> for AdminAuthenticated {
         if !inner.user.is_admin() {
             return Err((
                 StatusCode::FORBIDDEN,
-                axum::Json(json!({ "error": "Admin role required" })),
+                axum::Json(json!({ "error": "Operator access required" })),
             )
                 .into_response());
         }
@@ -264,12 +279,6 @@ impl FromRequestParts<AppState> for Authenticated {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        if !clerk_auth_enabled(state).await {
-            return Ok(Authenticated {
-                state: state.clone(),
-                user: AuthUser::bootstrap(state),
-            });
-        }
         match resolve_auth_user(state, &parts.headers).await {
             Ok(user) => Ok(Authenticated {
                 state: state.clone(),
@@ -301,5 +310,13 @@ pub async fn auth_me(auth: Authenticated) -> impl IntoResponse {
         "email": auth.user.email,
         "role": auth.user.role,
         "isAdmin": auth.user.is_admin(),
+        "breakGlass": auth.user.break_glass,
     }))
+}
+
+pub fn invoke_requires_operator(cmd: &str) -> bool {
+    matches!(
+        cmd,
+        "get_platform_credentials" | "update_platform_credentials"
+    )
 }

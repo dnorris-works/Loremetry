@@ -1,11 +1,12 @@
 import { ref, computed } from 'vue';
-import { setAuthTokenProvider } from '../api';
+import { getOperatorBypassToken, setAuthTokenProvider, setOperatorBypassToken } from '../api';
 
 export type MeResponse = {
   id: string;
   email: string;
   role: string;
   isAdmin: boolean;
+  breakGlass?: boolean;
 };
 
 const clerkEnabled = ref(false);
@@ -14,12 +15,18 @@ const me = ref<MeResponse | null>(null);
 const authReady = ref(false);
 
 export function useAuth() {
+  const breakGlass = computed(() => me.value?.breakGlass === true);
   const isAdmin = computed(() => me.value?.isAdmin === true);
-  const isSignedIn = computed(() => !clerkEnabled.value || me.value !== null);
+  const isSignedIn = computed(() => me.value !== null);
 
   async function loadAuthConfig(): Promise<void> {
     try {
-      const res = await fetch('/api/auth/config');
+      const headers = new Headers();
+      const bypass = getOperatorBypassToken();
+      if (bypass) {
+        headers.set('X-Loremetry-Admin-Bypass', bypass);
+      }
+      const res = await fetch('/api/auth/config', { headers });
       const data = await res.json();
       clerkEnabled.value = Boolean(data.clerkEnabled);
       publishableKey.value = data.publishableKey ?? '';
@@ -29,13 +36,13 @@ export function useAuth() {
   }
 
   async function refreshMe(): Promise<void> {
-    if (!clerkEnabled.value) {
-      me.value = { id: '', email: 'local', role: 'admin', isAdmin: true };
-      authReady.value = true;
-      return;
-    }
     try {
-      const res = await fetch('/api/me');
+      const headers = new Headers();
+      const bypass = getOperatorBypassToken();
+      if (bypass) {
+        headers.set('X-Loremetry-Admin-Bypass', bypass);
+      }
+      const res = await fetch('/api/me', { headers });
       if (!res.ok) {
         me.value = null;
         return;
@@ -48,8 +55,23 @@ export function useAuth() {
     }
   }
 
+  function applyOperatorBypass(token: string): void {
+    setOperatorBypassToken(token);
+    void refreshMe();
+  }
+
+  function clearOperatorBypass(): void {
+    setOperatorBypassToken('');
+    me.value = null;
+    authReady.value = false;
+    void refreshMe();
+  }
+
   function wireClerkGetToken(getToken: () => Promise<string | null>): void {
     setAuthTokenProvider(async () => {
+      if (getOperatorBypassToken()) {
+        return null;
+      }
       try {
         return await getToken();
       } catch {
@@ -63,10 +85,13 @@ export function useAuth() {
     publishableKey,
     me,
     authReady,
+    breakGlass,
     isAdmin,
     isSignedIn,
     loadAuthConfig,
     refreshMe,
+    applyOperatorBypass,
+    clearOperatorBypass,
     wireClerkGetToken,
   };
 }

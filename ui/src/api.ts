@@ -1,6 +1,29 @@
 /** Drop-in replacement for Tauri invoke + event listen. */
 
+const BYPASS_STORAGE_KEY = 'loremetry_admin_bypass';
+
 let authTokenProvider: (() => Promise<string | null>) | null = null;
+
+export function getOperatorBypassToken(): string {
+  try {
+    return sessionStorage.getItem(BYPASS_STORAGE_KEY)?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setOperatorBypassToken(token: string): void {
+  try {
+    const t = token.trim();
+    if (t) {
+      sessionStorage.setItem(BYPASS_STORAGE_KEY, t);
+    } else {
+      sessionStorage.removeItem(BYPASS_STORAGE_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 export function setAuthTokenProvider(fn: () => Promise<string | null>): void {
   authTokenProvider = fn;
@@ -8,6 +31,10 @@ export function setAuthTokenProvider(fn: () => Promise<string | null>): void {
 
 async function authHeaders(extra?: HeadersInit): Promise<Headers> {
   const headers = new Headers(extra);
+  const bypass = getOperatorBypassToken();
+  if (bypass) {
+    headers.set('X-Loremetry-Admin-Bypass', bypass);
+  }
   if (authTokenProvider) {
     const token = await authTokenProvider();
     if (token) {

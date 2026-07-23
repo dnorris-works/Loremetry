@@ -31,6 +31,8 @@ const credDfsLogin = ref('');
 const credDfsPassword = ref('');
 const credClerkPublishable = ref('');
 const credClerkIssuer = ref('');
+const credBootstrapEmail = ref('');
+const credBypassToken = ref('');
 const credDefaultProvider = ref('tokenmix');
 const showCredentialValues = ref(true);
 
@@ -48,6 +50,8 @@ type PlatformSecretsView = {
   clerk_publishable_key: string;
   clerk_jwt_issuer: string;
   clerk_enabled: boolean;
+  bootstrap_admin_email: string;
+  admin_bypass_token: string;
 };
 
 const credFieldType = computed(() => (showCredentialValues.value ? 'text' : 'password'));
@@ -166,6 +170,8 @@ function applyPlatformSecrets(data: PlatformSecretsView): void {
   }
   credClerkPublishable.value = data.clerk_publishable_key ?? '';
   credClerkIssuer.value = data.clerk_jwt_issuer ?? '';
+  credBootstrapEmail.value = data.bootstrap_admin_email ?? 'admin@local';
+  credBypassToken.value = data.admin_bypass_token ?? '';
 }
 
 async function loadPlatformSecrets(): Promise<void> {
@@ -208,6 +214,10 @@ async function savePlatformSecrets(): Promise<void> {
   const clerkIss = credClerkIssuer.value.trim();
   if (clerkPk) body.clerk_publishable_key = clerkPk;
   if (clerkIss) body.clerk_jwt_issuer = clerkIss;
+  const bootstrapEmail = credBootstrapEmail.value.trim();
+  if (bootstrapEmail) body.bootstrap_admin_email = bootstrapEmail;
+  const bypass = credBypassToken.value.trim();
+  if (bypass) body.admin_bypass_token = bypass;
   try {
     const result = await invoke<{
       success: boolean;
@@ -568,6 +578,14 @@ async function onRemoveStale(): Promise<void> {
       <input v-model="credClerkPublishable" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" placeholder="pk_live_… or pk_test_…" />
       <label class="field-label">Clerk JWT issuer (Frontend API URL)</label>
       <input v-model="credClerkIssuer" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" placeholder="https://your-app.clerk.accounts.dev" />
+      <h4 class="subsection-title">Operator bypass</h4>
+      <p class="panel-desc">Long random secret for full API access without Clerk (header <code>X-Loremetry-Admin-Bypass</code> or <strong>Operator access</strong> on the sign-in screen). On first deploy the server auto-generates a token and prints it in <strong>container logs</strong> if this field is empty. Unlocks Admin and all invoke routes.</p>
+      <label class="field-label">Operator bypass token</label>
+      <input v-model="credBypassToken" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" placeholder="Generate a long random string" />
+      <h4 class="subsection-title">Open mode (no Clerk)</h4>
+      <p class="panel-desc">When Clerk is not configured, the API treats you as this bootstrap admin (created on first boot if no admin exists). Changing the email updates the local admin user row for usage attribution and <code>/api/me</code>.</p>
+      <label class="field-label">Bootstrap admin email</label>
+      <input v-model="credBootstrapEmail" type="email" autocomplete="off" spellcheck="false" class="cred-input" placeholder="admin@local" />
       <label class="field-label">Default LLM provider</label>
       <div class="provider-options">
         <label class="provider-option">

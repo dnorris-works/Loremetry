@@ -23,6 +23,7 @@ import NewDocumentForm from './components/NewDocumentForm.vue';
 import ManuscriptViewer from './components/ManuscriptViewer.vue';
 import WritingPanel from './components/WritingPanel.vue';
 import ClerkGate from './components/ClerkGate.vue';
+import OperatorSignIn from './components/OperatorSignIn.vue';
 import { useAuth } from './composables/useAuth';
 
 const props = defineProps<{
@@ -209,56 +210,28 @@ onMounted(() => {
     }
   });
 
-  storiesCtx.loadStories().then(() => {
-    const folder = storiesCtx.activeFolder.value;
-    if (folder) {
-      analysisCtx.refreshState(folder);
-      reportsCtx.loadSidebarReports(folder, platformCtx.platform.value);
-    }
-  });
-  seriesCtx.loadSeries();
   void auth.loadAuthConfig().then(() => auth.refreshMe());
 });
+
+watch(
+  () => auth.isSignedIn.value,
+  (signedIn) => {
+    if (!signedIn) return;
+    storiesCtx.loadStories().then(() => {
+      const folder = storiesCtx.activeFolder.value;
+      if (folder) {
+        analysisCtx.refreshState(folder);
+        reportsCtx.loadSidebarReports(folder, platformCtx.platform.value);
+      }
+    });
+    seriesCtx.loadSeries();
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
-  <ClerkGate v-if="props.clerkEnabled">
-    <div id="app-root">
-      <TitleBar />
-      <Sidebar @open-story-form="openStoryForm" @open-series-form="openSeriesForm" />
-      <main id="main">
-        <NewDocumentForm
-          v-if="activePanel === 'new-document'"
-          :initial-location="newDocLocation"
-          @created="onDocumentCreated"
-          @cancel="onDocumentFormCancel"
-        />
-
-        <WritingPanel
-          v-else-if="appMode === 'writing'"
-          :file-path="writingFilePath"
-          :chapter-title="writingChapterTitle"
-          :story-folder="storiesCtx.activeFolder.value"
-        />
-
-        <template v-else-if="appMode === 'analyzer'">
-          <AnalyzerPanel v-if="activePanel === 'analyzer'" />
-          <ReportsViewer v-if="activePanel === 'reports'" />
-          <AdminPanel v-if="activePanel === 'admin'" />
-          <StoryForm v-if="activePanel === 'story-form'" :story="editingStory" />
-          <SeriesForm v-if="activePanel === 'series'" :series="editingSeries" />
-          <ManuscriptViewer
-            v-if="activePanel === 'manuscript'"
-            :findings="manuscriptFindings"
-            :start-index="manuscriptStartIndex"
-            :story-folder="storiesCtx.activeFolder.value"
-            @close="closeManuscriptEditor"
-          />
-        </template>
-      </main>
-    </div>
-  </ClerkGate>
-  <div v-else id="app-root">
+  <div v-if="auth.isSignedIn" id="app-root">
     <TitleBar />
     <Sidebar @open-story-form="openStoryForm" @open-series-form="openSeriesForm" />
     <main id="main">
@@ -269,7 +242,6 @@ onMounted(() => {
         @cancel="onDocumentFormCancel"
       />
 
-      <!-- Writing mode -->
       <WritingPanel
         v-else-if="appMode === 'writing'"
         :file-path="writingFilePath"
@@ -277,7 +249,6 @@ onMounted(() => {
         :story-folder="storiesCtx.activeFolder.value"
       />
 
-      <!-- Analyzer mode panels -->
       <template v-else-if="appMode === 'analyzer'">
         <AnalyzerPanel v-if="activePanel === 'analyzer'" />
         <ReportsViewer v-if="activePanel === 'reports'" />
@@ -294,6 +265,8 @@ onMounted(() => {
       </template>
     </main>
   </div>
+  <ClerkGate v-else-if="props.clerkEnabled" />
+  <OperatorSignIn v-else />
 </template>
 
 <style scoped>

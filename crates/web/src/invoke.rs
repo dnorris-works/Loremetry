@@ -33,6 +33,9 @@ pub async fn invoke_handler(
     auth: Authenticated,
     Json(body): Json<InvokeBody>,
 ) -> impl IntoResponse {
+    if crate::auth::invoke_requires_operator(&body.cmd) && !auth.user.is_admin() {
+        return json_error("Operator access required");
+    }
     let state = &auth.state;
     let ctx = auth.ctx();
     let mut args = normalize_args(body.args);

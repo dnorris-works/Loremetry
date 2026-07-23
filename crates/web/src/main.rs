@@ -68,6 +68,28 @@ async fn main() {
         }
     };
 
+    match loremetry_core::platform_secrets::ensure_operator_bypass_token(&database.pool).await {
+        Ok(Some(token)) => {
+            tracing::warn!(
+                "Operator bypass token was empty — generated a new one (copy from logs now)"
+            );
+            eprintln!();
+            eprintln!("══════════════════════════════════════════════════════════════");
+            eprintln!("  OPERATOR BYPASS TOKEN (first-time — copy now)");
+            eprintln!();
+            eprintln!("  {token}");
+            eprintln!();
+            eprintln!("  In the app: Sign-in screen → Operator access → paste token.");
+            eprintln!("  Later: rotate in Admin → Platform credentials.");
+            eprintln!("══════════════════════════════════════════════════════════════");
+            eprintln!();
+        }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::error!("Could not ensure operator bypass token: {e}");
+        }
+    }
+
     tracing::info!("Boot: loading platform secrets…");
     let secrets = match loremetry_core::platform_secrets::PlatformSecrets::load(
         database.pool.clone(),
@@ -101,10 +123,10 @@ async fn main() {
 
     if state.secrets.get().await.clerk_jwt_issuer.trim().is_empty() {
         tracing::warn!(
-            "Clerk not configured in DB — set JWT issuer + publishable key in Admin → Platform credentials. Using open local mode until then."
+            "Clerk not configured — users need operator bypass or Clerk settings in Admin → Platform credentials."
         );
     } else {
-        tracing::info!("Clerk auth enabled from platform settings in database");
+        tracing::info!("Clerk sign-in enabled from platform settings in database");
     }
 
     let port = state.config.port;

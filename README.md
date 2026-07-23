@@ -49,13 +49,12 @@ cd ui && npm run dev
 
 ### Server environment (any host)
 
-These are **infrastructure** settings only. Provider API keys, Clerk, and other operator config live in **Postgres** (`lore.platform_secrets`) via **Admin → Platform credentials**.
+These are **infrastructure** settings only. Provider API keys, Clerk, and bootstrap admin email live in **Postgres** (`lore.platform_secrets`) via **Admin → Platform credentials**.
 
 | Variable | Purpose |
 |----------|---------|
 | `DATABASE_URL` | PostgreSQL connection string (`postgres://…`). Also accepts `POSTGRES_URL`, `POSTGRESQL_URL`, or any `POSTGRES_<name>_URL` from a managed addon. |
 | `SECRETS_ENCRYPTION_KEY` | Base64-encoded 32-byte key (`openssl rand -base64 32`). Required in production to encrypt API secrets in the DB. **Keep this with your database backup** when you change hosts. |
-| `BOOTSTRAP_ADMIN_EMAIL` | Optional. First admin user when the DB has no users and Clerk is not configured (default `admin@local`). |
 | `PORT` | HTTP listen port (default `8080`; many platforms set this automatically). |
 | `STATIC_DIR` | Path to built Vue assets (default `./ui/dist`; set in the Docker image). |
 | `DATABASE_SSLMODE` | Optional. `prefer` (default for remote hosts), `disable` for localhost. |
@@ -70,27 +69,21 @@ These are **infrastructure** settings only. Provider API keys, Clerk, and other 
 5. **Clerk** — add the new app URL to Clerk **allowed origins** / redirect URLs if the domain changed.
 6. **Deploy** — build from the repo `Dockerfile` (or pull your image) and set the env vars above.
 
-### Clerk (sign-in + admin role)
+### Clerk (sign-in) and operator bypass
 
-1. Create a Clerk application. In Loremetry **Admin → Platform credentials**, set **Clerk publishable key** and **JWT issuer** (Clerk → **API keys** → “Frontend API URL”, without a trailing slash). Save, then reload the app so sign-in initializes with the publishable key.
-2. **Your user (admin):** Clerk Dashboard → **Users** → your user → **Public metadata**:
-
-   ```json
-   { "role": "admin" }
-   ```
-
-3. **Session token** (required so the API sees role/email): Clerk → **Sessions** → **Customize session token** → add:
+1. Create a Clerk application. In **Admin → Platform credentials**, set **Clerk publishable key** and **JWT issuer** (Clerk → **API keys** → “Frontend API URL”, without a trailing slash). Save, then reload the app.
+2. **Session token** (so the API gets email): Clerk → **Sessions** → **Customize session token** → add:
 
    ```json
    {
-     "role": "{{user.public_metadata.role}}",
      "email": "{{user.primary_email_address}}"
    }
    ```
 
-4. Everyone else: leave public metadata empty or `{ "role": "user" }` — they get `subscriber` in Postgres and **cannot** open Admin (platform secrets, SQL, WinningCat, usage).
+3. All Clerk users are **subscribers** in Postgres — no admin roles in Clerk metadata.
+4. **Operator bypass** — on **first boot**, if no token is stored, the server **generates one and prints it in deploy logs** (container stdout). Copy it from your host log viewer, then **Sign-in → Operator access** and paste. After that, view or rotate the token in **Admin → Platform credentials**. Optional header for scripts: `X-Loremetry-Admin-Bypass`. Clerk users cannot open Admin; only this token grants operator mode.
 
-5. Redeploy. Sign in via Clerk; API calls send `Authorization: Bearer <session token>` automatically.
+5. Sign in via Clerk for normal use; API calls send `Authorization: Bearer <session token>` automatically.
 
 ## Production deploy
 
