@@ -5,6 +5,7 @@ import {
   setAuthTokenProvider,
   setOperatorBypassToken,
   registerAuthRequiredHandler,
+  setAppSessionActive,
 } from '../api';
 
 export type MeResponse = {
@@ -29,6 +30,7 @@ registerAuthRequiredHandler(() => {
   setOperatorBypassToken('');
   me.value = null;
   enteredApp.value = false;
+  setAppSessionActive(false);
 });
 
 export function registerClerkSignOut(fn: () => Promise<void>): void {
@@ -47,12 +49,12 @@ async function hasClerkBearer(): Promise<boolean> {
 
 /** Validate session with the server; sets `enteredApp` only on success. */
 async function refreshMe(): Promise<boolean> {
-  me.value = null;
-  enteredApp.value = false;
-
   const bypass = getOperatorBypassToken();
   const bearer = await hasClerkBearer();
   if (!bypass && !bearer) {
+    me.value = null;
+    enteredApp.value = false;
+    setAppSessionActive(false);
     return false;
   }
 
@@ -63,13 +65,20 @@ async function refreshMe(): Promise<boolean> {
       if (res.status === 401 && bypass) {
         setOperatorBypassToken('');
       }
+      me.value = null;
+      enteredApp.value = false;
+      setAppSessionActive(false);
       return false;
     }
     const data = (await res.json()) as MeResponse;
     me.value = data;
     enteredApp.value = true;
+    setAppSessionActive(true);
     return true;
   } catch {
+    me.value = null;
+    enteredApp.value = false;
+    setAppSessionActive(false);
     return false;
   }
 }
@@ -108,6 +117,7 @@ export function useAuth() {
     setOperatorBypassToken('');
     me.value = null;
     enteredApp.value = false;
+    setAppSessionActive(false);
   }
 
   async function signOut(): Promise<void> {
@@ -118,6 +128,7 @@ export function useAuth() {
     }
     me.value = null;
     enteredApp.value = false;
+    setAppSessionActive(false);
   }
 
   function wireClerkGetToken(getToken: () => Promise<string | null>): void {

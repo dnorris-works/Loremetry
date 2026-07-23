@@ -8,7 +8,10 @@ import { useReportTypes } from '../composables/useReportTypes';
 const showPanel = inject(showPanelKey)!;
 const settingsCtx = inject(settingsKey)!;
 const { reportTypes, loadReportTypes } = useReportTypes();
-loadReportTypes();
+
+onMounted(() => {
+  void loadReportTypes();
+});
 
 const savedMsg = ref('');
 const modelFetchStatus = ref('');

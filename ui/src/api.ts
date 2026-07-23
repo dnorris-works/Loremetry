@@ -4,6 +4,17 @@ const BYPASS_STORAGE_KEY = 'loremetry_admin_bypass';
 
 let authTokenProvider: (() => Promise<string | null>) | null = null;
 let onAuthRequired: (() => void) | null = null;
+let appSessionActive = false;
+
+export function setAppSessionActive(active: boolean): void {
+  appSessionActive = active;
+}
+
+function assertAppSession(): void {
+  if (!appSessionActive) {
+    throw new Error('Not signed in');
+  }
+}
 
 export function registerAuthRequiredHandler(fn: () => void): void {
   onAuthRequired = fn;
@@ -74,6 +85,7 @@ export async function buildAuthHeaders(extra?: HeadersInit): Promise<Headers> {
 }
 
 export async function invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  assertAppSession();
   const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
   const res = await fetch('/api/invoke', {
     method: 'POST',
@@ -109,6 +121,7 @@ export function listen(event: string, handler: (event: { payload: string }) => v
 }
 
 export async function uploadChapters(storyId: string, files: FileList | File[]): Promise<void> {
+  assertAppSession();
   const fd = new FormData();
   for (const f of Array.from(files)) {
     fd.append('files', f, f.name);
@@ -130,6 +143,7 @@ export async function adminFetch<T = unknown>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  assertAppSession();
   let res: Response;
   try {
     const headers = await buildAuthHeaders(init.headers);
@@ -159,6 +173,7 @@ export async function adminUploadFile<T = unknown>(
   file: File,
   fieldName = 'file',
 ): Promise<T> {
+  assertAppSession();
   const fd = new FormData();
   fd.append(fieldName, file, file.name);
   const headers = await buildAuthHeaders();

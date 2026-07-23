@@ -3,7 +3,7 @@ import AuthClerkSignIn from './AuthClerkSignIn.vue';
 import AuthOperatorForm from './AuthOperatorForm.vue';
 import { useAuth } from '../composables/useAuth';
 
-const auth = useAuth();
+const { clerkEnabled, restoringSession } = useAuth();
 </script>
 
 <template>
@@ -11,9 +11,9 @@ const auth = useAuth();
     <div class="auth-page-inner">
       <h1 class="auth-title">Loremetry</h1>
 
-      <p v-if="auth.restoringSession" class="auth-muted">Checking existing session…</p>
+      <p v-if="restoringSession" class="auth-muted">Checking existing session…</p>
 
-      <template v-if="auth.clerkEnabled">
+      <template v-if="clerkEnabled">
         <AuthClerkSignIn />
         <hr class="auth-divider" />
       </template>

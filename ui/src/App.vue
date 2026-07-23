@@ -10,7 +10,7 @@ const props = defineProps<{
   publishableKey?: string;
 }>();
 
-const auth = useAuth();
+const { enteredApp, loadAuthConfig, restoreSession } = useAuth();
 
 onMounted(() => {
   document.addEventListener('contextmenu', (e) => {
@@ -20,12 +20,12 @@ onMounted(() => {
     }
   });
 
-  void auth.loadAuthConfig().then(() => auth.restoreSession());
+  void loadAuthConfig().then(() => restoreSession());
 });
 </script>
 
 <template>
   <ClerkTokenWire v-if="props.clerkEnabled" />
-  <MainApp v-if="auth.enteredApp" />
+  <MainApp v-if="enteredApp" />
   <AuthPage v-else />
 </template>
