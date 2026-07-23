@@ -303,6 +303,24 @@ pub async fn auth_config(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
+/// GET /api/auth/session — silent session probe (always 200; no 401 for missing/invalid auth).
+pub async fn auth_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    match resolve_auth_user(&state, &headers).await {
+        Ok(user) => ok_json(json!({
+            "authenticated": true,
+            "id": user.db_user_id,
+            "email": user.email,
+            "role": user.role,
+            "isAdmin": user.is_admin(),
+            "breakGlass": user.break_glass,
+        })),
+        Err(_) => ok_json(json!({ "authenticated": false })),
+    }
+}
+
 /// GET /api/me — current user.
 pub async fn auth_me(auth: Authenticated) -> impl IntoResponse {
     ok_json(json!({

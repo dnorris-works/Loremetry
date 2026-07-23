@@ -112,6 +112,7 @@ pub fn build_router(state: AppState) -> Router {
 
     let api = Router::new()
         .route("/auth/config", get(auth::auth_config))
+        .route("/auth/session", get(auth::auth_session))
         .merge(protected)
         .with_state(state.clone());
 

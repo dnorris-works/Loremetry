@@ -19,7 +19,7 @@ export type MeResponse = {
 const clerkEnabled = ref(false);
 const publishableKey = ref('');
 const me = ref<MeResponse | null>(null);
-/** Only true after GET /api/me succeeds — gates the main app. */
+/** Only true after session probe succeeds — gates the main app. */
 const enteredApp = ref(false);
 const restoringSession = ref(false);
 
@@ -60,9 +60,16 @@ async function refreshMe(): Promise<boolean> {
 
   try {
     const headers = await buildAuthHeaders();
-    const res = await fetch('/api/me', { headers });
+    const res = await fetch('/api/auth/session', { headers });
     if (!res.ok) {
-      if (res.status === 401 && bypass) {
+      me.value = null;
+      enteredApp.value = false;
+      setAppSessionActive(false);
+      return false;
+    }
+    const data = (await res.json()) as { authenticated?: boolean } & Partial<MeResponse>;
+    if (!data.authenticated) {
+      if (bypass) {
         setOperatorBypassToken('');
       }
       me.value = null;
@@ -70,8 +77,13 @@ async function refreshMe(): Promise<boolean> {
       setAppSessionActive(false);
       return false;
     }
-    const data = (await res.json()) as MeResponse;
-    me.value = data;
+    me.value = {
+      id: String(data.id ?? ''),
+      email: data.email ?? '',
+      role: data.role ?? '',
+      isAdmin: Boolean(data.isAdmin),
+      breakGlass: data.breakGlass,
+    };
     enteredApp.value = true;
     setAppSessionActive(true);
     return true;
