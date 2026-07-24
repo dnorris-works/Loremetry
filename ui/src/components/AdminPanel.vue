@@ -989,6 +989,8 @@ async function onRemoveStale(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: 100%;
+  max-width: none;
 }
 
 .field-label {

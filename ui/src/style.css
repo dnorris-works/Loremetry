@@ -536,10 +536,9 @@ html, body {
 }
 #btn-copy:hover, #btn-copy-csv:hover { color: var(--text); }
 
-/* ── Settings ── */
+/* ── Settings (narrow forms in story/series dialogs use their own scoped max-width) ── */
 .settings-form {
   display: flex; flex-direction: column; gap: 10px;
-  max-width: 480px;
 }
 .settings-form label {
   font-size: 12px; color: var(--text-muted);
