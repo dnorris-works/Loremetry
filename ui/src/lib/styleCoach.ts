@@ -1,21 +1,21 @@
 /**
- * Hemingway-style prose coaching — deterministic rules, no AI.
+ * Live prose style coaching — deterministic rules, no AI.
  * Highlights adverbs, passive voice, and long sentences while you write.
  */
 
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { analyzeTextReadability, countSyllables, splitSentences, tokenizeWords } from './readability';
 
-export type HemingwayIssueType = 'adverb' | 'passive' | 'hard' | 'very-hard' | 'complex';
+export type StyleCoachIssueType = 'adverb' | 'passive' | 'hard' | 'very-hard' | 'complex';
 
-export interface HemingwayHighlight {
-  type: HemingwayIssueType;
+export interface StyleCoachHighlight {
+  type: StyleCoachIssueType;
   from: number;
   to: number;
   text: string;
 }
 
-export interface HemingwayStats {
+export interface StyleCoachStats {
   wordCount: number;
   sentenceCount: number;
   paragraphCount: number;
@@ -54,9 +54,9 @@ function findAllMatches(text: string, re: RegExp): { from: number; to: number; t
   return out;
 }
 
-function findAdverbs(text: string): HemingwayHighlight[] {
+function findAdverbs(text: string): StyleCoachHighlight[] {
   const re = /\b[a-z]+ly\b/gi;
-  const out: HemingwayHighlight[] = [];
+  const out: StyleCoachHighlight[] = [];
   for (const m of text.matchAll(re)) {
     if (m.index == null) continue;
     const word = m[0].toLowerCase();
@@ -66,7 +66,7 @@ function findAdverbs(text: string): HemingwayHighlight[] {
   return out;
 }
 
-function findPassiveVoice(text: string): HemingwayHighlight[] {
+function findPassiveVoice(text: string): StyleCoachHighlight[] {
   return findAllMatches(text, PASSIVE_RE).map(m => ({
     type: 'passive' as const,
     ...m,
@@ -108,8 +108,8 @@ function sentenceRanges(text: string): { from: number; to: number; text: string;
   return ranges;
 }
 
-function findLongSentences(text: string): HemingwayHighlight[] {
-  const out: HemingwayHighlight[] = [];
+function findLongSentences(text: string): StyleCoachHighlight[] {
+  const out: StyleCoachHighlight[] = [];
   for (const s of sentenceRanges(text)) {
     if (s.wordCount >= VERY_HARD_SENTENCE_WORDS) {
       out.push({ type: 'very-hard', from: s.from, to: s.to, text: s.text });
@@ -120,9 +120,9 @@ function findLongSentences(text: string): HemingwayHighlight[] {
   return out;
 }
 
-function findComplexWords(text: string): HemingwayHighlight[] {
+function findComplexWords(text: string): StyleCoachHighlight[] {
   const re = /\b[A-Za-z']+(?:'[A-Za-z]+)?\b/g;
-  const out: HemingwayHighlight[] = [];
+  const out: StyleCoachHighlight[] = [];
   for (const m of text.matchAll(re)) {
     if (m.index == null) continue;
     const word = m[0];
@@ -133,7 +133,7 @@ function findComplexWords(text: string): HemingwayHighlight[] {
   return out;
 }
 
-export function analyzeHemingway(text: string): { stats: HemingwayStats; highlights: HemingwayHighlight[] } {
+export function analyzeStyleCoach(text: string): { stats: StyleCoachStats; highlights: StyleCoachHighlight[] } {
   const plain = text.trim();
   const readability = analyzeTextReadability(plain);
   const sentences = splitSentences(plain);
@@ -209,4 +209,26 @@ export function offsetsToDocRange(
 
   if (pmFrom === null || pmTo === null || pmTo <= pmFrom) return null;
   return { from: pmFrom, to: pmTo };
+}
+
+/** Resolve a highlight to document positions; falls back to phrase search. */
+export function highlightToDocRange(
+  doc: PMNode,
+  highlight: StyleCoachHighlight,
+): { from: number; to: number } | null {
+  const direct = offsetsToDocRange(doc, highlight.from, highlight.to);
+  if (direct) return direct;
+
+  const text = highlight.text?.trim();
+  if (!text) return null;
+
+  const full = doc.textContent;
+  const start = Math.max(0, highlight.from - 20);
+  const idx = full.indexOf(text, start);
+  if (idx < 0) {
+    const loose = full.indexOf(text);
+    if (loose < 0) return null;
+    return offsetsToDocRange(doc, loose, loose + text.length);
+  }
+  return offsetsToDocRange(doc, idx, idx + text.length);
 }

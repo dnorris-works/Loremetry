@@ -195,6 +195,7 @@ async function onDelete(): Promise<void> {
           ref="editorRef"
           :file-path="finding?.filePath || ''"
           :highlight-text="isReadMode ? '' : (finding?.tellingText || '')"
+          :style-coach="true"
         />
       </div>
 

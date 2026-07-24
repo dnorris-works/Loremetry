@@ -5,17 +5,20 @@ import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
 import { Markdown } from 'tiptap-markdown';
 import { invoke } from '../api';
-import { analyzeHemingway, type HemingwayHighlight, type HemingwayStats } from '../lib/hemingway';
-import { HemingwayCoach, hemingwayPluginKey } from '../lib/hemingwayExtension';
+import { analyzeStyleCoach, type StyleCoachHighlight, type StyleCoachStats } from '../lib/styleCoach';
+import { StyleCoachMarks, styleCoachPluginKey } from '../lib/styleCoachExtension';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
-const props = defineProps<{
-  filePath: string;
-  highlightText?: string;
-  /** Hemingway-style live highlights + grade (Writing mode). */
-  styleCoach?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    filePath: string;
+    highlightText?: string;
+    /** Live readability highlights + grade in the editor. */
+    styleCoach?: boolean;
+  }>(),
+  { styleCoach: true },
+);
 
 const emit = defineEmits<{
   (e: 'saved'): void;
@@ -30,11 +33,11 @@ const dirty = ref(false);
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let coachTimer: ReturnType<typeof setTimeout> | null = null;
 
-const styleCoachOn = ref(props.styleCoach === true);
-const hemingwayHighlights = shallowRef<HemingwayHighlight[]>([]);
-const hemingwayStats = ref<HemingwayStats | null>(null);
+const styleCoachOn = ref(props.styleCoach);
+const coachHighlights = shallowRef<StyleCoachHighlight[]>([]);
+const coachStats = ref<StyleCoachStats | null>(null);
 
-const emptyStats = (): HemingwayStats => ({
+const emptyStats = (): StyleCoachStats => ({
   wordCount: 0,
   sentenceCount: 0,
   paragraphCount: 0,
@@ -49,16 +52,17 @@ const emptyStats = (): HemingwayStats => ({
 });
 
 function refreshStyleCoach(): void {
-  if (!editor.value || !styleCoachOn.value) {
-    hemingwayHighlights.value = [];
-    hemingwayStats.value = emptyStats();
+  if (!editor.value || !props.styleCoach || !styleCoachOn.value) {
+    coachHighlights.value = [];
+    if (props.styleCoach) coachStats.value = emptyStats();
     return;
   }
   const text = editor.value.state.doc.textContent;
-  const result = analyzeHemingway(text);
-  hemingwayStats.value = result.stats;
-  hemingwayHighlights.value = result.highlights;
-  editor.value.view.dispatch(editor.value.state.tr.setMeta(hemingwayPluginKey, Date.now()));
+  const result = analyzeStyleCoach(text);
+  coachStats.value = result.stats;
+  coachHighlights.value = result.highlights;
+  const view = editor.value.view;
+  view.dispatch(view.state.tr.setMeta(styleCoachPluginKey, Date.now()));
 }
 
 function scheduleStyleCoach(): void {
@@ -80,9 +84,9 @@ const editor = useEditor({
       heading: { levels: [1, 2, 3] },
     }),
     Highlight.configure({ multicolor: true }),
-    HemingwayCoach.configure({
-      getHighlights: () => hemingwayHighlights.value,
-      enabled: () => props.styleCoach === true && styleCoachOn.value,
+    StyleCoachMarks.configure({
+      getHighlights: () => coachHighlights.value,
+      enabled: () => props.styleCoach && styleCoachOn.value,
     }),
     Markdown.configure({
       html: false,
@@ -121,6 +125,9 @@ const editor = useEditor({
   onSelectionUpdate: () => {
     updateSelection();
   },
+  onCreate: () => {
+    void nextTick(() => refreshStyleCoach());
+  },
 });
 
 function runFormat(command: () => boolean): void {
@@ -137,6 +144,7 @@ async function loadFile(filePath: string): Promise<void> {
     const text = await invoke<string>('read_chapter', { filePath });
     content.value = text;
     editor.value?.commands.setContent(text);
+    await nextTick();
     await nextTick();
     refreshStyleCoach();
     if (props.highlightText) {
@@ -299,7 +307,7 @@ watch(() => props.highlightText, (text) => {
 });
 
 watch(() => props.styleCoach, (on) => {
-  styleCoachOn.value = on === true;
+  styleCoachOn.value = on;
   refreshStyleCoach();
 });
 
@@ -349,22 +357,22 @@ onBeforeUnmount(() => {
         <span v-else-if="dirty" class="status-dirty">Unsaved</span>
       </div>
     </div>
-    <div v-if="styleCoach && styleCoachOn && hemingwayStats" class="hemingway-bar">
-      <div class="hemingway-grade">
-        <span class="hemingway-grade-num">{{ hemingwayStats.gradeLevel }}</span>
-        <span class="hemingway-grade-label">Grade</span>
+    <div v-if="styleCoach && styleCoachOn && coachStats" class="coach-bar">
+      <div class="coach-grade">
+        <span class="coach-grade-num">{{ coachStats.gradeLevel }}</span>
+        <span class="coach-grade-label">Grade</span>
       </div>
-      <div class="hemingway-metrics">
-        <span>{{ hemingwayStats.wordCount.toLocaleString() }} words</span>
-        <span>{{ hemingwayStats.readingTimeMinutes }} min read</span>
-        <span>{{ hemingwayStats.sentenceCount }} sentences</span>
+      <div class="coach-metrics">
+        <span>{{ coachStats.wordCount.toLocaleString() }} words</span>
+        <span>{{ coachStats.readingTimeMinutes }} min read</span>
+        <span>{{ coachStats.sentenceCount }} sentences</span>
       </div>
-      <div class="hemingway-issues">
-        <span class="hemingway-pill hemingway-adverb">{{ hemingwayStats.adverbCount }} adverbs</span>
-        <span class="hemingway-pill hemingway-passive">{{ hemingwayStats.passiveCount }} passive</span>
-        <span class="hemingway-pill hemingway-hard">{{ hemingwayStats.hardSentenceCount }} hard</span>
-        <span class="hemingway-pill hemingway-very-hard">{{ hemingwayStats.veryHardSentenceCount }} very hard</span>
-        <span class="hemingway-pill hemingway-complex">{{ hemingwayStats.complexWordCount }} complex</span>
+      <div class="coach-issues">
+        <span class="coach-pill coach-adverb">{{ coachStats.adverbCount }} adverbs</span>
+        <span class="coach-pill coach-passive">{{ coachStats.passiveCount }} passive</span>
+        <span class="coach-pill coach-hard">{{ coachStats.hardSentenceCount }} hard</span>
+        <span class="coach-pill coach-very-hard">{{ coachStats.veryHardSentenceCount }} very hard</span>
+        <span class="coach-pill coach-complex">{{ coachStats.complexWordCount }} complex</span>
       </div>
     </div>
     <EditorContent :editor="editor" class="editor-wrapper" />
@@ -515,7 +523,7 @@ onBeforeUnmount(() => {
   margin: 1.5em 0;
 }
 
-.hemingway-bar {
+.coach-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -527,74 +535,48 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.hemingway-grade {
+.coach-grade {
   display: flex;
   align-items: baseline;
   gap: 6px;
 }
 
-.hemingway-grade-num {
+.coach-grade-num {
   font-size: 22px;
   font-weight: 800;
   color: var(--accent);
   line-height: 1;
 }
 
-.hemingway-grade-label {
+.coach-grade-label {
   font-weight: 600;
   color: var(--text-muted);
 }
 
-.hemingway-metrics {
+.coach-metrics {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   color: var(--text-muted);
 }
 
-.hemingway-issues {
+.coach-issues {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-left: auto;
 }
 
-.hemingway-pill {
+.coach-pill {
   padding: 2px 8px;
   border-radius: 999px;
   font-weight: 600;
   font-size: 11px;
 }
 
-.editor-wrapper :deep(.hemingway-mark) {
-  border-radius: 2px;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
-}
-
-.editor-wrapper :deep(.hemingway-adverb) {
-  background: rgba(155, 89, 182, 0.22);
-}
-
-.editor-wrapper :deep(.hemingway-passive) {
-  background: rgba(39, 174, 96, 0.22);
-}
-
-.editor-wrapper :deep(.hemingway-hard) {
-  background: rgba(241, 196, 15, 0.35);
-}
-
-.editor-wrapper :deep(.hemingway-very-hard) {
-  background: rgba(231, 76, 60, 0.28);
-}
-
-.editor-wrapper :deep(.hemingway-complex) {
-  background: rgba(52, 152, 219, 0.2);
-}
-
-.hemingway-pill.hemingway-adverb { background: rgba(155, 89, 182, 0.2); color: #9b59b6; }
-.hemingway-pill.hemingway-passive { background: rgba(39, 174, 96, 0.2); color: #27ae60; }
-.hemingway-pill.hemingway-hard { background: rgba(241, 196, 15, 0.35); color: #b7950b; }
-.hemingway-pill.hemingway-very-hard { background: rgba(231, 76, 60, 0.25); color: #c0392b; }
-.hemingway-pill.hemingway-complex { background: rgba(52, 152, 219, 0.2); color: #2980b9; }
+.coach-pill.coach-adverb { background: rgba(155, 89, 182, 0.2); color: #9b59b6; }
+.coach-pill.coach-passive { background: rgba(39, 174, 96, 0.2); color: #27ae60; }
+.coach-pill.coach-hard { background: rgba(241, 196, 15, 0.35); color: #b7950b; }
+.coach-pill.coach-very-hard { background: rgba(231, 76, 60, 0.25); color: #c0392b; }
+.coach-pill.coach-complex { background: rgba(52, 152, 219, 0.2); color: #2980b9; }
 </style>

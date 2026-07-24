@@ -1035,7 +1035,33 @@ html, body {
   color: var(--text-muted);
 }
 
-/* ── Readability grade colors ── */
+/* ── Style coach marks (ProseMirror decorations — must be global) ── */
+.chapter-editor-content .coach-mark {
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.chapter-editor-content .coach-mark.coach-adverb,
+.chapter-editor-content .coach-adverb {
+  background: rgba(155, 89, 182, 0.35) !important;
+}
+.chapter-editor-content .coach-mark.coach-passive,
+.chapter-editor-content .coach-passive {
+  background: rgba(39, 174, 96, 0.3) !important;
+}
+.chapter-editor-content .coach-mark.coach-hard,
+.chapter-editor-content .coach-hard {
+  background: rgba(241, 196, 15, 0.45) !important;
+}
+.chapter-editor-content .coach-mark.coach-very-hard,
+.chapter-editor-content .coach-very-hard {
+  background: rgba(231, 76, 60, 0.35) !important;
+}
+.chapter-editor-content .coach-mark.coach-complex,
+.chapter-editor-content .coach-complex {
+  background: rgba(52, 152, 219, 0.3) !important;
+}
+
 .readability-easy { color: #27ae60; }
 .readability-mid { color: #2980b9; }
 .readability-hard { color: #e67e22; }
