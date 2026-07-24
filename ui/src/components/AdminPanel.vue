@@ -923,13 +923,15 @@ async function onRemoveStale(): Promise<void> {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 8px 10px;
+  overflow: hidden;
 }
 
 .table-name-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(240px, 1fr));
-  gap: 6px 24px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 16px;
   width: 100%;
+  min-width: 0;
 }
 
 .table-name-btn {
