@@ -815,9 +815,11 @@ async function onRemoveStale(): Promise<void> {
 }
 
 .admin-panel {
-  padding: 20px;
+  padding: 20px 24px;
   overflow-y: auto;
-  max-width: 1120px;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
 }
 
 .panel-header {
@@ -946,9 +948,7 @@ async function onRemoveStale(): Promise<void> {
   text-align: left;
   cursor: pointer;
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-word;
 }
 
 .table-name-btn:hover {
