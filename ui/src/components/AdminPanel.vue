@@ -487,29 +487,18 @@ async function onRemoveStale(): Promise<void> {
           <button type="button" class="btn btn-sm" @click="loadDbTables">Refresh</button>
         </div>
         <div class="table-list-wrap">
-          <table class="sql-results table-list">
-            <thead>
-              <tr>
-                <th>Schema</th>
-                <th>Table</th>
-                <th>Qualified name</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="t in dbTables"
-                :key="t.qualified"
-                class="table-list-row"
-                tabindex="0"
-                @click="insertTableQuery(t)"
-                @keydown.enter.prevent="insertTableQuery(t)"
-              >
-                <td>{{ t.schema }}</td>
-                <td>{{ t.name }}</td>
-                <td class="table-list-qualified">{{ t.qualified }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="table-name-grid">
+            <button
+              v-for="t in dbTables"
+              :key="t.qualified"
+              type="button"
+              class="table-name-btn"
+              :title="t.qualified"
+              @click="insertTableQuery(t)"
+            >
+              {{ t.name }}
+            </button>
+          </div>
         </div>
       </div>
       <textarea
@@ -931,9 +920,37 @@ async function onRemoveStale(): Promise<void> {
 }
 
 .table-list-wrap {
-  overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  padding: 8px 10px;
+}
+
+.table-name-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 12px;
+}
+
+.table-name-btn {
+  margin: 0;
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.table-name-btn:hover {
+  background: var(--surface2);
+}
+
+.table-name-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .table-picker-header {
@@ -941,27 +958,6 @@ async function onRemoveStale(): Promise<void> {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-}
-
-.table-list {
-  margin: 0;
-}
-
-.table-list-row {
-  cursor: pointer;
-}
-
-.table-list-row:hover td {
-  background: var(--surface2);
-}
-
-.table-list-qualified {
-  font-family: var(--mono);
-  font-size: 12px;
-}
-
-.table-list td:not(.table-list-qualified) {
-  font-family: inherit;
 }
 
 .table-picker-label {
