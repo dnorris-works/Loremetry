@@ -334,8 +334,11 @@ function onStop(): void {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 20px;
+  padding: var(--content-pad, 20px);
   overflow: hidden;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .panel-title {
@@ -388,11 +391,13 @@ function onStop(): void {
   flex: 1;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 8px;
   margin-bottom: 14px;
   padding-right: 4px;
   align-content: start;
+  width: 100%;
+  min-width: 0;
 }
 
 .report-cards-empty {

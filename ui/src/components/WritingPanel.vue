@@ -211,15 +211,29 @@ async function onDelete(): Promise<void> {
   flex: 1;
   display: flex;
   overflow: hidden;
+  min-width: 0;
 }
 
 .writing-editor {
   flex: 1;
   overflow: hidden;
+  min-width: 0;
 }
 
 .writing-chat {
   flex: 0 0 320px;
   overflow: hidden;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .writing-body {
+    flex-direction: column;
+  }
+
+  .writing-chat {
+    flex: 0 0 min(40vh, 320px);
+    border-top: 1px solid var(--border);
+  }
 }
 </style>

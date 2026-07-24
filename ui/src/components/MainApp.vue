@@ -52,11 +52,24 @@ provide('setAppMode', (mode: AppMode) => { appMode.value = mode; });
 
 type Panel = 'analyzer' | 'reports' | 'admin' | 'story-form' | 'series' | 'manuscript' | 'new-document';
 const activePanel = ref<Panel>('analyzer');
+const sidebarOpen = ref(false);
 const panelBeforeNewDoc = ref<Panel>('analyzer');
 const modeBeforeNewDoc = ref<AppMode>('analyzer');
 
+function toggleSidebar(): void {
+  sidebarOpen.value = !sidebarOpen.value;
+}
+
+function closeSidebar(): void {
+  sidebarOpen.value = false;
+}
+
+provide('toggleSidebar', toggleSidebar);
+provide('closeSidebar', closeSidebar);
+
 function showPanel(name: Panel): void {
   activePanel.value = name;
+  sidebarOpen.value = false;
 }
 
 provide(showPanelKey, showPanel as (name: string) => void);
@@ -191,7 +204,13 @@ onMounted(() => {
 </script>
 
 <template>
-  <div id="app-root">
+  <div id="app-root" :class="{ 'sidebar-drawer-open': sidebarOpen }">
+    <div
+      v-if="sidebarOpen"
+      class="sidebar-backdrop"
+      aria-hidden="true"
+      @click="closeSidebar"
+    />
     <TitleBar />
     <Sidebar @open-story-form="openStoryForm" @open-series-form="openSeriesForm" />
     <main id="main">
@@ -231,7 +250,7 @@ onMounted(() => {
 #app-root {
   display: grid;
   grid-template-rows: var(--titlebar-h, 28px) 1fr;
-  grid-template-columns: 200px 1fr;
+  grid-template-columns: var(--sidebar-w, 220px) minmax(0, 1fr);
   grid-template-areas:
     "titlebar titlebar"
     "sidebar main";
@@ -245,5 +264,50 @@ onMounted(() => {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  width: 100%;
+}
+
+#main > * {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  #app-root {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "titlebar"
+      "main";
+  }
+
+  #app-root :deep(#sidebar) {
+    position: fixed;
+    top: var(--titlebar-h, 28px);
+    left: 0;
+    bottom: 0;
+    width: min(280px, 88vw);
+    z-index: 200;
+    transform: translateX(-105%);
+    transition: transform 0.2s ease;
+    box-shadow: none;
+  }
+
+  #app-root.sidebar-drawer-open :deep(#sidebar) {
+    transform: translateX(0);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.35);
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: var(--titlebar-h, 28px) 0 0 0;
+    z-index: 199;
+    background: rgba(0, 0, 0, 0.45);
+  }
 }
 </style>

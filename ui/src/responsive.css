@@ -1,0 +1,26 @@
+/* Shared layout tokens and breakpoints for the app shell. */
+
+:root {
+  --sidebar-w: 220px;
+  --content-pad: 20px;
+  --bp-narrow: 900px;
+  --bp-compact: 600px;
+}
+
+@media (max-width: 1280px) {
+  :root {
+    --sidebar-w: 200px;
+  }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --content-pad: 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  :root {
+    --content-pad: 12px;
+  }
+}

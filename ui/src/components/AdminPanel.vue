@@ -815,11 +815,13 @@ async function onRemoveStale(): Promise<void> {
 }
 
 .admin-panel {
-  padding: 20px 24px;
+  padding: var(--content-pad, 20px) 24px;
   overflow-y: auto;
   width: 100%;
   max-width: none;
+  min-width: 0;
   box-sizing: border-box;
+  align-self: stretch;
 }
 
 .panel-header {
@@ -930,8 +932,8 @@ async function onRemoveStale(): Promise<void> {
 
 .table-name-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px 24px;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px 20px;
   width: 100%;
   min-width: 0;
 }

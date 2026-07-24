@@ -1,3 +1,5 @@
+@import './responsive.css';
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root,
@@ -793,7 +795,7 @@ html, body {
   grid-template-columns: 1fr 1fr;
   gap: 20px;
 }
-@media (max-width: 600px) {
+@media (max-width: 900px) {
   .two-col { grid-template-columns: 1fr; }
 }
 .category-list {
