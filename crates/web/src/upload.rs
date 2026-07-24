@@ -28,13 +28,48 @@ fn normalize_kind(kind: &str) -> &'static str {
 }
 
 fn path_hint_for_kind(kind: &str, filename: &str) -> String {
-    let name = if filename.is_empty() { "untitled.md" } else { filename };
+    let normalized = filename.replace('\\', "/");
+    let name = if normalized.is_empty() {
+        "untitled.md".to_string()
+    } else {
+        normalized
+    };
     match kind {
-        "bible" => format!("Bible/{name}"),
-        "character" => format!("Characters/{name}"),
-        "location" => format!("Locations/{name}"),
-        _ => name.to_string(),
+        "bible" => {
+            let base = basename(&name);
+            format!("Bible/{base}")
+        }
+        "character" => {
+            let base = basename(&name);
+            format!("Characters/{base}")
+        }
+        "location" => {
+            let base = basename(&name);
+            format!("Locations/{base}")
+        }
+        _ => name,
     }
+}
+
+fn basename(path: &str) -> String {
+    path.rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn title_from_path(path: &str) -> String {
+    let base = basename(path);
+    base.trim_end_matches(".md")
+        .trim_end_matches(".txt")
+        .trim_end_matches(".markdown")
+        .to_string()
+}
+
+fn is_manuscript_filename(path: &str) -> bool {
+    let lower = basename(path).to_lowercase();
+    lower.ends_with(".md") || lower.ends_with(".txt") || lower.ends_with(".markdown")
 }
 
 async fn maybe_replace_kind(pool: &sqlx::PgPool, story_id: &str, kind: &str, replace: bool) {
@@ -74,6 +109,11 @@ pub async fn upload_chapters(
             .file_name()
             .map(|s| s.to_string())
             .unwrap_or_else(|| "untitled.md".into());
+
+        if kind == "chapter" && !is_manuscript_filename(&filename) {
+            continue;
+        }
+
         let bytes = match field.bytes().await {
             Ok(b) => b,
             Err(e) => {
@@ -82,10 +122,7 @@ pub async fn upload_chapters(
             }
         };
         let content = String::from_utf8_lossy(&bytes).to_string();
-        let title = filename
-            .trim_end_matches(".md")
-            .trim_end_matches(".txt")
-            .to_string();
+        let title = title_from_path(&filename);
 
         let req = UpsertDocumentRequest {
             story_id: story_id.clone(),

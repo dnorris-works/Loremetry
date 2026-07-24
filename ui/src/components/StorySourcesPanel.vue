@@ -20,6 +20,7 @@ const bumpFileTree = inject<() => void>('bumpFileTree', () => {});
 
 const loading = ref(false);
 const uploading = ref(false);
+const uploadMessage = ref('');
 const error = ref('');
 const documents = ref<DocumentMeta[]>([]);
 
@@ -49,9 +50,15 @@ function compareDocs(a: DocumentMeta, b: DocumentMeta): number {
 }
 
 function displayName(doc: DocumentMeta): string {
-  if (doc.title) return doc.title;
+  return doc.path_hint || doc.title || `document-${doc.id}`;
+}
+
+function chapterLabel(doc: DocumentMeta): string {
   const parts = doc.path_hint.split('/');
-  return parts[parts.length - 1] || doc.path_hint;
+  if (parts.length > 1) {
+    return doc.path_hint;
+  }
+  return displayName(doc);
 }
 
 async function refresh(): Promise<void> {
@@ -90,8 +97,10 @@ async function onUpload(
 
   uploading.value = true;
   error.value = '';
+  uploadMessage.value = '';
   try {
-    await uploadDocuments(storyId, files, kind, { replace });
+    const { uploaded } = await uploadDocuments(storyId, files, kind, { replace });
+    uploadMessage.value = `Uploaded ${uploaded} file${uploaded === 1 ? '' : 's'}.`;
     await refresh();
     bumpFileTree();
   } catch (e) {
@@ -182,24 +191,40 @@ function finishWizard(): void {
       >
         <div class="section-head">
           <h3 class="section-title">Chapters <span class="required">required</span></h3>
-          <label class="btn btn-secondary btn-sm upload-btn">
-            {{ uploading ? 'Uploading…' : 'Add chapters' }}
-            <input
-              type="file"
-              accept=".md,.txt,text/markdown,text/plain"
-              multiple
-              hidden
-              :disabled="uploading"
-              @change="onUpload($event, 'chapter')"
-            />
-          </label>
+          <div class="section-actions">
+            <label class="btn btn-secondary btn-sm upload-btn">
+              {{ uploading ? 'Uploading…' : 'Choose folder' }}
+              <input
+                type="file"
+                accept=".md,.txt,text/markdown,text/plain"
+                webkitdirectory
+                multiple
+                hidden
+                :disabled="uploading"
+                @change="onUpload($event, 'chapter')"
+              />
+            </label>
+            <label class="btn btn-secondary btn-sm upload-btn">
+              Add files
+              <input
+                type="file"
+                accept=".md,.txt,text/markdown,text/plain"
+                multiple
+                hidden
+                :disabled="uploading"
+                @change="onUpload($event, 'chapter')"
+              />
+            </label>
+          </div>
         </div>
         <p class="section-hint">
-          Select all chapter files (.md or .txt). Upload more anytime to add chapters.
+          Point at the folder where your chapter <code>.md</code> / <code>.txt</code> files live.
+          Subfolders (e.g. <code>Act-1/</code>, <code>Act-2/</code>) are kept for order.
+          One file = one chapter.
         </p>
         <ul v-if="chapters.length" class="doc-list">
           <li v-for="doc in chapters" :key="doc.id" class="doc-row">
-            <span class="doc-name" :title="doc.path_hint">{{ displayName(doc) }}</span>
+            <span class="doc-name" :title="doc.path_hint">{{ chapterLabel(doc) }}</span>
             <button class="doc-delete" title="Remove" @click="onDelete(doc)">&times;</button>
           </li>
         </ul>
@@ -312,6 +337,7 @@ function finishWizard(): void {
       </section>
     </div>
 
+    <div v-if="uploadMessage" class="upload-message">{{ uploadMessage }}</div>
     <div v-if="error" class="form-error">{{ error }}</div>
 
     <footer class="sources-footer">
@@ -579,6 +605,19 @@ function finishWizard(): void {
 .btn-sm {
   font-size: 11px;
   padding: 6px 12px;
+}
+
+.section-hint code {
+  font-size: 11px;
+  background: var(--surface2);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.upload-message {
+  color: var(--accent);
+  font-size: 12px;
+  margin-top: 8px;
 }
 
 .form-error {

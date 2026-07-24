@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { inject, ref, watch, type ComputedRef, type Ref } from 'vue';
-import { invoke, uploadChapters } from '../api';
+import { invoke, uploadDocuments } from '../api';
 import { storiesKey, reportsKey, platformKey, showPanelKey, openManuscriptEditorKey, seriesKey } from '../injectionKeys';
 import type { Story, Series, SidebarReportGroup } from '../types';
 import FileTreeNodes, { type FileTreeEntry } from './FileTreeNodes.vue';
@@ -108,8 +108,11 @@ async function onUploadFiles(ev: Event): Promise<void> {
   if (!files?.length || !storyId) return;
   uploading.value = true;
   try {
-    await uploadChapters(storyId, files);
+    const { uploaded } = await uploadDocuments(storyId, files, 'chapter');
     bumpFileTree();
+    if (uploaded > 0) {
+      openSources(false);
+    }
   } catch (e) {
     alert('Upload failed: ' + String(e));
   } finally {
@@ -276,7 +279,7 @@ function formatTimestamp(ts: string): string {
       <button
         v-if="sidebarMode === 'files'"
         class="btn-new-story"
-        title="Upload chapters"
+        title="Upload chapter folder"
         :disabled="uploading"
         @click="onUploadClick"
       >↑</button>
@@ -285,7 +288,8 @@ function formatTimestamp(ts: string): string {
     <input
       ref="uploadInput"
       type="file"
-      accept=".md,text/markdown"
+      accept=".md,.txt,text/markdown,text/plain"
+      webkitdirectory
       multiple
       hidden
       @change="onUploadFiles"
@@ -295,7 +299,7 @@ function formatTimestamp(ts: string): string {
       <div v-if="appMode === 'writing'" class="nav-label-row files-header">
         <span class="nav-label">Files</span>
         <div class="files-header-actions">
-          <button class="btn-new-story" title="Upload chapters" :disabled="uploading" @click="onUploadClick">↑</button>
+          <button class="btn-new-story" title="Upload chapter folder" :disabled="uploading" @click="onUploadClick">↑</button>
           <button class="btn-new-story" title="New document" @click="onAddDocument">+</button>
         </div>
       </div>

@@ -243,11 +243,20 @@ export async function uploadDocuments(
   files: FileList | File[],
   kind: ManuscriptKind = 'chapter',
   options?: { replace?: boolean },
-): Promise<void> {
+): Promise<{ uploaded: number }> {
   assertAppSession();
+  const prepared = prepareUploadFiles(files, kind);
+  if (prepared.length === 0) {
+    throw new Error(
+      kind === 'chapter'
+        ? 'No .md or .txt files found. Choose a folder of chapter files.'
+        : 'No files selected.',
+    );
+  }
+
   const fd = new FormData();
-  for (const f of Array.from(files)) {
-    fd.append('files', f, f.name);
+  for (const { file, path } of prepared) {
+    fd.append('files', file, path);
   }
   const params = new URLSearchParams({ kind });
   if (options?.replace) params.set('replace', 'true');
@@ -260,14 +269,59 @@ export async function uploadDocuments(
     const data = await res.json().catch(() => ({}));
     throw new Error((data as { error?: string }).error || 'Upload failed');
   }
-  const data = await res.json() as { success?: boolean; errors?: string[] };
+  const data = await res.json() as {
+    success?: boolean;
+    errors?: string[];
+    documents?: unknown[];
+  };
   if (data.errors?.length) {
     throw new Error(data.errors.join('; '));
   }
+  return { uploaded: data.documents?.length ?? prepared.length };
+}
+
+const MANUSCRIPT_EXT = /\.(md|markdown|txt)$/i;
+
+function relativeUploadPath(file: File): string {
+  const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+  const raw = (rel && rel.trim()) ? rel : file.name;
+  return raw.replace(/\\/g, '/');
+}
+
+function isManuscriptPath(path: string): boolean {
+  const base = path.split('/').pop() || path;
+  return MANUSCRIPT_EXT.test(base);
+}
+
+/** Strip the common top-level folder name from a folder upload, keep act subfolders. */
+function stripCommonRootPrefix(paths: string[]): string[] {
+  if (paths.length === 0) return paths;
+  const parts = paths.map(p => p.split('/').filter(Boolean));
+  if (parts.some(segments => segments.length < 2)) {
+    return paths;
+  }
+  const root = parts[0][0];
+  if (!parts.every(segments => segments[0] === root)) {
+    return paths;
+  }
+  return parts.map(segments => segments.slice(1).join('/'));
+}
+
+function prepareUploadFiles(
+  files: FileList | File[],
+  kind: ManuscriptKind,
+): { file: File; path: string }[] {
+  const list = Array.from(files);
+  const filtered = kind === 'chapter'
+    ? list.filter(f => isManuscriptPath(relativeUploadPath(f)))
+    : list;
+  const paths = filtered.map(f => relativeUploadPath(f));
+  const trimmed = kind === 'chapter' ? stripCommonRootPrefix(paths) : paths;
+  return filtered.map((file, i) => ({ file, path: trimmed[i] }));
 }
 
 /** @deprecated Use uploadDocuments with kind 'chapter' */
-export async function uploadChapters(storyId: string, files: FileList | File[]): Promise<void> {
+export async function uploadChapters(storyId: string, files: FileList | File[]): Promise<{ uploaded: number }> {
   return uploadDocuments(storyId, files, 'chapter');
 }
 
