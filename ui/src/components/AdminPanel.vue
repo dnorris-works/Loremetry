@@ -931,7 +931,7 @@ async function onRemoveStale(): Promise<void> {
 .table-name-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px 16px;
+  gap: 8px 24px;
   width: 100%;
   min-width: 0;
 }
@@ -948,7 +948,7 @@ async function onRemoveStale(): Promise<void> {
   text-align: left;
   cursor: pointer;
   min-width: 0;
-  word-break: break-word;
+  white-space: nowrap;
 }
 
 .table-name-btn:hover {

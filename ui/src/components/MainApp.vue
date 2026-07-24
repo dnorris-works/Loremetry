@@ -191,10 +191,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <div id="app-root">
+  <div id="app-root" :class="{ 'admin-layout': activePanel === 'admin' }">
     <TitleBar />
     <Sidebar @open-story-form="openStoryForm" @open-series-form="openSeriesForm" />
-    <main id="main">
+    <main id="main" :class="{ 'main-admin': activePanel === 'admin' }">
       <NewDocumentForm
         v-if="activePanel === 'new-document'"
         :initial-location="newDocLocation"
@@ -244,5 +244,26 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
+}
+
+#app-root.admin-layout {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "titlebar"
+    "main";
+}
+
+#app-root.admin-layout #sidebar {
+  display: none;
+}
+
+#main.main-admin {
+  width: 100%;
+}
+
+#main.main-admin .admin-panel {
+  flex: 1;
+  min-height: 0;
 }
 </style>
