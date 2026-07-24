@@ -817,7 +817,7 @@ async function onRemoveStale(): Promise<void> {
 .admin-panel {
   padding: 20px;
   overflow-y: auto;
-  max-width: 960px;
+  max-width: 1120px;
 }
 
 .panel-header {
@@ -927,21 +927,26 @@ async function onRemoveStale(): Promise<void> {
 
 .table-name-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px 12px;
+  grid-template-columns: repeat(3, minmax(240px, 1fr));
+  gap: 6px 24px;
+  width: 100%;
 }
 
 .table-name-btn {
   margin: 0;
-  padding: 4px 6px;
+  padding: 6px 10px;
   border: none;
   border-radius: var(--radius);
   background: transparent;
   color: var(--text);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .table-name-btn:hover {
