@@ -475,12 +475,12 @@ pub(crate) async fn run_keyword_searches_dataforseo(
     let client = match crate::dataforseo::DataForSeoClient::new(dataforseo_login, dataforseo_password) {
         Ok(c) => c,
         Err(e) => {
-            let _ = app.emit("cdp:log", &format!("⚠ DataForSEO client error: {}", e));
+            let _ = app.emit("cdp:log", &format!("⚠ Keyword search API error: {}", e));
             return Vec::new();
         }
     };
 
-    let _ = app.emit("cdp:log", &format!("DataForSEO: Searching Amazon keywords for {} seed(s) in one batch...", seeds.len()));
+    let _ = app.emit("cdp:log", &format!("Searching Amazon keywords for {} seed(s) in one batch...", seeds.len()));
     for seed in seeds {
         let _ = app.emit("cdp:log", &format!("  Seed: \"{}\"", seed));
     }
@@ -512,7 +512,7 @@ pub(crate) async fn run_keyword_searches_dataforseo(
             }).collect()
         }
         Err(e) => {
-            let _ = app.emit("cdp:log", &format!("  ⚠ DataForSEO error: {}", e));
+            let _ = app.emit("cdp:log", &format!("  ⚠ Keyword search error: {}", e));
             Vec::new()
         }
     };
@@ -527,6 +527,6 @@ pub(crate) async fn run_keyword_searches_dataforseo(
             let _ = crate::db::replace_keyword_search_results(&database.pool, folder, first_seed, &rows).await;
         }
     }
-    let _ = app.emit("cdp:log", &format!("✓ DataForSEO: {} total Amazon keywords.", all_results.len()));
+    let _ = app.emit("cdp:log", &format!("✓ {} total Amazon keywords.", all_results.len()));
     all_results
 }

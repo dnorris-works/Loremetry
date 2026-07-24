@@ -722,10 +722,10 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
             if has_dataforseo_creds(&request.dataforseo_login, &request.dataforseo_password) {
                 run_keyword_searches_dataforseo(&app, &request.story_id, &seeds, &request.dataforseo_login, &request.dataforseo_password).await
             } else if !request.canopy_api_key.trim().is_empty() {
-                emit(&app, "⚠ DataForSEO credentials not set — falling back to Canopy for keyword search. Add DataForSEO in Admin → Platform credentials.");
+                emit(&app, "⚠ Keyword volume API not configured — falling back to alternate keyword source. Add credentials in Admin → Platform credentials.");
                 run_keyword_searches_canopy(&app, &request.story_id, &seeds, &request.canopy_api_key).await
             } else {
-                emit(&app, "  ⚠ No DataForSEO or Canopy credentials — skipping keyword search.");
+                emit(&app, "  ⚠ No keyword search credentials — skipping keyword search.");
                 Vec::new()
             }
         }
@@ -776,9 +776,9 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
 
         match res {
             Ok(entries) => {
-                // Enrich with Google search volume from DataForSEO if credentials available
+                // Enrich with Google search volume when keyword API credentials are available
                 let enriched = if has_dataforseo_creds(&request.dataforseo_login, &request.dataforseo_password) && !entries.is_empty() {
-                    emit(&app, "  Enriching with Google search volume via DataForSEO...");
+                    emit(&app, "  Enriching with Google search volume...");
                     let phrases: Vec<String> = entries.iter().map(|e| e.phrase.clone()).collect();
                     let client = crate::dataforseo::DataForSeoClient::new(&request.dataforseo_login, &request.dataforseo_password);
                     match client {
@@ -791,9 +791,9 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
                                     e
                                 }).collect()
                             }
-                            Err(err) => { emit(&app, &format!("  ⚠ DataForSEO volume lookup failed: {}", err)); entries }
+                            Err(err) => { emit(&app, &format!("  ⚠ Search volume lookup failed: {}", err)); entries }
                         }
-                        Err(err) => { emit(&app, &format!("  ⚠ DataForSEO client error: {}", err)); entries }
+                        Err(err) => { emit(&app, &format!("  ⚠ Keyword volume API error: {}", err)); entries }
                     }
                 } else {
                     entries

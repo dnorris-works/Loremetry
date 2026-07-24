@@ -302,7 +302,7 @@ pub async fn search_amazon_keywords(
         Err(e) => return KeywordSearchResponse { success: false, results: Vec::new(), error: e },
     };
 
-    emit_dfs(&app, &format!("DataForSEO: Searching Amazon keywords for {} seed(s)...", seeds.len()));
+    emit_dfs(&app, &format!("Searching Amazon keywords for {} seed(s)...", seeds.len()));
 
     let mut all_results: Vec<KeywordResult> = Vec::new();
 
@@ -335,7 +335,7 @@ pub async fn search_amazon_keywords(
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
-    emit_dfs(&app, &format!("✓ DataForSEO: {} total Amazon keywords.", all_results.len()));
+    emit_dfs(&app, &format!("✓ {} total Amazon keywords.", all_results.len()));
     KeywordSearchResponse { success: true, results: all_results, error: String::new() }
 }
 
@@ -354,7 +354,7 @@ pub async fn search_google_keywords(
         Err(e) => return KeywordSearchResponse { success: false, results: Vec::new(), error: e },
     };
 
-    emit_dfs(&app, &format!("DataForSEO: Getting Google volume for {} keyword(s)...", keywords.len()));
+    emit_dfs(&app, &format!("Getting Google volume for {} keyword(s)...", keywords.len()));
 
     match client.google_search_volume(&keywords).await {
         Ok(volumes) => {
@@ -367,11 +367,11 @@ pub async fn search_google_keywords(
                 }
             }).collect();
 
-            emit_dfs(&app, &format!("✓ DataForSEO: {} keywords with volume data.", results.len()));
+            emit_dfs(&app, &format!("✓ {} keywords with volume data.", results.len()));
             KeywordSearchResponse { success: true, results, error: String::new() }
         }
         Err(e) => {
-            emit_dfs(&app, &format!("✗ DataForSEO error: {}", e));
+            emit_dfs(&app, &format!("✗ Keyword volume lookup failed: {}", e));
             KeywordSearchResponse { success: false, results: Vec::new(), error: e }
         }
     }
