@@ -2,7 +2,7 @@
 import { inject, ref, watch, type ComputedRef, type Ref } from 'vue';
 import { invoke, uploadChapters } from '../api';
 import { storiesKey, reportsKey, platformKey, showPanelKey, openManuscriptEditorKey, seriesKey } from '../injectionKeys';
-import type { Story, Series } from '../types';
+import type { Story, Series, SidebarReportGroup } from '../types';
 import FileTreeNodes, { type FileTreeEntry } from './FileTreeNodes.vue';
 
 // ── Injections ────────────────────────────────────────────────────────────────
@@ -149,6 +149,14 @@ const expanded = ref<string | null>(null);
 
 function toggleExpand(docType: string): void {
   expanded.value = expanded.value === docType ? null : docType;
+}
+
+function onReportTypeClick(type: SidebarReportGroup): void {
+  if (type.versions.length === 1) {
+    void onVersionClick(type.versions[0].id);
+    return;
+  }
+  toggleExpand(type.doc_type);
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -300,6 +308,9 @@ function formatTimestamp(ts: string): string {
       <div v-if="!storiesCtx.activeFolder.value" class="sidebar-hint">
         Select a story to see reports.
       </div>
+      <div v-else-if="reportsCtx.sidebarGroups.value.length === 0" class="sidebar-hint">
+        No saved reports yet. Run analyses from the Analyzer panel.
+      </div>
       <template v-else>
         <div
           v-for="type in reportsCtx.sidebarGroups.value"
@@ -308,15 +319,18 @@ function formatTimestamp(ts: string): string {
         >
           <div
             class="report-type-header"
+            :class="{ expanded: expanded === type.doc_type }"
             :title="type.description"
-            @click="toggleExpand(type.doc_type)"
+            @click="onReportTypeClick(type)"
           >
             <span class="report-type-label">{{ type.label }}</span>
-            <span class="report-count">{{ type.count }}</span>
+            <span v-if="type.versions.length > 1" class="report-version-hint">
+              {{ type.versions.length }} versions
+            </span>
           </div>
 
           <div
-            v-if="expanded === type.doc_type && type.versions.length > 0"
+            v-if="expanded === type.doc_type && type.versions.length > 1"
             class="report-versions"
           >
             <div
@@ -627,6 +641,13 @@ function formatTimestamp(ts: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text);
+}
+
+.report-version-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  margin-left: 8px;
 }
 
 .report-count {

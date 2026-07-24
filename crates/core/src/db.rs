@@ -1967,58 +1967,57 @@ pub struct SidebarReportGroup {
     pub versions:    Vec<SidebarReportVersion>,
 }
 
-/// Returns reports grouped by type, filtered by platform, sorted newest-first.
-/// This is the single source of truth for the sidebar's report list.
+/// Returns saved reports grouped by type for the sidebar. Only types that have
+/// at least one stored document for this story are included, filtered by platform.
 pub async fn get_sidebar_reports(db: &Db, folder: String, platform: String) -> Result<Vec<SidebarReportGroup>, String> {
-    let all_types: Vec<(String, String, String)> = sqlx::query(
-        "SELECT id, label, description FROM report_types ORDER BY id",
+    let type_rows = sqlx::query(
+        "SELECT id, label, description, platforms FROM report_types ORDER BY id",
     )
     .fetch_all(&db.pool)
     .await
-    .map_err(|e| e.to_string())?
-    .into_iter()
-    .filter_map(|r| {
-        Some((
-            r.try_get(0).ok()?,
-            r.try_get(1).ok()?,
-            r.try_get(2).ok()?,
-        ))
-    })
-    .collect();
-
-    let plat_rows = sqlx::query("SELECT id, platforms FROM report_types")
-        .fetch_all(&db.pool)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let plat_map: std::collections::HashMap<String, Vec<String>> = plat_rows
-        .into_iter()
-        .filter_map(|r| {
-            let id: String = r.try_get(0).ok()?;
-            let platforms: String = r.try_get(1).ok()?;
-            let plats: Vec<String> = platforms.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-            Some((id, plats))
-        })
-        .collect();
+    .map_err(|e| e.to_string())?;
 
     let docs = list_documents(&db.pool, &folder).await;
 
-    let mut versions_by_type: std::collections::HashMap<String, Vec<SidebarReportVersion>> = std::collections::HashMap::new();
+    let mut versions_by_type: std::collections::HashMap<String, Vec<SidebarReportVersion>> =
+        std::collections::HashMap::new();
     for doc in &docs {
-        versions_by_type.entry(doc.doc_type.clone()).or_default().push(SidebarReportVersion {
-            id: doc.id,
-            generated_at: doc.generated_at.clone(),
-        });
+        versions_by_type
+            .entry(doc.doc_type.clone())
+            .or_default()
+            .push(SidebarReportVersion {
+                id: doc.id,
+                generated_at: doc.generated_at.clone(),
+            });
     }
 
-    let groups: Vec<SidebarReportGroup> = all_types.into_iter()
-        .filter(|(id, _, _)| {
-            plat_map.get(id).map(|p| p.contains(&platform)).unwrap_or(false)
-        })
-        .map(|(id, label, description)| {
-            let versions = versions_by_type.remove(&id).unwrap_or_default();
+    let groups: Vec<SidebarReportGroup> = type_rows
+        .into_iter()
+        .filter_map(|r| {
+            let id: String = r.try_get(0).ok()?;
+            let label: String = r.try_get(1).ok()?;
+            let description: String = r.try_get(2).ok()?;
+            let platforms: String = r.try_get(3).ok()?;
+            let plats: Vec<String> = platforms
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !plats.contains(&platform) {
+                return None;
+            }
+            let versions = versions_by_type.remove(&id)?;
+            if versions.is_empty() {
+                return None;
+            }
             let count = versions.len();
-            SidebarReportGroup { doc_type: id, label, description, count, versions }
+            Some(SidebarReportGroup {
+                doc_type: id,
+                label,
+                description,
+                count,
+                versions,
+            })
         })
         .collect();
 
