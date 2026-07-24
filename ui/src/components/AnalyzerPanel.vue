@@ -68,15 +68,18 @@ const visibleReports = computed(() => {
     }));
 });
 
+const canSelectReports = computed(() => Boolean(storiesCtx.activeFolder.value));
+
+const reportsLocked = computed(() => analysisCtx.isWorking.value || !canSelectReports.value);
+
 const getReportsDisabled = computed(() => {
-  return analysisCtx.isWorking.value
-    || !storiesCtx.activeFolder.value
-    || selected.value.length === 0;
+  return reportsLocked.value || selected.value.length === 0;
 });
 
 // ── Checkbox logic ────────────────────────────────────────────────────────────
 
 function toggleReport(id: string): void {
+  if (reportsLocked.value) return;
   const sel = new Set(selected.value);
   const dependants = getDependants(id);
 
@@ -97,9 +100,15 @@ function toggleReport(id: string): void {
   selected.value = [...sel];
 }
 
-// Reset selection when platform changes
+// Reset selection when platform or story changes
 watch(() => platformCtx.platform.value, () => {
   selected.value = [];
+});
+
+watch(() => storiesCtx.activeFolder.value, (folder) => {
+  if (!folder) {
+    selected.value = [];
+  }
 });
 
 // ── Cost estimation ───────────────────────────────────────────────────────────
@@ -173,7 +182,7 @@ function reportToModelFn(reportId: string): 'default' | 'summaries' | 'genre' | 
 }
 
 // Refresh estimates when folder changes, models are loaded, or report types load
-watch(() => storiesCtx.activeFolder.value, () => fetchCostEstimates());
+watch(() => storiesCtx.activeFolder.value, () => fetchCostEstimates(), { flush: 'post' });
 watch(() => settings.models.value, () => fetchCostEstimates());
 watch(() => reportTypes.value, () => fetchCostEstimates());
 
@@ -207,7 +216,12 @@ function onStop(): void {
   <div class="panel analyzer-panel">
     <h2 class="panel-title">Analyzer</h2>
     <p class="panel-desc">
-      {{ storiesCtx.activeStory.value ? `Story: ${storiesCtx.activeStory.value.name}` : 'Select or create a story to begin.' }}
+      <template v-if="storiesCtx.activeStory.value">
+        Story: {{ storiesCtx.activeStory.value.name }}
+      </template>
+      <template v-else>
+        Select or create a story to enable reports.
+      </template>
     </p>
 
     <!-- Platform tabs -->
@@ -245,7 +259,7 @@ function onStop(): void {
         v-if="platformCtx.isKdp.value"
         class="btn btn-secondary"
         title="Run market intelligence via Canopy API"
-        :disabled="analysisCtx.isWorking.value || !analysisCtx.analysisState.value?.has_search_terms"
+        :disabled="analysisCtx.isWorking.value || !canSelectReports || !analysisCtx.analysisState.value?.has_search_terms"
         @click="onMarketIntel"
       >Market Intel</button>
 
@@ -256,7 +270,7 @@ function onStop(): void {
       >Stop</button>
 
       <label v-if="platformCtx.platform.value !== 'craft'" class="force-resummarize-label">
-        <input v-model="forceResummarize" type="checkbox" />
+        <input v-model="forceResummarize" type="checkbox" :disabled="reportsLocked" />
         Force re-summarize
       </label>
     </div>
@@ -299,12 +313,14 @@ function onStop(): void {
         v-for="report in visibleReports"
         :key="report.id"
         class="report-card"
+        :class="{ disabled: reportsLocked }"
       >
         <div class="report-card-check">
           <input
             type="checkbox"
             :checked="selected.includes(report.id)"
-            @input="toggleReport(report.id)"
+            :disabled="reportsLocked"
+            @change="toggleReport(report.id)"
           />
         </div>
         <div class="report-card-content">
@@ -433,6 +449,15 @@ function onStop(): void {
 }
 
 .report-card.dimmed:hover {
+  border-color: var(--border);
+}
+
+.report-card.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.report-card.disabled:hover {
   border-color: var(--border);
 }
 
