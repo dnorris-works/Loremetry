@@ -172,6 +172,93 @@ pub async fn analyze_zeigarnik_for_story(app: AppCtx, request: ZeigarnikRequest)
     GenreResult { success: true, report: content, error: String::new(), run_ts }
 }
 
+// ── Client-side report persistence ──────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+pub struct SaveZeigarnikClientRequest {
+    #[serde(alias = "folder")]
+    pub story_id: String,
+    pub content: String,
+}
+
+/// Persist a Zeigarnik report generated in the browser (same JSON schema as analyze_zeigarnik_for_story).
+pub async fn save_zeigarnik_client_report(app: AppCtx, request: SaveZeigarnikClientRequest) -> GenreResult {
+    if !crate::stories::story_exists(&app.db, &request.story_id).await {
+        return err("Story not found.");
+    }
+
+    let json: serde_json::Value = match serde_json::from_str(&request.content) {
+        Ok(v) => v,
+        Err(e) => return err(&format!("Invalid Zeigarnik JSON: {e}")),
+    };
+
+    let chapter_rows = parse_chapter_rows(&json);
+    let thread_rows = parse_thread_rows(&json);
+
+    let database = app.db.as_ref();
+    if let Err(e) = db::replace_zeigarnik_analysis(&database.pool, &request.story_id, &chapter_rows, &thread_rows).await {
+        return err(&format!("Could not save analysis: {e}"));
+    }
+
+    let run_ts = chrono::Utc::now().to_rfc3339();
+    if let Err(e) = db::save_document_at(&database.pool, &request.story_id, "zeigarnik_analysis", &request.content, &run_ts).await {
+        return err(&format!("Could not save report document: {e}"));
+    }
+
+    GenreResult {
+        success: true,
+        report: request.content,
+        error: String::new(),
+        run_ts,
+    }
+}
+
+fn parse_chapter_rows(json: &serde_json::Value) -> Vec<db::ZeigarnikChapterRow> {
+    json.get("chapters")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|c| {
+                    Some(db::ZeigarnikChapterRow {
+                        chapter_index:  c.get("chapter_index")?.as_i64()?,
+                        file:           c.get("file").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        title:          c.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        word_count:     c.get("word_count").and_then(|v| v.as_i64()).unwrap_or(0),
+                        sentence_count: c.get("sentence_count").and_then(|v| v.as_i64()).unwrap_or(0),
+                        question_count: c.get("question_count").and_then(|v| v.as_i64()).unwrap_or(0),
+                        ending_type:    c.get("ending_type").and_then(|v| v.as_str()).unwrap_or("neutral").to_string(),
+                        tension_score:  c.get("tension_score").and_then(|v| v.as_i64()).unwrap_or(0),
+                        ending_snippet: c.get("ending_snippet").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_thread_rows(json: &serde_json::Value) -> Vec<db::ZeigarnikThreadRow> {
+    json.get("threads")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| {
+                    Some(db::ZeigarnikThreadRow {
+                        term:                t.get("term").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        mention_count:       t.get("mention_count").and_then(|v| v.as_i64()).unwrap_or(0),
+                        first_chapter_index: t.get("first_chapter_index").and_then(|v| v.as_i64()).unwrap_or(0),
+                        first_file:          t.get("first_file").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        first_snippet:       t.get("first_snippet").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        gap_start_index:     t.get("gap_start_index").and_then(|v| v.as_i64()).unwrap_or(0),
+                        gap_end_index:       t.get("gap_end_index").and_then(|v| v.as_i64()).unwrap_or(0),
+                        max_gap_chapters:    t.get("max_gap_chapters").and_then(|v| v.as_i64()).unwrap_or(0),
+                        max_gap_words:       t.get("max_gap_words").and_then(|v| v.as_i64()).unwrap_or(0),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // ── Text prep ────────────────────────────────────────────────────────────────
 
 /// Strip the leading "# Title" line and light markdown formatting so pattern

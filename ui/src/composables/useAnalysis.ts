@@ -1,6 +1,8 @@
 import { ref, watch } from 'vue';
-import { invoke, connectAnalysisLogStream, disconnectAnalysisLogStream } from '../api';
+import { invoke, connectAnalysisLogStream, disconnectAnalysisLogStream, saveZeigarnikReport } from '../api';
 import type { AnalysisState, GenreResult, LogLine } from '../types';
+import { listCachedChapters } from '../lib/manuscriptCache';
+import { cachedChapterToInput, runZeigarnikAnalysis } from '../lib/zeigarnik';
 
 import { useSettings } from './useSettings';
 
@@ -107,11 +109,34 @@ async function runCraftAnalysis(folder: string, selected: string[], continuitySc
   clearLog();
   isWorking.value = true;
 
+  let serverSelected = [...selected];
+
   try {
+    if (selected.includes('zeigarnik_analysis')) {
+      const cached = await listCachedChapters(folder);
+      if (cached.length > 0) {
+        appendLog(`Found ${cached.length} chapter(s). Scanning for open loops locally (no AI — pattern matching only)...`);
+        try {
+          const inputs = cached.map(cachedChapterToInput);
+          const report = runZeigarnikAnalysis(inputs);
+          const content = JSON.stringify(report);
+          await saveZeigarnikReport(folder, content);
+          appendLog('✓ Zeigarnik analysis saved to database.');
+          serverSelected = serverSelected.filter(id => id !== 'zeigarnik_analysis');
+        } catch (e) {
+          appendLog(`⚠ Local Zeigarnik failed (${String(e)}); falling back to server.`);
+        }
+      }
+    }
+
+    if (serverSelected.length === 0) {
+      return;
+    }
+
     const result = await invoke<GenreResult>('run_craft_pipeline', {
       request: {
         folder,
-        selected,
+        selected: serverSelected,
         provider,
         model: s.modelFor('default'),
         model_summaries: s.modelFor('summaries'),

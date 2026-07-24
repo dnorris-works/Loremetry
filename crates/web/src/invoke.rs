@@ -5,7 +5,7 @@ use axum::response::IntoResponse;
 use axum::Json;
 use crate::auth::Authenticated;
 use loremetry_core::analysis::{
-    ai_isms, continuity, pipeline, show_dont_tell, AnalyzeStoryRequest, FolderRequest,
+    ai_isms, continuity, pipeline, show_dont_tell, zeigarnik, AnalyzeStoryRequest, FolderRequest,
 };
 use loremetry_core::canopy::{self, MarketIntelRequest};
 use loremetry_core::commands::{self, ChatRequest, CostEstimateRequest};
@@ -127,6 +127,10 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
         "run_craft_pipeline" => {
             let request: pipeline::CraftPipelineRequest = take_request(&args)?;
             to_val(pipeline::run_craft_pipeline(app, request).await)
+        }
+        "save_zeigarnik_report" => {
+            let request: zeigarnik::SaveZeigarnikClientRequest = take_request(&args)?;
+            to_val(zeigarnik::save_zeigarnik_client_report(app, request).await)
         }
         "run_market_intel" => {
             let request: MarketIntelRequest = take_request(&args)?;

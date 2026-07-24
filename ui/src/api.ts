@@ -1,6 +1,14 @@
 /** Drop-in replacement for Tauri invoke + event listen. */
 
 import type { DocumentMeta, ManuscriptKind } from './types';
+import {
+  countWords,
+  getCachedChapter,
+  hashText,
+  putCachedChapter,
+  removeCachedChapter,
+  type CachedChapter,
+} from './lib/manuscriptCache';
 
 const BYPASS_STORAGE_KEY = 'loremetry_admin_bypass';
 
@@ -243,7 +251,7 @@ export async function uploadDocuments(
   files: FileList | File[],
   kind: ManuscriptKind = 'chapter',
   options?: { replace?: boolean },
-): Promise<{ uploaded: number }> {
+): Promise<{ uploaded: number; skipped: number }> {
   assertAppSession();
   const prepared = prepareUploadFiles(files, kind);
   if (prepared.length === 0) {
@@ -254,8 +262,31 @@ export async function uploadDocuments(
     );
   }
 
-  const fd = new FormData();
+  type UploadItem = { file: File; path: string; content: string; hash: string };
+  const toUpload: UploadItem[] = [];
+  let skipped = 0;
+
   for (const { file, path } of prepared) {
+    const content = await file.text();
+    if (kind === 'chapter') {
+      const hash = await hashText(content);
+      const cached = await getCachedChapter(storyId, path);
+      if (cached?.hash === hash) {
+        skipped += 1;
+        continue;
+      }
+      toUpload.push({ file, path, content, hash });
+    } else {
+      toUpload.push({ file, path, content, hash: await hashText(content) });
+    }
+  }
+
+  if (toUpload.length === 0) {
+    return { uploaded: 0, skipped };
+  }
+
+  const fd = new FormData();
+  for (const { file, path } of toUpload) {
     fd.append('files', file, path);
   }
   const params = new URLSearchParams({ kind });
@@ -272,13 +303,64 @@ export async function uploadDocuments(
   const data = await res.json() as {
     success?: boolean;
     errors?: string[];
-    documents?: unknown[];
+    documents?: {
+      id: number;
+      path_hint: string;
+      title: string;
+    }[];
   };
   if (data.errors?.length) {
     throw new Error(data.errors.join('; '));
   }
-  return { uploaded: data.documents?.length ?? prepared.length };
+
+  const docsByPath = new Map(
+    (data.documents ?? []).map(d => [d.path_hint, d]),
+  );
+
+  if (kind === 'chapter') {
+    const now = new Date().toISOString();
+    await Promise.all(toUpload.map(async (item) => {
+      const doc = docsByPath.get(item.path);
+      const entry: CachedChapter = {
+        storyId,
+        path: item.path,
+        content: item.content,
+        hash: item.hash,
+        wordCount: countWords(item.content),
+        docId: doc?.id ?? null,
+        updatedAt: now,
+      };
+      await putCachedChapter(entry);
+    }));
+  }
+
+  return { uploaded: data.documents?.length ?? toUpload.length, skipped };
 }
+
+export async function saveZeigarnikReport(
+  storyId: string,
+  content: string,
+): Promise<void> {
+  assertAppSession();
+  const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch('/api/invoke', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      cmd: 'save_zeigarnik_report',
+      args: { request: { folder: storyId, content } },
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok || (data && typeof data === 'object' && data.error)) {
+    throw new Error((data as { error?: string }).error || 'Could not save Zeigarnik report');
+  }
+  if (data && typeof data === 'object' && 'success' in data && !data.success) {
+    throw new Error(String((data as { error?: string }).error || 'Zeigarnik save failed'));
+  }
+}
+
+export { removeCachedChapter };
 
 const MANUSCRIPT_EXT = /\.(md|markdown|txt)$/i;
 
@@ -321,7 +403,7 @@ function prepareUploadFiles(
 }
 
 /** @deprecated Use uploadDocuments with kind 'chapter' */
-export async function uploadChapters(storyId: string, files: FileList | File[]): Promise<{ uploaded: number }> {
+export async function uploadChapters(storyId: string, files: FileList | File[]): Promise<{ uploaded: number; skipped: number }> {
   return uploadDocuments(storyId, files, 'chapter');
 }
 

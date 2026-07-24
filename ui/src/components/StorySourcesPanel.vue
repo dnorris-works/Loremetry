@@ -4,6 +4,7 @@ import {
   uploadDocuments,
   listStoryDocuments,
   deleteStoryDocument,
+  removeCachedChapter,
 } from '../api';
 import { storiesKey, showPanelKey, analysisKey } from '../injectionKeys';
 import type { DocumentMeta, ManuscriptKind } from '../types';
@@ -99,8 +100,15 @@ async function onUpload(
   error.value = '';
   uploadMessage.value = '';
   try {
-    const { uploaded } = await uploadDocuments(storyId, files, kind, { replace });
-    uploadMessage.value = `Uploaded ${uploaded} file${uploaded === 1 ? '' : 's'}.`;
+    const { uploaded, skipped } = await uploadDocuments(storyId, files, kind, { replace });
+    const parts: string[] = [];
+    if (uploaded > 0) {
+      parts.push(`Uploaded ${uploaded} file${uploaded === 1 ? '' : 's'}`);
+    }
+    if (skipped > 0) {
+      parts.push(`${skipped} unchanged (skipped)`);
+    }
+    uploadMessage.value = parts.length ? `${parts.join('; ')}.` : 'No changes to upload.';
     await refresh();
     bumpFileTree();
   } catch (e) {
@@ -119,6 +127,9 @@ async function onDelete(doc: DocumentMeta): Promise<void> {
   error.value = '';
   try {
     await deleteStoryDocument(storyId, doc.id);
+    if (doc.kind === 'chapter' && doc.path_hint) {
+      await removeCachedChapter(storyId, doc.path_hint);
+    }
     await refresh();
     bumpFileTree();
   } catch (e) {

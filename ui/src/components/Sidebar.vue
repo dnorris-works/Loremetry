@@ -108,9 +108,9 @@ async function onUploadFiles(ev: Event): Promise<void> {
   if (!files?.length || !storyId) return;
   uploading.value = true;
   try {
-    const { uploaded } = await uploadDocuments(storyId, files, 'chapter');
+    const { uploaded, skipped } = await uploadDocuments(storyId, files, 'chapter');
     bumpFileTree();
-    if (uploaded > 0) {
+    if (uploaded > 0 || skipped > 0) {
       openSources(false);
     }
   } catch (e) {

@@ -162,6 +162,10 @@ export interface ReportTypeDef {
   depends_on: string[];
   model_slot: string;
   min_tier: string;
+  cost_truncation: number;
+  cost_output_max: number;
+  cost_per_chapter: boolean;
+  cost_fixed_calls: number;
 }
 
 export interface SeriesBook {

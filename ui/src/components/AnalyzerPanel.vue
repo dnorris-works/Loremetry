@@ -6,6 +6,8 @@ import { useSettings } from '../composables/useSettings';
 import { storiesKey, analysisKey, seriesKey, platformKey } from '../injectionKeys';
 import LogStream from './LogStream.vue';
 import { useReportTypes } from '../composables/useReportTypes';
+import { getChapterWordStats } from '../lib/manuscriptCache';
+import { estimateReportCosts } from '../lib/estimateCosts';
 
 // ── Injections ────────────────────────────────────────────────────────────────
 
@@ -149,6 +151,17 @@ async function fetchCostEstimates(): Promise<void> {
   });
 
   try {
+    const stats = await getChapterWordStats(folder);
+    if (stats.chapterCount > 0) {
+      const estimates = estimateReportCosts(visibleReports.value, modelPrices, stats);
+      const obj: Record<string, number> = {};
+      for (const est of estimates) {
+        obj[est.report_id] = est.estimated_cost;
+      }
+      costEstimates.value = obj;
+      return;
+    }
+
     const result = await invoke<{ success: boolean; estimates: { report_id: string; estimated_cost: number }[] }>('estimate_report_costs', {
       request: { folder, model_prices: modelPrices },
     });

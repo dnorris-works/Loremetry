@@ -1791,13 +1791,17 @@ pub async fn list_documents(pool: &PgPool, story_id: &str) -> Vec<DocMeta> {
 
 #[derive(serde::Serialize, Clone, Debug)]
 pub struct ReportTypeDef {
-    pub id:          String,
-    pub label:       String,
-    pub description: String,
-    pub platforms:   Vec<String>,
-    pub depends_on:  Vec<String>,
-    pub model_slot:  String,
-    pub min_tier:    String,
+    pub id:               String,
+    pub label:            String,
+    pub description:      String,
+    pub platforms:        Vec<String>,
+    pub depends_on:       Vec<String>,
+    pub model_slot:       String,
+    pub min_tier:         String,
+    pub cost_truncation:  i64,
+    pub cost_output_max:  i64,
+    pub cost_per_chapter: bool,
+    pub cost_fixed_calls: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -1880,7 +1884,8 @@ pub async fn load_lookup_string_list(pool: &PgPool, key: &str) -> Vec<String> {
 
 pub async fn list_report_types_cmd(db: &Db) -> Result<Vec<ReportTypeDef>, String> {
     let rows = sqlx::query(
-        "SELECT id, label, description, platforms, depends_on, model_slot, min_tier
+        "SELECT id, label, description, platforms, depends_on, model_slot, min_tier,
+                cost_truncation, cost_output_max, cost_per_chapter, cost_fixed_calls
          FROM report_types ORDER BY id",
     )
     .fetch_all(&db.pool)
@@ -1899,6 +1904,10 @@ pub async fn list_report_types_cmd(db: &Db) -> Result<Vec<ReportTypeDef>, String
                 depends_on:  depends_on.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
                 model_slot:  r.try_get(5).map_err(|e| e.to_string())?,
                 min_tier:    r.try_get(6).map_err(|e| e.to_string())?,
+                cost_truncation:  r.try_get::<i32, _>(7).unwrap_or(4000) as i64,
+                cost_output_max:  r.try_get::<i32, _>(8).unwrap_or(1000) as i64,
+                cost_per_chapter: r.try_get::<i32, _>(9).unwrap_or(0) != 0,
+                cost_fixed_calls: r.try_get::<i32, _>(10).unwrap_or(1) as i64,
             })
         })
         .collect()
