@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount, nextTick, computed } from 'vue';
+import { ref, watch, onBeforeUnmount, nextTick, computed, shallowRef } from 'vue';
 import { useEditor, EditorContent } from '@tiptap/vue-3';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
 import { Markdown } from 'tiptap-markdown';
 import { invoke } from '../api';
+import { analyzeHemingway, type HemingwayHighlight, type HemingwayStats } from '../lib/hemingway';
+import { HemingwayCoach, hemingwayPluginKey } from '../lib/hemingwayExtension';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 const props = defineProps<{
   filePath: string;
   highlightText?: string;
+  /** Hemingway-style live highlights + grade (Writing mode). */
+  styleCoach?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -24,6 +28,49 @@ const saveStatus = ref('');
 const content = ref('');  // Original content as loaded from disk
 const dirty = ref(false);
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let coachTimer: ReturnType<typeof setTimeout> | null = null;
+
+const styleCoachOn = ref(props.styleCoach === true);
+const hemingwayHighlights = shallowRef<HemingwayHighlight[]>([]);
+const hemingwayStats = ref<HemingwayStats | null>(null);
+
+const emptyStats = (): HemingwayStats => ({
+  wordCount: 0,
+  sentenceCount: 0,
+  paragraphCount: 0,
+  adverbCount: 0,
+  passiveCount: 0,
+  hardSentenceCount: 0,
+  veryHardSentenceCount: 0,
+  complexWordCount: 0,
+  gradeLevel: 0,
+  readingEase: 0,
+  readingTimeMinutes: 0,
+});
+
+function refreshStyleCoach(): void {
+  if (!editor.value || !styleCoachOn.value) {
+    hemingwayHighlights.value = [];
+    hemingwayStats.value = emptyStats();
+    return;
+  }
+  const text = editor.value.state.doc.textContent;
+  const result = analyzeHemingway(text);
+  hemingwayStats.value = result.stats;
+  hemingwayHighlights.value = result.highlights;
+  editor.value.view.dispatch(editor.value.state.tr.setMeta(hemingwayPluginKey, Date.now()));
+}
+
+function scheduleStyleCoach(): void {
+  if (!props.styleCoach || !styleCoachOn.value) return;
+  if (coachTimer) clearTimeout(coachTimer);
+  coachTimer = setTimeout(() => refreshStyleCoach(), 250);
+}
+
+function toggleStyleCoach(): void {
+  styleCoachOn.value = !styleCoachOn.value;
+  refreshStyleCoach();
+}
 
 // ── Editor setup ──────────────────────────────────────────────────────────────
 
@@ -33,6 +80,10 @@ const editor = useEditor({
       heading: { levels: [1, 2, 3] },
     }),
     Highlight.configure({ multicolor: true }),
+    HemingwayCoach.configure({
+      getHighlights: () => hemingwayHighlights.value,
+      enabled: () => props.styleCoach === true && styleCoachOn.value,
+    }),
     Markdown.configure({
       html: false,
       transformPastedText: true,
@@ -65,6 +116,7 @@ const editor = useEditor({
   },
   onUpdate: () => {
     dirty.value = true;
+    scheduleStyleCoach();
   },
   onSelectionUpdate: () => {
     updateSelection();
@@ -86,6 +138,7 @@ async function loadFile(filePath: string): Promise<void> {
     content.value = text;
     editor.value?.commands.setContent(text);
     await nextTick();
+    refreshStyleCoach();
     if (props.highlightText) {
       highlightTarget(props.highlightText);
     }
@@ -245,8 +298,14 @@ watch(() => props.highlightText, (text) => {
   if (text && editor.value) highlightTarget(text);
 });
 
+watch(() => props.styleCoach, (on) => {
+  styleCoachOn.value = on === true;
+  refreshStyleCoach();
+});
+
 onBeforeUnmount(() => {
   if (saveTimer) clearTimeout(saveTimer);
+  if (coachTimer) clearTimeout(coachTimer);
 });
 </script>
 
@@ -273,10 +332,39 @@ onBeforeUnmount(() => {
         <button type="button" class="tb-btn" title="Undo" @click="editor.chain().focus().undo().run()">↶</button>
         <button type="button" class="tb-btn" title="Redo" @click="editor.chain().focus().redo().run()">↷</button>
       </div>
+      <div v-if="styleCoach" class="toolbar-group">
+        <button
+          type="button"
+          class="tb-btn"
+          :class="{ active: styleCoachOn }"
+          title="Style coach (readability highlights)"
+          @click="toggleStyleCoach"
+        >
+          Style
+        </button>
+      </div>
       <div class="toolbar-status">
         <span v-if="saving" class="status-saving">Saving...</span>
         <span v-else-if="saveStatus" class="status-saved">{{ saveStatus }}</span>
         <span v-else-if="dirty" class="status-dirty">Unsaved</span>
+      </div>
+    </div>
+    <div v-if="styleCoach && styleCoachOn && hemingwayStats" class="hemingway-bar">
+      <div class="hemingway-grade">
+        <span class="hemingway-grade-num">{{ hemingwayStats.gradeLevel }}</span>
+        <span class="hemingway-grade-label">Grade</span>
+      </div>
+      <div class="hemingway-metrics">
+        <span>{{ hemingwayStats.wordCount.toLocaleString() }} words</span>
+        <span>{{ hemingwayStats.readingTimeMinutes }} min read</span>
+        <span>{{ hemingwayStats.sentenceCount }} sentences</span>
+      </div>
+      <div class="hemingway-issues">
+        <span class="hemingway-pill hemingway-adverb">{{ hemingwayStats.adverbCount }} adverbs</span>
+        <span class="hemingway-pill hemingway-passive">{{ hemingwayStats.passiveCount }} passive</span>
+        <span class="hemingway-pill hemingway-hard">{{ hemingwayStats.hardSentenceCount }} hard</span>
+        <span class="hemingway-pill hemingway-very-hard">{{ hemingwayStats.veryHardSentenceCount }} very hard</span>
+        <span class="hemingway-pill hemingway-complex">{{ hemingwayStats.complexWordCount }} complex</span>
       </div>
     </div>
     <EditorContent :editor="editor" class="editor-wrapper" />
@@ -426,4 +514,87 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--border);
   margin: 1.5em 0;
 }
+
+.hemingway-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.hemingway-grade {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.hemingway-grade-num {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.hemingway-grade-label {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.hemingway-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text-muted);
+}
+
+.hemingway-issues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.hemingway-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.editor-wrapper :deep(.hemingway-mark) {
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.editor-wrapper :deep(.hemingway-adverb) {
+  background: rgba(155, 89, 182, 0.22);
+}
+
+.editor-wrapper :deep(.hemingway-passive) {
+  background: rgba(39, 174, 96, 0.22);
+}
+
+.editor-wrapper :deep(.hemingway-hard) {
+  background: rgba(241, 196, 15, 0.35);
+}
+
+.editor-wrapper :deep(.hemingway-very-hard) {
+  background: rgba(231, 76, 60, 0.28);
+}
+
+.editor-wrapper :deep(.hemingway-complex) {
+  background: rgba(52, 152, 219, 0.2);
+}
+
+.hemingway-pill.hemingway-adverb { background: rgba(155, 89, 182, 0.2); color: #9b59b6; }
+.hemingway-pill.hemingway-passive { background: rgba(39, 174, 96, 0.2); color: #27ae60; }
+.hemingway-pill.hemingway-hard { background: rgba(241, 196, 15, 0.35); color: #b7950b; }
+.hemingway-pill.hemingway-very-hard { background: rgba(231, 76, 60, 0.25); color: #c0392b; }
+.hemingway-pill.hemingway-complex { background: rgba(52, 152, 219, 0.2); color: #2980b9; }
 </style>

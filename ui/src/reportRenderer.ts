@@ -55,6 +55,7 @@ function renderBySchema(data: any, docType: string): string {
   if (schema === 'discovery_keywords_v1') return renderDiscoveryKeywords(data);
   if (schema === 'activity_log_v1') return renderActivityLog(data);
   if (schema === 'zeigarnik_v1') return renderZeigarnik(data);
+  if (schema === 'readability_v1') return renderReadability(data);
   if (schema === 'continuity_v1') return renderContinuity(data);
   if (schema === 'show_dont_tell_v1') return renderShowDontTell(data);
   if (schema === 'ai_isms_v1') return renderAiIsms(data);
@@ -754,6 +755,67 @@ function renderZeigarnik(data: any): string {
       if (c.ending_snippet) {
         html += `<tr><td colspan="6" class="top-books-cell muted">"${esc(c.ending_snippet)}"</td></tr>`;
       }
+    });
+    html += `</tbody></table></section>`;
+  }
+
+  return html;
+}
+
+// ── Readability Report ────────────────────────────────────────────────────────
+
+function gradeClass(grade: number): string {
+  if (grade <= 6) return 'readability-easy';
+  if (grade <= 9) return 'readability-mid';
+  if (grade <= 12) return 'readability-hard';
+  return 'readability-very-hard';
+}
+
+function renderReadability(data: any): string {
+  const summary = data.summary || {};
+  const chapters: any[] = data.chapters || [];
+
+  let html = '';
+
+  const avgGrade = summary.avg_flesch_kincaid_grade ?? 0;
+  html += `<div class="zeigarnik-score readability-score ${gradeClass(avgGrade)}">`;
+  html += `<span class="zeigarnik-pct">${avgGrade}</span>`;
+  html += `<span class="zeigarnik-label">Avg. grade level (Flesch-Kincaid)</span>`;
+  html += `</div>`;
+
+  if (data.note) {
+    html += `<p class="report-note">${esc(data.note)}</p>`;
+  }
+
+  html += `<section class="report-section"><h3>Summary</h3>`;
+  html += `<table class="report-table"><tbody>`;
+  html += `<tr><td><strong>Chapters analyzed</strong></td><td>${summary.total_chapters ?? '—'}</td></tr>`;
+  html += `<tr><td><strong>Total words</strong></td><td>${(summary.total_words ?? 0).toLocaleString()}</td></tr>`;
+  html += `<tr><td><strong>Average grade level</strong></td><td>${avgGrade} (${esc(summary.avg_grade_label || '')})</td></tr>`;
+  html += `<tr><td><strong>Average reading ease</strong></td><td>${summary.avg_flesch_reading_ease ?? 0} — ${esc(summary.avg_ease_label || '')}</td></tr>`;
+  html += `<tr><td><strong>Grade range</strong></td><td>${summary.min_grade ?? 0} – ${summary.max_grade ?? 0} (spread ${summary.grade_spread ?? 0})</td></tr>`;
+  if (summary.easiest_chapter) {
+    html += `<tr><td><strong>Easiest chapter</strong></td><td>${esc(summary.easiest_chapter)} (grade ${summary.min_grade ?? 0})</td></tr>`;
+  }
+  if (summary.hardest_chapter) {
+    html += `<tr><td><strong>Hardest chapter</strong></td><td>${esc(summary.hardest_chapter)} (grade ${summary.max_grade ?? 0})</td></tr>`;
+  }
+  html += `</tbody></table></section>`;
+
+  if (chapters.length) {
+    html += `<section class="report-section"><h3>Per Chapter</h3>`;
+    html += `<p class="report-hint">Flesch-Kincaid grade ≈ US school grade needed to read comfortably. Reading ease: 90+ very easy, 60–70 standard, 30– difficult.</p>`;
+    html += `<table class="report-table"><thead><tr><th>#</th><th>Chapter</th><th>Words</th><th>Grade</th><th>Reading ease</th><th>Gunning Fog</th></tr></thead><tbody>`;
+    chapters.forEach((c: any, i: number) => {
+      const g = c.flesch_kincaid_grade ?? 0;
+      html += `<tr>
+        <td>${i + 1}</td>
+        <td><strong>${esc(c.title || c.file)}</strong></td>
+        <td>${(c.word_count ?? 0).toLocaleString()}</td>
+        <td class="${gradeClass(g)}"><strong>${g}</strong></td>
+        <td>${c.flesch_reading_ease ?? 0}</td>
+        <td>${c.gunning_fog ?? 0}</td>
+      </tr>`;
     });
     html += `</tbody></table></section>`;
   }

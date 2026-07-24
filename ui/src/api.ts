@@ -341,22 +341,37 @@ export async function saveZeigarnikReport(
   storyId: string,
   content: string,
 ): Promise<void> {
+  await saveClientReport('save_zeigarnik_report', storyId, content);
+}
+
+export async function saveReadabilityReport(
+  storyId: string,
+  content: string,
+): Promise<void> {
+  await saveClientReport('save_readability_report', storyId, content);
+}
+
+async function saveClientReport(
+  cmd: string,
+  storyId: string,
+  content: string,
+): Promise<void> {
   assertAppSession();
   const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
   const res = await fetch('/api/invoke', {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      cmd: 'save_zeigarnik_report',
+      cmd,
       args: { request: { folder: storyId, content } },
     }),
   });
   const data = await res.json();
   if (!res.ok || (data && typeof data === 'object' && data.error)) {
-    throw new Error((data as { error?: string }).error || 'Could not save Zeigarnik report');
+    throw new Error((data as { error?: string }).error || 'Could not save report');
   }
   if (data && typeof data === 'object' && 'success' in data && !data.success) {
-    throw new Error(String((data as { error?: string }).error || 'Zeigarnik save failed'));
+    throw new Error(String((data as { error?: string }).error || 'Report save failed'));
   }
 }
 

@@ -54,6 +54,7 @@ const existsMap = computed(() => {
     author_analysis: false,
     activity_log: false,
     zeigarnik_analysis: state.has_zeigarnik,
+    readability_analysis: state.has_readability,
     continuity_check: state.has_continuity_check,
     show_dont_tell: state.has_show_dont_tell,
     ai_isms: state.has_ai_isms,

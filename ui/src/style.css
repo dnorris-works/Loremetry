@@ -1034,3 +1034,13 @@ html, body {
   font-weight: 600;
   color: var(--text-muted);
 }
+
+/* ── Readability grade colors ── */
+.readability-easy { color: #27ae60; }
+.readability-mid { color: #2980b9; }
+.readability-hard { color: #e67e22; }
+.readability-very-hard { color: #e74c3c; }
+.readability-score.readability-easy .zeigarnik-pct { color: #27ae60; }
+.readability-score.readability-mid .zeigarnik-pct { color: #2980b9; }
+.readability-score.readability-hard .zeigarnik-pct { color: #e67e22; }
+.readability-score.readability-very-hard .zeigarnik-pct { color: #e74c3c; }

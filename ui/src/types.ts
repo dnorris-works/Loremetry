@@ -59,6 +59,7 @@ export interface AnalysisState {
   has_discovery_keywords: boolean;
   has_keyword_search_results: boolean;
   has_zeigarnik: boolean;
+  has_readability: boolean;
   has_continuity_check: boolean;
   has_show_dont_tell: boolean;
   has_ai_isms: boolean;

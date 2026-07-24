@@ -1,8 +1,9 @@
 import { ref, watch } from 'vue';
-import { invoke, connectAnalysisLogStream, disconnectAnalysisLogStream, saveZeigarnikReport } from '../api';
+import { invoke, connectAnalysisLogStream, disconnectAnalysisLogStream, saveZeigarnikReport, saveReadabilityReport } from '../api';
 import type { AnalysisState, GenreResult, LogLine } from '../types';
 import { listCachedChapters } from '../lib/manuscriptCache';
-import { cachedChapterToInput, runZeigarnikAnalysis } from '../lib/zeigarnik';
+import { cachedChapterToInput as zeigarnikChapterInput, runZeigarnikAnalysis } from '../lib/zeigarnik';
+import { cachedChapterToInput as readabilityChapterInput, runReadabilityAnalysis } from '../lib/readability';
 
 import { useSettings } from './useSettings';
 
@@ -112,21 +113,35 @@ async function runCraftAnalysis(folder: string, selected: string[], continuitySc
   let serverSelected = [...selected];
 
   try {
-    if (selected.includes('zeigarnik_analysis')) {
-      const cached = await listCachedChapters(folder);
-      if (cached.length > 0) {
-        appendLog(`Found ${cached.length} chapter(s). Scanning for open loops locally (no AI — pattern matching only)...`);
-        try {
-          const inputs = cached.map(cachedChapterToInput);
-          const report = runZeigarnikAnalysis(inputs);
-          const content = JSON.stringify(report);
-          await saveZeigarnikReport(folder, content);
-          appendLog('✓ Zeigarnik analysis saved to database.');
-          serverSelected = serverSelected.filter(id => id !== 'zeigarnik_analysis');
-        } catch (e) {
-          appendLog(`⚠ Local Zeigarnik failed (${String(e)}); falling back to server.`);
-        }
+    const cached = await listCachedChapters(folder);
+
+    if (selected.includes('zeigarnik_analysis') && cached.length > 0) {
+      appendLog(`Found ${cached.length} chapter(s). Scanning for open loops locally (no AI — pattern matching only)...`);
+      try {
+        const inputs = cached.map(zeigarnikChapterInput);
+        const report = runZeigarnikAnalysis(inputs);
+        await saveZeigarnikReport(folder, JSON.stringify(report));
+        appendLog('✓ Zeigarnik analysis saved to database.');
+        serverSelected = serverSelected.filter(id => id !== 'zeigarnik_analysis');
+      } catch (e) {
+        appendLog(`⚠ Local Zeigarnik failed (${String(e)}); falling back to server.`);
       }
+    }
+
+    if (selected.includes('readability_analysis') && cached.length > 0) {
+      appendLog(`Analyzing readability for ${cached.length} chapter(s) locally (formula-based — no AI)...`);
+      try {
+        const inputs = cached.map(readabilityChapterInput);
+        const report = runReadabilityAnalysis(inputs);
+        await saveReadabilityReport(folder, JSON.stringify(report));
+        appendLog('✓ Readability report saved to database.');
+        serverSelected = serverSelected.filter(id => id !== 'readability_analysis');
+      } catch (e) {
+        appendLog(`✗ Readability analysis failed: ${String(e)}`);
+      }
+    } else if (selected.includes('readability_analysis') && cached.length === 0) {
+      appendLog('✗ Readability needs chapter text in this browser. Upload chapters in Sources first.');
+      serverSelected = serverSelected.filter(id => id !== 'readability_analysis');
     }
 
     if (serverSelected.length === 0) {

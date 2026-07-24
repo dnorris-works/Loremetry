@@ -17,6 +17,7 @@ pub mod keywords;
 pub mod bisac;
 pub mod pipeline;
 pub mod zeigarnik;
+pub mod readability;
 pub mod continuity;
 pub mod show_dont_tell;
 pub mod ai_isms;

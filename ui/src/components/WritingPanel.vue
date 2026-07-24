@@ -92,6 +92,7 @@ async function onDelete(): Promise<void> {
           <ChapterEditor
             ref="editorRef"
             :file-path="filePath"
+            :style-coach="true"
             @saved="onEditorSaved"
           />
         </div>

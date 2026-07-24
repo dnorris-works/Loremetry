@@ -321,6 +321,7 @@ async fn seed_report_types(pool: &PgPool) -> Result<(), String> {
         ("review_mining", "Reader Review Intelligence", "Reader insights extracted from competitor book reviews.", "kdp", "mi_search_terms", 4000, 1000, 0, 1, "default", "basic"),
         ("author_analysis", "Competitor Author Analysis", "Competitor pricing, release cadence, and series strategy.", "kdp", "mi_search_terms", 4000, 1000, 0, 1, "default", "basic"),
         ("zeigarnik_analysis", "Zeigarnik Effect", "Analyzes open loops and unresolved tension to maintain reader engagement.", "craft", "", 0, 0, 0, 0, "default", "basic"),
+        ("readability_analysis", "Readability", "Flesch-Kincaid grade level and reading ease per chapter — formula-based, no AI.", "craft", "", 0, 0, 0, 0, "default", "basic"),
         ("continuity_check", "Continuity Check", "AI-assisted scan for contradicted facts — within a manuscript or across a whole series.", "craft", "", 6000, 4000, 1, 3, "continuity", "capable"),
         ("show_dont_tell", "Show Don't Tell", "AI-assisted check for telling instead of showing — flags violations with surrounding manuscript text.", "craft", "", 4000, 4000, 1, 0, "showDontTell", "capable"),
         ("ai_isms", "AI-isms", "AI-assisted check for prose habits that often read as machine-generated — flags passages with surrounding manuscript text.", "craft", "", 4000, 4000, 1, 0, "aiIsms", "capable"),
