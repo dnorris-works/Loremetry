@@ -1,5 +1,16 @@
 // ── Shared types for Loremetry UI ───────────────────────────────────────────
 
+export interface DocumentMeta {
+  id: number;
+  story_id: string;
+  kind: string;
+  title: string;
+  path_hint: string;
+  updated_at: string;
+}
+
+export type ManuscriptKind = 'chapter' | 'bible' | 'character' | 'location';
+
 export interface Story {
   id: string;
   name: string;

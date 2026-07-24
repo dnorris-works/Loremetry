@@ -1,20 +1,64 @@
-use axum::extract::{Multipart, Path, State};
+use axum::extract::{Multipart, Path, Query, State};
 use axum::response::IntoResponse;
 use loremetry_core::documents::{self, UpsertDocumentRequest};
+use serde::Deserialize;
 use serde_json::json;
 
 use crate::error::{json_error, ok_json};
 use crate::state::AppState;
 
-/// POST /api/stories/:story_id/documents/upload — multipart files → chapter documents.
+#[derive(Deserialize, Default)]
+pub struct UploadQuery {
+    /// chapter | bible | character | location
+    #[serde(default)]
+    pub kind: String,
+    /// When true, delete existing documents of this kind before uploading (bible only).
+    #[serde(default)]
+    pub replace: bool,
+}
+
+fn normalize_kind(kind: &str) -> &'static str {
+    let k = kind.trim().to_lowercase();
+    match k.as_str() {
+        "bible" => "bible",
+        "character" | "characters" => "character",
+        "location" | "locations" => "location",
+        _ => "chapter",
+    }
+}
+
+fn path_hint_for_kind(kind: &str, filename: &str) -> String {
+    let name = if filename.is_empty() { "untitled.md" } else { filename };
+    match kind {
+        "bible" => format!("Bible/{name}"),
+        "character" => format!("Characters/{name}"),
+        "location" => format!("Locations/{name}"),
+        _ => name.to_string(),
+    }
+}
+
+async fn maybe_replace_kind(pool: &sqlx::PgPool, story_id: &str, kind: &str, replace: bool) {
+    if replace && kind == "bible" {
+        let _ = sqlx::query("DELETE FROM manuscripts WHERE story_id = $1 AND kind = 'bible'")
+            .bind(story_id)
+            .execute(pool)
+            .await;
+    }
+}
+
+/// POST /api/stories/:story_id/documents/upload — multipart files → story documents.
 pub async fn upload_chapters(
     State(state): State<AppState>,
     Path(story_id): Path<String>,
+    Query(query): Query<UploadQuery>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
     if !loremetry_core::stories::story_exists(&state.ctx.db, &story_id).await {
         return json_error(format!("Story not found: {story_id}"));
     }
+
+    let kind = normalize_kind(&query.kind);
+    maybe_replace_kind(&state.ctx.db.pool, &story_id, kind, query.replace).await;
 
     let mut created = Vec::new();
     let mut errors = Vec::new();
@@ -45,9 +89,9 @@ pub async fn upload_chapters(
 
         let req = UpsertDocumentRequest {
             story_id: story_id.clone(),
-            kind: "chapter".into(),
+            kind: kind.to_string(),
             title: title.clone(),
-            path_hint: filename.clone(),
+            path_hint: path_hint_for_kind(kind, &filename),
             content,
             id: None,
         };
@@ -56,6 +100,7 @@ pub async fn upload_chapters(
             Ok(doc) => {
                 created.push(json!({
                     "id": doc.id,
+                    "kind": doc.kind,
                     "path": format!("doc:{}", doc.id),
                     "title": doc.title,
                     "path_hint": doc.path_hint,

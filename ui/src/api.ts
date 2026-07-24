@@ -1,5 +1,7 @@
 /** Drop-in replacement for Tauri invoke + event listen. */
 
+import type { DocumentMeta, ManuscriptKind } from './types';
+
 const BYPASS_STORAGE_KEY = 'loremetry_admin_bypass';
 
 let authTokenProvider: (() => Promise<string | null>) | null = null;
@@ -236,21 +238,58 @@ export function disconnectAnalysisLogStream(): void {
   analysisLogUnsubs = null;
 }
 
-export async function uploadChapters(storyId: string, files: FileList | File[]): Promise<void> {
+export async function uploadDocuments(
+  storyId: string,
+  files: FileList | File[],
+  kind: ManuscriptKind = 'chapter',
+  options?: { replace?: boolean },
+): Promise<void> {
   assertAppSession();
   const fd = new FormData();
   for (const f of Array.from(files)) {
     fd.append('files', f, f.name);
   }
+  const params = new URLSearchParams({ kind });
+  if (options?.replace) params.set('replace', 'true');
   const headers = await buildAuthHeaders();
-  const res = await fetch(`/api/stories/${encodeURIComponent(storyId)}/documents/upload`, {
-    method: 'POST',
-    headers,
-    body: fd,
-  });
+  const res = await fetch(
+    `/api/stories/${encodeURIComponent(storyId)}/documents/upload?${params}`,
+    { method: 'POST', headers, body: fd },
+  );
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error((data as { error?: string }).error || 'Upload failed');
+  }
+  const data = await res.json() as { success?: boolean; errors?: string[] };
+  if (data.errors?.length) {
+    throw new Error(data.errors.join('; '));
+  }
+}
+
+/** @deprecated Use uploadDocuments with kind 'chapter' */
+export async function uploadChapters(storyId: string, files: FileList | File[]): Promise<void> {
+  return uploadDocuments(storyId, files, 'chapter');
+}
+
+export async function listStoryDocuments(storyId: string): Promise<DocumentMeta[]> {
+  assertAppSession();
+  const headers = await buildAuthHeaders();
+  const res = await fetch(`/api/stories/${encodeURIComponent(storyId)}/documents`, { headers });
+  const data = await res.json() as { success?: boolean; documents?: DocumentMeta[]; error?: string };
+  if (!res.ok) throw new Error(data.error || 'Could not load documents');
+  return data.documents ?? [];
+}
+
+export async function deleteStoryDocument(storyId: string, docId: number): Promise<void> {
+  assertAppSession();
+  const headers = await buildAuthHeaders();
+  const res = await fetch(
+    `/api/documents/${docId}?story_id=${encodeURIComponent(storyId)}`,
+    { method: 'DELETE', headers },
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { error?: string }).error || 'Delete failed');
   }
 }
 

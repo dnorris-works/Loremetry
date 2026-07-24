@@ -6,6 +6,10 @@ import type { Story, StoriesResult } from '../types';
 const storiesCtx = inject(storiesKey)!;
 const showPanel = inject(showPanelKey)!;
 
+const emit = defineEmits<{
+  (e: 'story-created'): void;
+}>();
+
 const props = defineProps<{
   story: Story | null;
 }>();
@@ -51,8 +55,14 @@ async function onSave(): Promise<void> {
   const saved = isEditing.value && editId.value
     ? result.stories.find(s => s.id === editId.value)
     : [...result.stories].reverse().find(s => s.name === trimName);
-  if (saved) storiesCtx.setActiveStory(saved.id);
-  showPanel('analyzer');
+  if (saved) {
+    storiesCtx.setActiveStory(saved.id);
+    if (isEditing.value && editId.value) {
+      showPanel('analyzer');
+    } else {
+      emit('story-created');
+    }
+  }
 }
 
 function onCancel(): void {

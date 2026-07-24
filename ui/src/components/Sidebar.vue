@@ -11,6 +11,7 @@ const storiesCtx = inject(storiesKey)!;
 const reportsCtx = inject(reportsKey)!;
 const platformCtx = inject(platformKey)!;
 const showPanel = inject(showPanelKey)!;
+const openSources = inject<(wizard?: boolean) => void>('openSources')!;
 const openManuscriptEditor = inject(openManuscriptEditorKey)!;
 const seriesCtx = inject(seriesKey)!;
 
@@ -249,7 +250,7 @@ function formatTimestamp(ts: string): string {
     </div>
 
     <div v-if="storiesCtx.activeFolder.value && appMode === 'analyzer'" class="mode-toggle-row">
-      <div class="mode-toggle">
+      <div class="mode-toggle mode-toggle-three">
         <button
           class="mode-btn"
           :class="{ active: sidebarMode === 'files' }"
@@ -260,6 +261,11 @@ function formatTimestamp(ts: string): string {
           :class="{ active: sidebarMode === 'reports' }"
           @click="sidebarMode = 'reports'"
         >Reports</button>
+        <button
+          class="mode-btn"
+          title="Upload chapters, bible, and reference files"
+          @click="openSources(false)"
+        >Sources</button>
       </div>
       <button
         v-if="sidebarMode === 'files'"
@@ -293,7 +299,10 @@ function formatTimestamp(ts: string): string {
           <button class="btn-new-story" title="New document" @click="onAddDocument">+</button>
         </div>
       </div>
-      <div v-if="fileTree.length === 0" class="sidebar-hint">No documents yet. Click + to create one.</div>
+      <div v-if="fileTree.length === 0" class="sidebar-hint">
+        No documents yet.
+        <button type="button" class="sidebar-link" @click="openSources(false)">Set up sources</button>
+      </div>
       <FileTreeNodes
         v-else
         :entries="fileTree"
@@ -597,7 +606,25 @@ function formatTimestamp(ts: string): string {
 }
 
 .mode-btn:first-child {
+  border-right: none;
+}
+
+.mode-btn:not(:last-child) {
   border-right: 1px solid var(--border);
+}
+
+.sidebar-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.sidebar-link:hover {
+  color: var(--accent-dim);
 }
 
 .mode-btn.active {

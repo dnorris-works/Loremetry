@@ -18,6 +18,7 @@ import AnalyzerPanel from './AnalyzerPanel.vue';
 import ReportsViewer from './ReportsViewer.vue';
 import AdminPanel from './AdminPanel.vue';
 import StoryForm from './StoryForm.vue';
+import StorySourcesPanel from './StorySourcesPanel.vue';
 import SeriesForm from './SeriesForm.vue';
 import NewDocumentForm from './NewDocumentForm.vue';
 import ManuscriptViewer from './ManuscriptViewer.vue';
@@ -50,9 +51,10 @@ const appMode = ref<AppMode>('analyzer');
 provide('appMode', appMode);
 provide('setAppMode', (mode: AppMode) => { appMode.value = mode; });
 
-type Panel = 'analyzer' | 'reports' | 'admin' | 'story-form' | 'series' | 'manuscript' | 'new-document';
+type Panel = 'analyzer' | 'reports' | 'admin' | 'story-form' | 'series' | 'manuscript' | 'new-document' | 'sources';
 const activePanel = ref<Panel>('analyzer');
 const sidebarOpen = ref(false);
+const sourcesWizard = ref(false);
 const panelBeforeNewDoc = ref<Panel>('analyzer');
 const modeBeforeNewDoc = ref<AppMode>('analyzer');
 
@@ -72,7 +74,14 @@ function showPanel(name: Panel): void {
   sidebarOpen.value = false;
 }
 
+function openSources(wizard = false): void {
+  sourcesWizard.value = wizard;
+  appMode.value = 'analyzer';
+  showPanel('sources');
+}
+
 provide(showPanelKey, showPanel as (name: string) => void);
+provide('openSources', openSources);
 
 const fileTreeTick = ref(0);
 provide('fileTreeTick', fileTreeTick);
@@ -160,6 +169,10 @@ function openStoryForm(story: Story | null): void {
   showPanel('story-form');
 }
 
+function onStoryCreated(): void {
+  openSources(true);
+}
+
 const editingSeries = ref<Series | null>(null);
 
 function openSeriesForm(series: Series | null): void {
@@ -221,6 +234,11 @@ onMounted(() => {
         @cancel="onDocumentFormCancel"
       />
 
+      <StorySourcesPanel
+        v-else-if="activePanel === 'sources'"
+        :wizard="sourcesWizard"
+      />
+
       <WritingPanel
         v-else-if="appMode === 'writing'"
         :file-path="writingFilePath"
@@ -232,7 +250,11 @@ onMounted(() => {
         <AnalyzerPanel v-if="activePanel === 'analyzer'" />
         <ReportsViewer v-if="activePanel === 'reports'" />
         <AdminPanel v-if="activePanel === 'admin'" />
-        <StoryForm v-if="activePanel === 'story-form'" :story="editingStory" />
+        <StoryForm
+          v-if="activePanel === 'story-form'"
+          :story="editingStory"
+          @story-created="onStoryCreated"
+        />
         <SeriesForm v-if="activePanel === 'series'" :series="editingSeries" />
         <ManuscriptViewer
           v-if="activePanel === 'manuscript'"
