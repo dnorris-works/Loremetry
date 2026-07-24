@@ -1,41 +1,48 @@
 <script setup lang="ts">
-import { onMounted, watch } from 'vue';
+import { onMounted, watch, unref } from 'vue';
 import { useAuth as useClerkAuth } from '@clerk/vue';
 import { registerClerkSignOut, useAuth } from '../composables/useAuth';
+import { resolveClerkSessionToken, sleep } from '../clerkSessionToken';
 
 const auth = useAuth();
+const { breakGlass } = auth;
 const clerk = useClerkAuth();
 
 onMounted(() => {
-  auth.wireClerkGetToken(async () => {
-    try {
-      const fn = clerk.getToken.value;
-      if (typeof fn === 'function') {
-        return (await fn()) ?? null;
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  });
+  auth.wireClerkGetToken(() => resolveClerkSessionToken(clerk));
   registerClerkSignOut(async () => {
-    if (clerk.signOut.value) {
-      await clerk.signOut.value();
+    try {
+      const raw = clerk.signOut as unknown;
+      const fn =
+        typeof raw === 'function'
+          ? raw
+          : unref(raw as (() => Promise<void>) | null);
+      if (typeof fn === 'function') {
+        await fn();
+      }
+    } catch {
+      /* ignore */
     }
   });
-  if (clerk.isSignedIn.value && !auth.breakGlass.value) {
-    void auth.refreshMe();
-  }
+  void completeClerkSignIn();
 });
 
 watch(
   () => clerk.isSignedIn.value,
   (signedIn) => {
-    if (signedIn && !auth.breakGlass.value) {
-      void auth.refreshMe();
+    if (signedIn && !breakGlass.value) {
+      void completeClerkSignIn();
     }
   },
 );
+
+async function completeClerkSignIn(): Promise<void> {
+  if (!clerk.isSignedIn.value || breakGlass.value) return;
+  for (let i = 0; i < 10; i++) {
+    if (await auth.refreshMe()) return;
+    await sleep(350);
+  }
+}
 </script>
 
 <template>

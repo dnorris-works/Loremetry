@@ -3,12 +3,14 @@ import { onMounted } from 'vue';
 import AuthPage from './components/AuthPage.vue';
 import MainApp from './components/MainApp.vue';
 import ClerkTokenWire from './components/ClerkTokenWire.vue';
-import { useAuth } from './composables/useAuth';
+import { useAuth, syncBootClerkConfig } from './composables/useAuth';
 
 const props = defineProps<{
   clerkEnabled?: boolean;
   publishableKey?: string;
 }>();
+
+syncBootClerkConfig(props.clerkEnabled, props.publishableKey);
 
 const { enteredApp, loadAuthConfig, restoreSession } = useAuth();
 

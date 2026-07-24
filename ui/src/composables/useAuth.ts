@@ -22,8 +22,8 @@ const me = ref<MeResponse | null>(null);
 /** Only true after session probe succeeds — gates the main app. */
 const enteredApp = ref(false);
 const restoringSession = ref(false);
+const sessionError = ref('');
 
-let authTokenProvider: (() => Promise<string | null>) | null = null;
 let clerkSignOut: (() => Promise<void>) | null = null;
 
 registerAuthRequiredHandler(() => {
@@ -37,21 +37,19 @@ export function registerClerkSignOut(fn: () => Promise<void>): void {
   clerkSignOut = fn;
 }
 
-async function hasClerkBearer(): Promise<boolean> {
-  if (!authTokenProvider) return false;
-  try {
-    const t = await authTokenProvider();
-    return Boolean(t);
-  } catch {
-    return false;
-  }
+/** Call from App with boot-time `/api/auth/config` (before async reload). */
+export function syncBootClerkConfig(enabled?: boolean, key?: string): void {
+  if (enabled) clerkEnabled.value = true;
+  if (key) publishableKey.value = key;
 }
 
 /** Validate session with the server; sets `enteredApp` only on success. */
 async function refreshMe(): Promise<boolean> {
+  sessionError.value = '';
   const bypass = getOperatorBypassToken();
-  const bearer = await hasClerkBearer();
-  if (!bypass && !bearer) {
+  const headers = await buildAuthHeaders();
+  const hasAuth = bypass || headers.has('Authorization');
+  if (!hasAuth) {
     me.value = null;
     enteredApp.value = false;
     setAppSessionActive(false);
@@ -59,19 +57,21 @@ async function refreshMe(): Promise<boolean> {
   }
 
   try {
-    const headers = await buildAuthHeaders();
     const res = await fetch('/api/auth/session', { headers });
     if (!res.ok) {
+      sessionError.value = 'Could not verify session with the server.';
       me.value = null;
       enteredApp.value = false;
       setAppSessionActive(false);
       return false;
     }
-    const data = (await res.json()) as { authenticated?: boolean } & Partial<MeResponse>;
+    const data = (await res.json()) as { authenticated?: boolean; reason?: string } & Partial<MeResponse>;
     if (!data.authenticated) {
       if (bypass) {
         setOperatorBypassToken('');
       }
+      sessionError.value = data.reason?.trim()
+        || 'Sign-in could not be verified. Check Clerk JWT issuer and publishable key in Admin → Platform credentials.';
       me.value = null;
       enteredApp.value = false;
       setAppSessionActive(false);
@@ -86,8 +86,10 @@ async function refreshMe(): Promise<boolean> {
     };
     enteredApp.value = true;
     setAppSessionActive(true);
+    sessionError.value = '';
     return true;
   } catch {
+    sessionError.value = 'Could not reach the server.';
     me.value = null;
     enteredApp.value = false;
     setAppSessionActive(false);
@@ -133,6 +135,7 @@ export function useAuth() {
   }
 
   async function signOut(): Promise<void> {
+    sessionError.value = '';
     if (breakGlass.value) {
       setOperatorBypassToken('');
     } else if (clerkSignOut) {
@@ -154,7 +157,6 @@ export function useAuth() {
         return null;
       }
     };
-    authTokenProvider = provider;
     setAuthTokenProvider(provider);
   }
 
@@ -164,6 +166,7 @@ export function useAuth() {
     me,
     enteredApp,
     restoringSession,
+    sessionError,
     breakGlass,
     isAdmin,
     isSignedIn,

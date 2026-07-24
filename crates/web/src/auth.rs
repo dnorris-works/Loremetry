@@ -317,7 +317,7 @@ pub async fn auth_session(
             "isAdmin": user.is_admin(),
             "breakGlass": user.break_glass,
         })),
-        Err(_) => ok_json(json!({ "authenticated": false })),
+        Err(e) => ok_json(json!({ "authenticated": false, "reason": e })),
     }
 }
 

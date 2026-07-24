@@ -1,9 +1,17 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import AuthClerkSignIn from './AuthClerkSignIn.vue';
 import AuthOperatorForm from './AuthOperatorForm.vue';
+import { useAuth as useClerkAuth } from '@clerk/vue';
 import { useAuth } from '../composables/useAuth';
 
-const { clerkEnabled, restoringSession } = useAuth();
+const { clerkEnabled, restoringSession, sessionError } = useAuth();
+const clerk = useClerkAuth();
+
+const showOperator = computed(() => {
+  if (!clerkEnabled.value) return true;
+  return !clerk.isSignedIn.value || Boolean(sessionError.value);
+});
 </script>
 
 <template>
@@ -15,11 +23,11 @@ const { clerkEnabled, restoringSession } = useAuth();
 
       <template v-if="clerkEnabled">
         <AuthClerkSignIn />
-        <hr class="auth-divider" />
+        <hr v-if="showOperator" class="auth-divider" />
       </template>
       <p v-else class="auth-lead">Sign in with operator access, or configure Clerk in Admin after unlock.</p>
 
-      <AuthOperatorForm />
+      <AuthOperatorForm v-if="showOperator" />
     </div>
   </div>
 </template>

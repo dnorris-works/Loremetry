@@ -1,35 +1,23 @@
 <script setup lang="ts">
-import { onMounted, watch } from 'vue';
+import { watch } from 'vue';
 import { ClerkLoaded, ClerkLoading, Show, SignIn, useAuth as useClerkAuth } from '@clerk/vue';
-import { registerClerkSignOut, useAuth } from '../composables/useAuth';
+import { useAuth } from '../composables/useAuth';
+import { sleep } from '../clerkSessionToken';
 
 const auth = useAuth();
+const { enteredApp, sessionError, breakGlass } = auth;
 const clerk = useClerkAuth();
-
-onMounted(() => {
-  auth.wireClerkGetToken(async () => {
-    try {
-      const fn = clerk.getToken.value;
-      if (typeof fn === 'function') {
-        return (await fn()) ?? null;
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  });
-  registerClerkSignOut(async () => {
-    if (clerk.signOut.value) {
-      await clerk.signOut.value();
-    }
-  });
-});
 
 watch(
   () => clerk.isSignedIn.value,
   (signedIn) => {
-    if (signedIn && !auth.breakGlass.value) {
-      void auth.refreshMe();
+    if (signedIn && !breakGlass.value) {
+      void (async () => {
+        for (let i = 0; i < 10; i++) {
+          if (await auth.refreshMe()) return;
+          await sleep(350);
+        }
+      })();
     }
   },
 );
@@ -43,6 +31,12 @@ watch(
     <Show when="signed-out">
       <p class="auth-lead">Sign in to continue.</p>
       <SignIn routing="hash" />
+    </Show>
+    <Show when="signed-in">
+      <p v-if="!enteredApp" class="auth-muted">
+        Finishing sign-in…
+      </p>
+      <p v-if="sessionError" class="auth-error">{{ sessionError }}</p>
     </Show>
   </ClerkLoaded>
 </template>
@@ -59,5 +53,13 @@ watch(
   text-align: center;
   color: var(--text-muted);
   font-size: 0.85rem;
+}
+
+.auth-error {
+  text-align: center;
+  color: var(--danger, #c44);
+  font-size: 0.85rem;
+  margin: 12px 0 0;
+  line-height: 1.45;
 }
 </style>
