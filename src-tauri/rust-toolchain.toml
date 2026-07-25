@@ -1,0 +1,3 @@
+[toolchain]
+# Desktop (Tauri 2.11+) — separate from the web workspace toolchain.
+channel = "1.88.0"

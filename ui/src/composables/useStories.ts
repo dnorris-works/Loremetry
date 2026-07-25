@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue';
 import { invoke } from '../api';
+import { isDesktopApp } from '../platform';
 import type { Story, StoriesResult } from '../types';
 
 const stories = ref<Story[]>([]);
@@ -9,9 +10,12 @@ const activeStory = computed<Story | null>(() => {
   return stories.value.find(s => s.id === activeStoryId.value) || null;
 });
 
-/** Story id (kept as activeFolder for callers that pass it to analysis as `folder`). */
+/** Story folder path (desktop) or story id (web analysis key). */
 const activeFolder = computed<string>(() => {
-  return activeStory.value?.id || '';
+  const story = activeStory.value;
+  if (!story) return '';
+  if (isDesktopApp()) return story.folder || '';
+  return story.id;
 });
 
 async function loadStories(): Promise<void> {
@@ -28,28 +32,38 @@ function setActiveStory(id: string | null): void {
   localStorage.setItem('activeStoryId', id || '');
 }
 
-async function addStory(name: string): Promise<StoriesResult> {
-  const result = await invoke<StoriesResult>('add_story', { request: { name } });
+async function addStory(name: string, folder?: string): Promise<StoriesResult> {
+  const request = isDesktopApp()
+    ? { name, folder: folder ?? '' }
+    : { name };
+  const result = await invoke<StoriesResult>('add_story', { request });
   if (result.success) {
     stories.value = result.stories;
   }
   return result;
 }
 
-async function initStory(name: string): Promise<StoriesResult> {
-  const result = await invoke<StoriesResult>('init_story', {
-    request: { name },
-  });
+async function initStory(name: string, parentFolder?: string): Promise<StoriesResult> {
+  const request = isDesktopApp()
+    ? { name, parent_folder: parentFolder ?? '' }
+    : { name };
+  const result = await invoke<StoriesResult>('init_story', { request });
   if (result.success) {
     stories.value = result.stories;
   }
   return result;
 }
 
-async function updateStory(id: string, name: string, biblePath: string = ''): Promise<StoriesResult> {
-  const result = await invoke<StoriesResult>('update_story', {
-    request: { id, name, bible_path: biblePath },
-  });
+async function updateStory(
+  id: string,
+  name: string,
+  folderOrBible: string = '',
+  biblePath: string = '',
+): Promise<StoriesResult> {
+  const request = isDesktopApp()
+    ? { id, name, folder: folderOrBible, bible_path: biblePath }
+    : { id, name, bible_path: folderOrBible };
+  const result = await invoke<StoriesResult>('update_story', { request });
   if (result.success) {
     stories.value = result.stories;
   }

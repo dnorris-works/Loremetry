@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue';
 import { invoke } from '../api';
+import { isDesktopApp } from '../platform';
 import type { ModelInfo, ModelsResult } from '../types';
 
 // ── AI function model assignments ─────────────────────────────────────────────
@@ -86,6 +87,32 @@ const modelAssignments = ref<ModelAssignments>(loadAssignments());
 const models = ref<ModelInfo[]>(loadModelsFromStorage());
 const folderStructure = ref<FolderStructure>({ ...DEFAULT_FOLDER_STRUCTURE, acts: [...DEFAULT_FOLDER_STRUCTURE.acts], extra: [...DEFAULT_FOLDER_STRUCTURE.extra] });
 
+function cloneStructure(s: FolderStructure): FolderStructure {
+  return {
+    ...s,
+    acts: [...(s.acts || [])],
+    extra: [...(s.extra || [])],
+  };
+}
+
+async function loadFolderStructure(): Promise<void> {
+  if (!isDesktopApp()) return;
+  try {
+    const result = await invoke<FolderStructure>('get_folder_structure');
+    folderStructure.value = cloneStructure(result);
+  } catch {
+    folderStructure.value = cloneStructure(DEFAULT_FOLDER_STRUCTURE);
+  }
+}
+
+function addFolderEntry(): void {
+  folderStructure.value.extra.push('');
+}
+
+function removeFolderEntry(index: number): void {
+  folderStructure.value.extra.splice(index, 1);
+}
+
 function loadModelsFromStorage(): ModelInfo[] {
   const stored = localStorage.getItem('cachedModels');
   if (stored) {
@@ -124,6 +151,17 @@ async function saveSettings(): Promise<void> {
   localStorage.setItem('modelAssignments', JSON.stringify(modelAssignments.value));
   localStorage.setItem('model', modelAssignments.value.default);
   localStorage.setItem('proseModel', modelAssignments.value.prose);
+
+  if (isDesktopApp()) {
+    try {
+      const saved = await invoke<FolderStructure>('save_folder_structure', {
+        structure: folderStructure.value,
+      });
+      folderStructure.value = cloneStructure(saved);
+    } catch {
+      /* keep local copy */
+    }
+  }
 }
 
 export function useSettings() {
@@ -137,6 +175,9 @@ export function useSettings() {
     modelFor,
     models,
     folderStructure,
+    loadFolderStructure,
+    addFolderEntry,
+    removeFolderEntry,
     fetchModels,
     saveSettings,
   };

@@ -16,6 +16,8 @@ export interface Story {
   name: string;
   created: string;
   bible_path: string;
+  /** Desktop: absolute path to the story folder on disk. */
+  folder?: string;
 }
 
 export interface StoriesResult {

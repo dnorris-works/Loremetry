@@ -2,3 +2,7 @@
 resolver = "2"
 members = ["crates/core", "crates/web"]
 default-members = ["crates/web"]
+exclude = ["src-tauri"]
+
+# Desktop: standalone crate at src-tauri/ with its own Cargo.lock and rust-toolchain.toml.
+# Miget/Docker only build crates/* (loremetry-web).

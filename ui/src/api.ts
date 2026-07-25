@@ -1,5 +1,6 @@
 /** Drop-in replacement for Tauri invoke + event listen. */
 
+import { isDesktopApp } from './platform';
 import type { DocumentMeta, ManuscriptKind } from './types';
 import {
   countWords,
@@ -98,6 +99,10 @@ export async function buildAuthHeaders(extra?: HeadersInit): Promise<Headers> {
 }
 
 export async function invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (isDesktopApp()) {
+    const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
+    return tauriInvoke<T>(cmd, args ?? {});
+  }
   assertAppSession();
   const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
   const res = await fetch('/api/invoke', {
@@ -231,6 +236,16 @@ let analysisLogUnsubs: Unlisten[] | null = null;
 
 export function connectAnalysisLogStream(onLine: (message: string) => void): void {
   if (analysisLogUnsubs) return;
+  if (isDesktopApp()) {
+    void (async () => {
+      const { listen: tauriListen } = await import('@tauri-apps/api/event');
+      const handler = (payload: string) => onLine(payload);
+      const u1 = await tauriListen<string>('genre:log', (e) => handler(String(e.payload)));
+      const u2 = await tauriListen<string>('cdp:log', (e) => handler(String(e.payload)));
+      analysisLogUnsubs = [u1, u2];
+    })();
+    return;
+  }
   const handler = (e: { payload: string }) => onLine(e.payload);
   analysisLogUnsubs = [
     listen('genre:log', handler),

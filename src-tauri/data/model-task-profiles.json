@@ -1,0 +1,344 @@
+[
+  {
+    "report_id": "chapter_summaries",
+    "family": "volume_extract",
+    "literary": 1,
+    "reasoning": 2,
+    "creative": 1,
+    "volume": "per_chapter",
+    "min_band": "budget"
+  },
+  {
+    "report_id": "cliffhanger_score",
+    "family": "volume_extract",
+    "literary": 1,
+    "reasoning": 2,
+    "creative": 1,
+    "volume": "per_chapter",
+    "min_band": "budget"
+  },
+  {
+    "report_id": "hook_strength",
+    "family": "volume_extract",
+    "literary": 2,
+    "reasoning": 2,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "budget"
+  },
+  {
+    "report_id": "pacing_curve",
+    "family": "volume_extract",
+    "literary": 1,
+    "reasoning": 2,
+    "creative": 1,
+    "volume": "per_chapter",
+    "min_band": "budget"
+  },
+  {
+    "report_id": "kdp_categories",
+    "family": "metadata",
+    "literary": 1,
+    "reasoning": 2,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "budget"
+  },
+  {
+    "report_id": "kdp_keywords",
+    "family": "metadata",
+    "literary": 1,
+    "reasoning": 2,
+    "creative": 2,
+    "volume": "fixed",
+    "min_band": "budget"
+  },
+  {
+    "report_id": "bisac_classification",
+    "family": "metadata",
+    "literary": 1,
+    "reasoning": 2,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "budget"
+  },
+  {
+    "report_id": "mi_search_terms",
+    "family": "metadata",
+    "literary": 1,
+    "reasoning": 2,
+    "creative": 2,
+    "volume": "fixed",
+    "min_band": "budget"
+  },
+  {
+    "report_id": "discovery_keywords",
+    "family": "metadata",
+    "literary": 1,
+    "reasoning": 2,
+    "creative": 2,
+    "volume": "fixed",
+    "min_band": "budget"
+  },
+  {
+    "report_id": "genre_analysis",
+    "family": "genre",
+    "literary": 2,
+    "reasoning": 3,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "mid"
+  },
+  {
+    "report_id": "genre_ranking",
+    "family": "genre",
+    "literary": 2,
+    "reasoning": 3,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "mid"
+  },
+  {
+    "report_id": "trope_market_fit",
+    "family": "genre",
+    "literary": 2,
+    "reasoning": 3,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "mid"
+  },
+  {
+    "report_id": "competition_report",
+    "family": "market_writeup",
+    "literary": 2,
+    "reasoning": 3,
+    "creative": 2,
+    "volume": "fixed",
+    "min_band": "budget"
+  },
+  {
+    "report_id": "review_mining",
+    "family": "market_writeup",
+    "literary": 2,
+    "reasoning": 3,
+    "creative": 2,
+    "volume": "fixed",
+    "min_band": "budget"
+  },
+  {
+    "report_id": "author_analysis",
+    "family": "market_writeup",
+    "literary": 2,
+    "reasoning": 3,
+    "creative": 2,
+    "volume": "fixed",
+    "min_band": "budget"
+  },
+  {
+    "report_id": "continuity_check",
+    "family": "structure_reasoning",
+    "literary": 3,
+    "reasoning": 5,
+    "creative": 1,
+    "volume": "per_chapter",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "chekhovs_gun",
+    "family": "structure_reasoning",
+    "literary": 4,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "red_herring_vs_abandoned",
+    "family": "structure_reasoning",
+    "literary": 4,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "foreshadowing_twist_fairness",
+    "family": "structure_reasoning",
+    "literary": 4,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "macguffin_clarity",
+    "family": "structure_reasoning",
+    "literary": 4,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "want_vs_need",
+    "family": "structure_reasoning",
+    "literary": 4,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "thematic_throughline",
+    "family": "structure_reasoning",
+    "literary": 4,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "mirror_foil_character",
+    "family": "structure_reasoning",
+    "literary": 4,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "pov_discipline",
+    "family": "structure_reasoning",
+    "literary": 4,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "story_beat_placement",
+    "family": "structure_reasoning",
+    "literary": 3,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "scene_sequel_balance",
+    "family": "structure_reasoning",
+    "literary": 3,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "timeline_flashback",
+    "family": "structure_reasoning",
+    "literary": 3,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "dramatic_irony",
+    "family": "structure_reasoning",
+    "literary": 4,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "stakes_escalation",
+    "family": "structure_reasoning",
+    "literary": 3,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "cross_book_setup_payoff",
+    "family": "structure_reasoning",
+    "literary": 4,
+    "reasoning": 5,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "series_pacing_comparator",
+    "family": "structure_reasoning",
+    "literary": 3,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "recurring_motif_theme_series",
+    "family": "structure_reasoning",
+    "literary": 4,
+    "reasoning": 4,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "show_dont_tell",
+    "family": "literary_judgment",
+    "literary": 5,
+    "reasoning": 3,
+    "creative": 1,
+    "volume": "per_chapter",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "ai_isms",
+    "family": "literary_judgment",
+    "literary": 5,
+    "reasoning": 3,
+    "creative": 1,
+    "volume": "per_chapter",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "dialogue_voice",
+    "family": "literary_judgment",
+    "literary": 5,
+    "reasoning": 3,
+    "creative": 1,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "ai_beta_reader",
+    "family": "author_facing_copy",
+    "literary": 4,
+    "reasoning": 2,
+    "creative": 4,
+    "volume": "per_chapter",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "blurb_builder",
+    "family": "author_facing_copy",
+    "literary": 4,
+    "reasoning": 2,
+    "creative": 5,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  },
+  {
+    "report_id": "ad_copy_hook_pack",
+    "family": "author_facing_copy",
+    "literary": 3,
+    "reasoning": 2,
+    "creative": 5,
+    "volume": "fixed",
+    "min_band": "literary_mid"
+  }
+]

@@ -1,0 +1,304 @@
+{
+  "catalog": [
+    {
+      "id": "enemies_to_lovers",
+      "name": "Enemies to Lovers",
+      "aliases": ["rivals to lovers", "hate to love"],
+      "common_in_genres": ["Romance", "Paranormal Romance", "Clean & Wholesome Romance", "Young Adult", "New Adult"]
+    },
+    {
+      "id": "friends_to_lovers",
+      "name": "Friends to Lovers",
+      "aliases": ["best friends to lovers"],
+      "common_in_genres": ["Romance", "Clean & Wholesome Romance", "Young Adult", "New Adult", "Women's Fiction"]
+    },
+    {
+      "id": "forced_proximity",
+      "name": "Forced Proximity",
+      "aliases": ["stuck together", "one bed", "trapped together"],
+      "common_in_genres": ["Romance", "Paranormal Romance", "Thriller", "Suspense", "Adventure"]
+    },
+    {
+      "id": "fake_relationship",
+      "name": "Fake Relationship",
+      "aliases": ["fake dating", "marriage of convenience", "pretend couple"],
+      "common_in_genres": ["Romance", "Clean & Wholesome Romance", "Young Adult", "New Adult"]
+    },
+    {
+      "id": "second_chance_romance",
+      "name": "Second Chance Romance",
+      "aliases": ["exes reunited", "rekindled romance"],
+      "common_in_genres": ["Romance", "Clean & Wholesome Romance", "Women's Fiction", "Christian Fiction"]
+    },
+    {
+      "id": "grumpy_sunshine",
+      "name": "Grumpy / Sunshine",
+      "aliases": ["grumpy sunshine", "opposites attract"],
+      "common_in_genres": ["Romance", "Clean & Wholesome Romance", "Humor"]
+    },
+    {
+      "id": "slow_burn",
+      "name": "Slow Burn",
+      "aliases": ["slow-burn romance"],
+      "common_in_genres": ["Romance", "Paranormal Romance", "Literary Fiction", "Women's Fiction"]
+    },
+    {
+      "id": "found_family",
+      "name": "Found Family",
+      "aliases": ["chosen family"],
+      "common_in_genres": ["Fantasy", "Urban Fantasy", "Science Fiction", "Young Adult", "Adventure"]
+    },
+    {
+      "id": "chosen_one",
+      "name": "Chosen One",
+      "aliases": ["the prophesied one", "destiny chosen"],
+      "common_in_genres": ["Fantasy", "Epic Fantasy", "Young Adult", "Science Fiction", "Dystopian"]
+    },
+    {
+      "id": "mentor_protege",
+      "name": "Mentor / Protégé",
+      "aliases": ["mentor and apprentice", "reluctant mentor"],
+      "common_in_genres": ["Fantasy", "Epic Fantasy", "Coming of Age", "Young Adult", "Adventure"]
+    },
+    {
+      "id": "quest",
+      "name": "Quest / Journey",
+      "aliases": ["hero's journey", "road trip quest"],
+      "common_in_genres": ["Fantasy", "Epic Fantasy", "Adventure", "Science Fiction", "Coming of Age"]
+    },
+    {
+      "id": "fish_out_of_water",
+      "name": "Fish Out of Water",
+      "aliases": ["stranger in a strange land"],
+      "common_in_genres": ["Science Fiction", "Fantasy", "Humor", "Romance", "Young Adult"]
+    },
+    {
+      "id": "locked_room_mystery",
+      "name": "Locked-Room Mystery",
+      "aliases": ["impossible crime", "sealed room"],
+      "common_in_genres": ["Mystery", "Cozy Mystery", "Crime Fiction"]
+    },
+    {
+      "id": "amateur_sleuth",
+      "name": "Amateur Sleuth",
+      "aliases": ["cozy sleuth", "unlikely detective"],
+      "common_in_genres": ["Cozy Mystery", "Mystery", "Christian Mystery & Suspense"]
+    },
+    {
+      "id": "whodunit",
+      "name": "Whodunit",
+      "aliases": ["who-done-it", "murder mystery"],
+      "common_in_genres": ["Mystery", "Cozy Mystery", "Crime Fiction", "Thriller"]
+    },
+    {
+      "id": "unreliable_narrator",
+      "name": "Unreliable Narrator",
+      "aliases": ["unreliable POV"],
+      "common_in_genres": ["Psychological Thriller", "Literary Fiction", "Domestic Suspense", "Mystery"]
+    },
+    {
+      "id": "ticking_clock",
+      "name": "Ticking Clock",
+      "aliases": ["deadline pressure", "race against time"],
+      "common_in_genres": ["Thriller", "Suspense", "Techno-thriller", "Legal Thriller", "Adventure"]
+    },
+    {
+      "id": "cat_and_mouse",
+      "name": "Cat and Mouse",
+      "aliases": ["hunter and hunted", "pursuit"],
+      "common_in_genres": ["Thriller", "Suspense", "Crime Fiction", "Espionage"]
+    },
+    {
+      "id": "red_herring",
+      "name": "Red Herring",
+      "aliases": ["false lead", "misdirection"],
+      "common_in_genres": ["Mystery", "Cozy Mystery", "Thriller", "Psychological Thriller"]
+    },
+    {
+      "id": "twist_ending",
+      "name": "Twist Ending",
+      "aliases": ["plot twist", "reveal twist"],
+      "common_in_genres": ["Thriller", "Psychological Thriller", "Mystery", "Domestic Suspense"]
+    },
+    {
+      "id": "dual_timeline",
+      "name": "Dual Timeline",
+      "aliases": ["dual timelines", "past and present threads"],
+      "common_in_genres": ["Historical Fiction", "Literary Fiction", "Mystery", "Women's Fiction", "Gothic Fiction"]
+    },
+    {
+      "id": "secret_identity",
+      "name": "Secret Identity",
+      "aliases": ["hidden identity", "undercover"],
+      "common_in_genres": ["Romance", "Thriller", "Espionage", "Urban Fantasy", "Superhero"]
+    },
+    {
+      "id": "revenge",
+      "name": "Revenge",
+      "aliases": ["vengeance plot", "payback"],
+      "common_in_genres": ["Thriller", "Crime Fiction", "Western", "Literary Fiction", "Horror"]
+    },
+    {
+      "id": "forbidden_love",
+      "name": "Forbidden Love",
+      "aliases": ["star-crossed lovers", "taboo romance"],
+      "common_in_genres": ["Romance", "Historical Fiction", "Young Adult", "Paranormal Romance"]
+    },
+    {
+      "id": "love_triangle",
+      "name": "Love Triangle",
+      "aliases": ["romantic triangle"],
+      "common_in_genres": ["Romance", "Young Adult", "New Adult", "Women's Fiction"]
+    },
+    {
+      "id": "enemies_within",
+      "name": "Enemy Within / Betrayal",
+      "aliases": ["betrayal", "mole", "traitor"],
+      "common_in_genres": ["Thriller", "Espionage", "Fantasy", "Political", "Suspense"]
+    },
+    {
+      "id": "heist",
+      "name": "Heist",
+      "aliases": ["caper", "con job"],
+      "common_in_genres": ["Crime Fiction", "Thriller", "Adventure", "Humor"]
+    },
+    {
+      "id": "survival",
+      "name": "Survival",
+      "aliases": ["stranded", "against the elements"],
+      "common_in_genres": ["Adventure", "Post-Apocalyptic", "Thriller", "Horror", "Science Fiction"]
+    },
+    {
+      "id": "coming_of_age",
+      "name": "Coming of Age",
+      "aliases": ["bildungsroman", "growing up"],
+      "common_in_genres": ["Coming of Age", "Young Adult", "Middle Grade", "Literary Fiction"]
+    },
+    {
+      "id": "redemption_arc",
+      "name": "Redemption Arc",
+      "aliases": ["antihero redemption", "moral recovery"],
+      "common_in_genres": ["Christian Fiction", "Literary Fiction", "Western", "Crime Fiction", "Fantasy"]
+    },
+    {
+      "id": "small_town",
+      "name": "Small Town",
+      "aliases": ["small-town setting", "close-knit community"],
+      "common_in_genres": ["Cozy Mystery", "Romance", "Clean & Wholesome Romance", "Southern Fiction", "Christian Fiction"]
+    },
+    {
+      "id": "fishbowl_secrets",
+      "name": "Town Secrets",
+      "aliases": ["everyone has secrets", "buried scandal"],
+      "common_in_genres": ["Domestic Suspense", "Mystery", "Gothic Fiction", "Southern Fiction", "Thriller"]
+    },
+    {
+      "id": "haunted_past",
+      "name": "Haunted Past",
+      "aliases": ["dark past returns", "ghosts of the past"],
+      "common_in_genres": ["Gothic Fiction", "Horror", "Psychological Thriller", "Literary Fiction", "Mystery"]
+    },
+    {
+      "id": "training_montage",
+      "name": "Training / Skill Arc",
+      "aliases": ["training montage", "learning the craft"],
+      "common_in_genres": ["Fantasy", "Young Adult", "Science Fiction", "Sports", "Adventure"]
+    },
+    {
+      "id": "rags_to_riches",
+      "name": "Rags to Riches",
+      "aliases": ["underdog rise", "from nothing"],
+      "common_in_genres": ["Romance", "Women's Fiction", "Literary Fiction", "Historical Fiction"]
+    },
+    {
+      "id": "underdog",
+      "name": "Underdog",
+      "aliases": ["unlikely hero", "long odds"],
+      "common_in_genres": ["Adventure", "Sports", "Young Adult", "Fantasy", "Humor"]
+    },
+    {
+      "id": "moral_dilemma",
+      "name": "Moral Dilemma",
+      "aliases": ["ethical conflict", "no good choice"],
+      "common_in_genres": ["Literary Fiction", "Legal Thriller", "Science Fiction", "Christian Fiction", "Thriller"]
+    },
+    {
+      "id": "courtroom_drama",
+      "name": "Courtroom Drama",
+      "aliases": ["trial plot", "legal battle"],
+      "common_in_genres": ["Legal Thriller", "Crime Fiction", "Suspense"]
+    },
+    {
+      "id": "epistolary",
+      "name": "Epistolary / Documents",
+      "aliases": ["letters", "diary format", "found documents"],
+      "common_in_genres": ["Literary Fiction", "Horror", "Gothic Fiction", "Mystery", "Young Adult"]
+    },
+    {
+      "id": "multiple_pov",
+      "name": "Multiple POV",
+      "aliases": ["alternating POV", "ensemble POVs"],
+      "common_in_genres": ["Thriller", "Romance", "Epic Fantasy", "Literary Fiction", "Mystery"]
+    },
+    {
+      "id": "closed_circle",
+      "name": "Closed Circle of Suspects",
+      "aliases": ["closed circle", "isolated suspects"],
+      "common_in_genres": ["Mystery", "Cozy Mystery", "Thriller", "Gothic Fiction"]
+    },
+    {
+      "id": "bodyguard",
+      "name": "Bodyguard / Protector",
+      "aliases": ["protector romance", "guarded by"],
+      "common_in_genres": ["Romance", "Thriller", "Suspense", "Paranormal Romance"]
+    },
+    {
+      "id": "road_trip",
+      "name": "Road Trip",
+      "aliases": ["on the road", "cross-country journey"],
+      "common_in_genres": ["Romance", "Adventure", "Coming of Age", "Humor", "Young Adult"]
+    },
+    {
+      "id": "workplace_romance",
+      "name": "Workplace Romance",
+      "aliases": ["office romance", "boss/employee romance"],
+      "common_in_genres": ["Romance", "Clean & Wholesome Romance", "Women's Fiction", "New Adult"]
+    },
+    {
+      "id": "only_one_bed",
+      "name": "Only One Bed",
+      "aliases": ["one bed trope"],
+      "common_in_genres": ["Romance", "Paranormal Romance", "Clean & Wholesome Romance"]
+    },
+    {
+      "id": "hidden_heir",
+      "name": "Hidden Heir / Secret Royalty",
+      "aliases": ["secret princess", "lost heir"],
+      "common_in_genres": ["Romance", "Fantasy", "Young Adult", "Historical Fiction"]
+    },
+    {
+      "id": "magic_school",
+      "name": "Magic School",
+      "aliases": ["academy fantasy", "wizarding school"],
+      "common_in_genres": ["Fantasy", "Young Adult", "Middle Grade", "Urban Fantasy"]
+    },
+    {
+      "id": "portal_fantasy",
+      "name": "Portal Fantasy",
+      "aliases": ["isekai", "transported to another world"],
+      "common_in_genres": ["Fantasy", "Young Adult", "Middle Grade", "Science Fiction"]
+    },
+    {
+      "id": "time_travel",
+      "name": "Time Travel",
+      "aliases": ["time slip", "temporal loop"],
+      "common_in_genres": ["Science Fiction", "Romance", "Historical Fiction", "Fantasy", "Young Adult"]
+    },
+    {
+      "id": "amnesia",
+      "name": "Amnesia",
+      "aliases": ["memory loss", "forgotten identity"],
+      "common_in_genres": ["Thriller", "Romance", "Mystery", "Science Fiction", "Suspense"]
+    }
+  ]
+}

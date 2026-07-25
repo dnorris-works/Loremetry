@@ -11,7 +11,7 @@ FROM rust:1.86-bookworm AS rust
 WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
 RUN cargo build --release -p loremetry-web \
     && cp target/release/loremetry-web /build/loremetry-web

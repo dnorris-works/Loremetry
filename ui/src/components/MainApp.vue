@@ -11,6 +11,7 @@ import {
   reportsKey, seriesKey, showPanelKey, openManuscriptEditorKey,
 } from '../injectionKeys';
 import type { Story, Finding, Series } from '../types';
+import { isDesktopApp } from '../platform';
 
 import TitleBar from './TitleBar.vue';
 import Sidebar from './Sidebar.vue';
@@ -170,7 +171,12 @@ function openStoryForm(story: Story | null): void {
 }
 
 function onStoryCreated(): void {
-  openSources(true);
+  if (isDesktopApp()) {
+    bumpFileTree();
+    showPanel('analyzer');
+  } else {
+    openSources(true);
+  }
 }
 
 const editingSeries = ref<Series | null>(null);
@@ -205,6 +211,9 @@ watch(() => analysisCtx.isWorking.value, (working, wasWorking) => {
 
 onMounted(() => {
   void loadReportTypes({ force: true });
+  if (isDesktopApp()) {
+    void settingsCtx.loadFolderStructure();
+  }
   void storiesCtx.loadStories().then(() => {
     const folder = storiesCtx.activeFolder.value;
     if (folder) {

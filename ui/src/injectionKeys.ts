@@ -24,9 +24,9 @@ export interface StoriesContext {
   activeFolder: ComputedRef<string>;
   loadStories: () => Promise<void>;
   setActiveStory: (id: string | null) => void;
-  addStory: (name: string) => Promise<StoriesResult>;
-  initStory: (name: string) => Promise<StoriesResult>;
-  updateStory: (id: string, name: string, biblePath?: string) => Promise<StoriesResult>;
+  addStory: (name: string, folder?: string) => Promise<StoriesResult>;
+  initStory: (name: string, parentFolder?: string) => Promise<StoriesResult>;
+  updateStory: (id: string, name: string, folderOrBible?: string, biblePath?: string) => Promise<StoriesResult>;
   deleteStory: (id: string) => Promise<StoriesResult>;
 }
 

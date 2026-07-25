@@ -7,6 +7,7 @@ import {
   registerAuthRequiredHandler,
   setAppSessionActive,
 } from '../api';
+import { isDesktopApp } from '../platform';
 
 export type MeResponse = {
   id: string;
@@ -103,6 +104,10 @@ export function useAuth() {
   const isSignedIn = computed(() => enteredApp.value);
 
   async function loadAuthConfig(): Promise<void> {
+    if (isDesktopApp()) {
+      clerkEnabled.value = false;
+      return;
+    }
     try {
       const res = await fetch('/api/auth/config');
       const data = await res.json();
@@ -114,6 +119,11 @@ export function useAuth() {
   }
 
   async function restoreSession(): Promise<void> {
+    if (isDesktopApp()) {
+      enteredApp.value = true;
+      setAppSessionActive(true);
+      return;
+    }
     restoringSession.value = true;
     try {
       await refreshMe();

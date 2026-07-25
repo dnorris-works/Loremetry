@@ -4,6 +4,9 @@ import AuthPage from './components/AuthPage.vue';
 import MainApp from './components/MainApp.vue';
 import ClerkTokenWire from './components/ClerkTokenWire.vue';
 import { useAuth, syncBootClerkConfig } from './composables/useAuth';
+import { isDesktopApp } from './platform';
+
+const desktop = isDesktopApp();
 
 const props = defineProps<{
   clerkEnabled?: boolean;
@@ -27,7 +30,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <ClerkTokenWire v-if="props.clerkEnabled" />
-  <MainApp v-if="enteredApp" />
+  <ClerkTokenWire v-if="props.clerkEnabled && !desktop" />
+  <MainApp v-if="enteredApp || desktop" />
   <AuthPage v-else />
 </template>

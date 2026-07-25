@@ -4,6 +4,8 @@
 *.db
 ui/node_modules/
 ui/dist/
+src-tauri/target/
+src-tauri/gen/
 .DS_Store
 .env
 .env.*
