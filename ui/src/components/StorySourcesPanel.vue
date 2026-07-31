@@ -471,7 +471,7 @@ function finishWizard(): void {
 
 .wizard-step.active .wizard-step-num {
   background: var(--accent);
-  color: #fff;
+  color: var(--color-on-accent);
 }
 
 .sources-loading {
@@ -587,7 +587,7 @@ function finishWizard(): void {
 }
 
 .doc-delete:hover {
-  color: var(--danger, #c44);
+  color: var(--danger);
 }
 
 .ref-subsection {
@@ -632,7 +632,7 @@ function finishWizard(): void {
 }
 
 .form-error {
-  color: var(--danger, #c44);
+  color: var(--danger);
   font-size: 12px;
   margin-top: 8px;
 }
@@ -649,7 +649,7 @@ function finishWizard(): void {
   background: var(--accent);
   border: none;
   border-radius: var(--radius);
-  color: #fff;
+  color: var(--color-on-accent);
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;

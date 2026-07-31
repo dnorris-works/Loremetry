@@ -369,9 +369,9 @@ async function onDelete(): Promise<void> {
   margin-bottom: 4px;
 }
 
-.mv-finding-severity.sev-minor { color: #7a7a7a; }
-.mv-finding-severity.sev-moderate { color: #e0a020; }
-.mv-finding-severity.sev-major { color: #e74c3c; }
+.mv-finding-severity.sev-minor { color: var(--color-text-tertiary); }
+.mv-finding-severity.sev-moderate { color: var(--color-warning); }
+.mv-finding-severity.sev-major { color: var(--color-danger); }
 
 .mv-finding-why {
   font-size: 13px;
@@ -388,7 +388,7 @@ async function onDelete(): Promise<void> {
   padding: 8px 0;
 }
 
-.mv-error { color: #e74c3c; font-size: 12px; }
+.mv-error { color: var(--color-danger); font-size: 12px; }
 
 .mv-suggestion-content { flex: 1; }
 
@@ -466,7 +466,7 @@ async function onDelete(): Promise<void> {
   background: var(--accent);
   border: none;
   border-radius: var(--radius);
-  color: #fff;
+  color: var(--color-on-accent);
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;

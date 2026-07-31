@@ -255,7 +255,7 @@ onUnmounted(() => {
   background: var(--accent);
   border: none;
   border-radius: var(--radius);
-  color: #fff;
+  color: var(--color-on-accent);
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
@@ -273,11 +273,11 @@ onUnmounted(() => {
 }
 
 .btn-danger {
-  background: #c0392b;
-  color: #fff;
+  background: var(--danger);
+  color: var(--color-on-accent);
 }
 
-.btn-danger:hover { background: #a93226; }
+.btn-danger:hover { background: var(--color-danger-hover); }
 
 .btn-close {
   background: none;

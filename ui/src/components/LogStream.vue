@@ -96,7 +96,7 @@ const lines = computed(() => analysisCtx.logLines.value);
 
 .clear-log:hover {
   color: var(--danger);
-  background: rgba(207, 102, 121, 0.1);
+  background: var(--color-log-error-bg);
 }
 
 .log-stream-pane {
@@ -166,16 +166,15 @@ const lines = computed(() => analysisCtx.logLines.value);
 
 .log-success .log-icon { color: var(--success); }
 .log-success .log-text { color: var(--success); }
-.log-success { background: rgba(76, 175, 125, 0.06); }
+.log-success { background: var(--color-log-success-bg); }
 
 .log-error .log-icon { color: var(--danger); }
 .log-error .log-text { color: var(--danger); }
-.log-error { background: rgba(207, 102, 121, 0.08); }
+.log-error { background: var(--color-log-error-bg); }
 
 .log-warn .log-icon { color: var(--warning); }
 .log-warn .log-text { color: var(--color-warning); }
-.log-warn { background: color-mix(in srgb, var(--color-warning) 10%, transparent); }
-.log-warn { background: rgba(245, 166, 35, 0.06); }
+.log-warn { background: var(--color-log-warn-bg); }
 
 .log-item {
   color: var(--text);

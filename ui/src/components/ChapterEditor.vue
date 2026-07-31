@@ -447,7 +447,7 @@ onBeforeUnmount(() => {
 }
 
 .status-saved {
-  color: #27ae60;
+  color: var(--color-success);
 }
 
 .status-dirty {
@@ -510,8 +510,8 @@ onBeforeUnmount(() => {
 }
 
 .editor-wrapper :deep(.chapter-editor-content mark) {
-  background: rgba(231, 76, 60, 0.15);
-  color: #e74c3c;
+  background: var(--color-mark-highlight-bg);
+  color: var(--color-danger);
   font-weight: 600;
   padding: 1px 2px;
   border-radius: 2px;
@@ -574,9 +574,9 @@ onBeforeUnmount(() => {
   font-size: 11px;
 }
 
-.coach-pill.coach-adverb { background: rgba(155, 89, 182, 0.2); color: #9b59b6; }
-.coach-pill.coach-passive { background: rgba(39, 174, 96, 0.2); color: #27ae60; }
-.coach-pill.coach-hard { background: rgba(241, 196, 15, 0.35); color: #b7950b; }
-.coach-pill.coach-very-hard { background: rgba(231, 76, 60, 0.25); color: #c0392b; }
-.coach-pill.coach-complex { background: rgba(52, 152, 219, 0.2); color: #2980b9; }
+.coach-pill.coach-adverb { background: color-mix(in srgb, var(--color-coach-adverb) 20%, transparent); color: var(--color-coach-adverb); }
+.coach-pill.coach-passive { background: color-mix(in srgb, var(--color-success) 20%, transparent); color: var(--color-success); }
+.coach-pill.coach-hard { background: color-mix(in srgb, var(--color-warning) 35%, transparent); color: var(--color-warning); }
+.coach-pill.coach-very-hard { background: color-mix(in srgb, var(--color-danger) 25%, transparent); color: var(--color-danger); }
+.coach-pill.coach-complex { background: color-mix(in srgb, var(--color-info) 20%, transparent); color: var(--color-info); }
 </style>

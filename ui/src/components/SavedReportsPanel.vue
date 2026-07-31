@@ -124,7 +124,7 @@ watch(() => storiesCtx.activeFolder.value, (folder) => {
 .saved-report-delete {
   background: none;
   border: none;
-  color: var(--danger, #c44);
+  color: var(--danger);
   cursor: pointer;
   font-size: 16px;
   line-height: 1;

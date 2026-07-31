@@ -325,7 +325,7 @@ onMounted(() => {
 
   #app-root.sidebar-drawer-open :deep(#sidebar) {
     transform: translateX(0);
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.35);
+    box-shadow: 4px 0 24px var(--color-shadow);
   }
 
   .sidebar-backdrop {
@@ -333,7 +333,7 @@ onMounted(() => {
     position: fixed;
     inset: var(--titlebar-h, 28px) 0 0 0;
     z-index: 199;
-    background: rgba(0, 0, 0, 0.45);
+    background: var(--color-backdrop);
   }
 }
 </style>

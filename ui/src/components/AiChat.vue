@@ -252,7 +252,7 @@ watch(() => props.chapterTitle, () => {
 
 .chat-msg.user .chat-msg-text {
   background: var(--accent);
-  color: #fff;
+  color: var(--color-on-accent);
   border-radius: 12px 12px 2px 12px;
   padding: 8px 12px;
   font-size: 13px;
@@ -299,7 +299,7 @@ watch(() => props.chapterTitle, () => {
 }
 
 .chat-error {
-  color: #e74c3c;
+  color: var(--color-danger);
   font-size: 11px;
   padding: 4px 14px;
   flex-shrink: 0;
@@ -350,8 +350,8 @@ watch(() => props.chapterTitle, () => {
 }
 
 .pin-clear:hover {
-  border-color: #e74c3c;
-  color: #e74c3c;
+  border-color: var(--color-danger);
+  color: var(--color-danger);
 }
 
 .chat-input-row {
@@ -385,7 +385,7 @@ watch(() => props.chapterTitle, () => {
   background: var(--accent);
   border: none;
   border-radius: var(--radius);
-  color: #fff;
+  color: var(--color-on-accent);
   font-size: 12px;
   font-weight: 600;
   padding: 8px 14px;

@@ -1094,7 +1094,7 @@ async function onRemoveStale(): Promise<void> {
 .model-sort-btn.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--color-on-accent);
 }
 
 .model-assignments {
@@ -1152,7 +1152,7 @@ async function onRemoveStale(): Promise<void> {
   background: var(--accent);
   border: none;
   border-radius: var(--radius);
-  color: #fff;
+  color: var(--color-on-accent);
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;

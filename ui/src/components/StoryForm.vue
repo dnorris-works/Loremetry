@@ -175,7 +175,7 @@ async function onDelete(): Promise<void> {
   background: var(--accent);
   border: none;
   border-radius: var(--radius);
-  color: #fff;
+  color: var(--color-on-accent);
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
@@ -198,9 +198,9 @@ async function onDelete(): Promise<void> {
 }
 
 .btn-danger {
-  background: #c0392b;
-  color: #fff;
+  background: var(--danger);
+  color: var(--color-on-accent);
 }
 
-.btn-danger:hover { background: #a93226; }
+.btn-danger:hover { background: var(--color-danger-hover); }
 </style>

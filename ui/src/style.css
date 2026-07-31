@@ -31,6 +31,16 @@
 
   --color-on-accent: #FFFFFF;
 
+  --color-danger-hover: #9A2F2F;
+  --color-info: #3B6E9E;
+  --color-coach-adverb: #8B5FA8;
+  --color-shadow: color-mix(in srgb, var(--color-text-primary) 30%, transparent);
+  --color-backdrop: color-mix(in srgb, var(--color-text-primary) 45%, transparent);
+  --color-log-success-bg: color-mix(in srgb, var(--color-success) 6%, transparent);
+  --color-log-error-bg: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  --color-log-warn-bg: color-mix(in srgb, var(--color-warning) 6%, transparent);
+  --color-mark-highlight-bg: color-mix(in srgb, var(--color-danger) 15%, transparent);
+
   /* Semantic aliases (used across the app) */
   --bg: var(--color-bg);
   --surface: var(--color-bg-elevated);
@@ -46,6 +56,8 @@
   --success: var(--color-success);
   --warning: var(--color-warning);
   --danger: var(--color-danger);
+  --danger-hover: var(--color-danger-hover);
+  --info: var(--color-info);
   --overlay: color-mix(in srgb, var(--color-accent) 6%, transparent);
   --overlay-border: color-mix(in srgb, var(--color-border-strong) 40%, transparent);
 
@@ -82,6 +94,12 @@
   --color-tier-free: #6B7280;
   --color-tier-subscriber: #C05C63;
   --color-tier-locked: #3D4652;
+
+  --color-danger-hover: #B85555;
+  --color-info: #5A8FC4;
+  --color-coach-adverb: #A67BC4;
+  --color-shadow: color-mix(in srgb, var(--color-text-primary) 35%, transparent);
+  --color-backdrop: color-mix(in srgb, var(--color-text-primary) 45%, transparent);
 
   --overlay: color-mix(in srgb, var(--color-accent) 10%, transparent);
   --overlay-border: color-mix(in srgb, var(--color-border-strong) 50%, transparent);
@@ -147,6 +165,17 @@ textarea::placeholder {
 .report-color-warning { color: var(--color-warning); }
 .report-color-danger { color: var(--color-danger); }
 .report-color-muted { color: var(--color-text-tertiary); }
+
+.report-severity-minor,
+.sdt-severity.severity-minor { color: var(--color-text-tertiary); }
+.report-severity-moderate,
+.sdt-severity.severity-moderate { color: var(--color-warning); }
+.report-severity-major,
+.sdt-severity.severity-major { color: var(--color-danger); }
+
+.verdict-contradiction { color: var(--color-danger); font-weight: 600; }
+.verdict-possible { color: var(--color-warning); font-weight: 600; }
+.verdict-likely_intentional { color: var(--color-text-tertiary); font-weight: 600; }
 
 /* ── Layout ── */
 #app {
@@ -269,7 +298,7 @@ textarea::placeholder {
 }
 .btn-action-stop {
   background: var(--danger);
-  color: white;
+  color: var(--color-on-accent);
   font-size: 12px;
   padding: 9px 12px;
   border-radius: var(--radius);
@@ -406,7 +435,7 @@ textarea::placeholder {
 .btn-danger {
   background: var(--danger);
 }
-.btn-danger:hover { background: var(--color-accent-hover); }
+.btn-danger:hover { background: var(--color-danger-hover); }
 
 /* ── Sidebar layout fix ── */
 #sidebar {
@@ -741,7 +770,7 @@ textarea::placeholder {
   color: var(--color-on-accent);
   border: none;
 }
-.btn-danger:hover { background: var(--color-accent-hover); }
+.btn-danger:hover { background: var(--color-danger-hover); }
 .reports-viewer {
   display: flex;
   flex-direction: column;
@@ -873,7 +902,7 @@ textarea::placeholder {
 .top-book-link:hover { text-decoration: underline; }
 .top-book-link img {
   border-radius: 3px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  box-shadow: 0 1px 3px var(--color-shadow);
 }
 .report-table .keyword-cell {
   font-family: monospace;
@@ -1143,23 +1172,23 @@ textarea::placeholder {
 }
 .chapter-editor-content .coach-mark.coach-adverb,
 .chapter-editor-content .coach-adverb {
-  background: rgba(155, 89, 182, 0.35) !important;
+  background: color-mix(in srgb, var(--color-coach-adverb) 35%, transparent) !important;
 }
 .chapter-editor-content .coach-mark.coach-passive,
 .chapter-editor-content .coach-passive {
-  background: rgba(39, 174, 96, 0.3) !important;
+  background: color-mix(in srgb, var(--color-success) 30%, transparent) !important;
 }
 .chapter-editor-content .coach-mark.coach-hard,
 .chapter-editor-content .coach-hard {
-  background: rgba(241, 196, 15, 0.45) !important;
+  background: color-mix(in srgb, var(--color-warning) 45%, transparent) !important;
 }
 .chapter-editor-content .coach-mark.coach-very-hard,
 .chapter-editor-content .coach-very-hard {
-  background: rgba(231, 76, 60, 0.35) !important;
+  background: color-mix(in srgb, var(--color-danger) 35%, transparent) !important;
 }
 .chapter-editor-content .coach-mark.coach-complex,
 .chapter-editor-content .coach-complex {
-  background: rgba(52, 152, 219, 0.3) !important;
+  background: color-mix(in srgb, var(--color-info) 30%, transparent) !important;
 }
 
 .readability-easy { color: var(--color-success); }

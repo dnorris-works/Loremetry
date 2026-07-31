@@ -39,7 +39,7 @@ const showOperator = computed(() => {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: var(--bg, #0f0f12);
+  background: var(--bg);
 }
 
 .auth-page-inner {

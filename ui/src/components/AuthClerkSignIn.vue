@@ -57,7 +57,7 @@ watch(
 
 .auth-error {
   text-align: center;
-  color: var(--danger, #c44);
+  color: var(--danger);
   font-size: 0.85rem;
   margin: 12px 0 0;
   line-height: 1.45;

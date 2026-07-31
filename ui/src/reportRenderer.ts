@@ -655,8 +655,8 @@ function renderKeywordSearch(data: any): string {
   let html = `<p class="report-hint">${keywords.length} keywords analyzed</p>`;
   html += `<table class="report-table"><thead><tr><th>Keyword</th><th>Est. Monthly Searches</th><th>Competition</th><th>Est. Earnings</th></tr></thead><tbody>`;
   for (const k of keywords) {
-    const compClass = k.competition === 'Low' ? 'style="color:#27ae60"' :
-                      k.competition === 'High' ? 'style="color:#e74c3c"' : '';
+    const compClass = k.competition === 'Low' ? 'class="report-color-success"' :
+                      k.competition === 'High' ? 'class="report-color-danger"' : '';
     html += `<tr>
       <td class="keyword-cell">${esc(k.keyword)}</td>
       <td>${esc(k.searches)}</td>
@@ -751,8 +751,8 @@ function renderZeigarnik(data: any): string {
     html += `<section class="report-section"><h3>Chapter Endings</h3>`;
     html += `<table class="report-table"><thead><tr><th>#</th><th>Chapter</th><th>Words</th><th>Questions</th><th>Ending</th><th>Tension</th></tr></thead><tbody>`;
     chapters.forEach((c: any, i: number) => {
-      const endingClass = c.ending_type === 'cliffhanger' ? 'style="color:#e74c3c"' :
-                          c.ending_type === 'resolved' ? 'style="color:#27ae60"' : '';
+      const endingClass = c.ending_type === 'cliffhanger' ? 'class="report-color-danger"' :
+                          c.ending_type === 'resolved' ? 'class="report-color-success"' : '';
       html += `<tr>
         <td>${i + 1}</td>
         <td><strong>${esc(c.title || c.file)}</strong></td>
@@ -849,8 +849,8 @@ function renderContinuity(data: any): string {
   html += `<section class="report-section"><h3>Summary</h3>`;
   html += `<table class="report-table"><tbody>`;
   html += `<tr><td><strong>Total findings</strong></td><td>${summary.total_findings ?? 0}</td></tr>`;
-  html += `<tr><td><strong>Contradictions</strong></td><td style="color:#e74c3c"><strong>${summary.contradictions ?? 0}</strong></td></tr>`;
-  html += `<tr><td><strong>Possible issues</strong></td><td style="color:#e0a020">${summary.possible ?? 0}</td></tr>`;
+  html += `<tr><td><strong>Contradictions</strong></td><td class="report-color-danger"><strong>${summary.contradictions ?? 0}</strong></td></tr>`;
+  html += `<tr><td><strong>Possible issues</strong></td><td class="report-color-warning">${summary.possible ?? 0}</td></tr>`;
   html += `<tr><td><strong>Likely intentional / non-issues</strong></td><td class="muted">${summary.likely_intentional ?? 0}</td></tr>`;
   html += `</tbody></table></section>`;
 
@@ -864,19 +864,19 @@ function renderContinuity(data: any): string {
     possible: 'Possible',
     likely_intentional: 'Likely intentional',
   };
-  const verdictColor: Record<string, string> = {
-    contradiction: '#e74c3c',
-    possible: '#e0a020',
-    likely_intentional: '#7a7a7a',
+  const verdictClass: Record<string, string> = {
+    contradiction: 'verdict-contradiction',
+    possible: 'verdict-possible',
+    likely_intentional: 'verdict-likely_intentional',
   };
 
   html += `<section class="report-section"><h3>Findings</h3>`;
   findings.forEach((f: any, idx: number) => {
-    const color = verdictColor[f.verdict] || '#7a7a7a';
+    const verdictCls = verdictClass[f.verdict] || 'verdict-likely_intentional';
     const label = verdictLabel[f.verdict] || esc(f.verdict);
     html += `<div class="genre-block">`;
     html += `<strong>${esc(f.entity)}</strong> &mdash; ${esc(f.attribute)} `;
-    html += `<span style="color:${color}; font-weight:600;">[${label}, ${f.confidence}%]</span>`;
+    html += `<span class="${verdictCls}">[${label}, ${f.confidence}%]</span>`;
     if (f.verdict === 'contradiction' || f.verdict === 'possible') {
       html += ` <a href="#" class="suggest-fix-link" data-finding-index="${idx}">Suggest fix</a>`;
     }
@@ -930,7 +930,7 @@ function renderPassageViolations(data: any, opts: { emptyMsg: string; linkClass:
   html += `<table class="report-table"><tbody>`;
   html += `<tr><td><strong>Chapters checked</strong></td><td>${summary.chapters_checked ?? 0}</td></tr>`;
   html += `<tr><td><strong>Chapters with flags</strong></td><td>${summary.chapters_with_violations ?? 0}</td></tr>`;
-  html += `<tr><td><strong>Total flags</strong></td><td style="color:#e74c3c"><strong>${summary.total_violations ?? 0}</strong></td></tr>`;
+  html += `<tr><td><strong>Total flags</strong></td><td class="report-color-danger"><strong>${summary.total_violations ?? 0}</strong></td></tr>`;
   html += `</tbody></table></section>`;
 
   if (!chapters.length) {
@@ -938,10 +938,10 @@ function renderPassageViolations(data: any, opts: { emptyMsg: string; linkClass:
     return html;
   }
 
-  const severityColor: Record<string, string> = {
-    minor: '#7a7a7a',
-    moderate: '#e0a020',
-    major: '#e74c3c',
+  const severityClass: Record<string, string> = {
+    minor: 'severity-minor',
+    moderate: 'severity-moderate',
+    major: 'severity-major',
   };
 
   chapters.forEach((ch: any, chIdx: number) => {
@@ -950,9 +950,9 @@ function renderPassageViolations(data: any, opts: { emptyMsg: string; linkClass:
     html += `<h3>${esc(ch.title || ch.file)} <span class="muted">(${violations.length})</span></h3>`;
 
     violations.forEach((v: any, vIdx: number) => {
-      const color = severityColor[v.severity] || '#7a7a7a';
+      const sevCls = severityClass[v.severity] || 'severity-minor';
       html += `<div class="sdt-violation">`;
-      html += `<div class="sdt-severity" style="color:${color}">${esc(v.severity)} <a href="#" class="${opts.linkClass}" data-chapter-index="${chIdx}" data-violation-index="${vIdx}">Suggest fix</a></div>`;
+      html += `<div class="sdt-severity ${sevCls}">${esc(v.severity)} <a href="#" class="${opts.linkClass}" data-chapter-index="${chIdx}" data-violation-index="${vIdx}">Suggest fix</a></div>`;
       html += `<div class="sdt-passage">`;
       if (v.context) {
         const ctx = v.context as string;

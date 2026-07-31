@@ -728,7 +728,7 @@ function formatTimestamp(ts: string): string {
 }
 
 .report-version-item .version-delete:hover {
-  color: #e74c3c;
+  color: var(--danger);
   background: var(--surface2);
 }
 

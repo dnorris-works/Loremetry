@@ -186,10 +186,10 @@ async function onDelete(): Promise<void> {
 
 .form-error { color: var(--danger); font-size: 12px; margin-bottom: 12px; }
 .form-actions { display: flex; gap: 8px; margin-top: 16px; }
-.btn { background: var(--accent); border: none; border-radius: var(--radius); color: #fff; cursor: pointer; font-size: 13px; font-weight: 600; padding: 9px 18px; transition: background 0.15s; }
+.btn { background: var(--accent); border: none; border-radius: var(--radius); color: var(--color-on-accent); cursor: pointer; font-size: 13px; font-weight: 600; padding: 9px 18px; transition: background 0.15s; }
 .btn:hover { background: var(--accent-dim); }
 .btn-secondary { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); }
 .btn-secondary:hover { color: var(--text); border-color: var(--accent); }
-.btn-danger { background: #c0392b; color: #fff; }
-.btn-danger:hover { background: #a93226; }
+.btn-danger { background: var(--danger); color: var(--color-on-accent); }
+.btn-danger:hover { background: var(--color-danger-hover); }
 </style>

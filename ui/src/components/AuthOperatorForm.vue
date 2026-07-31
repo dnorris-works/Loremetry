@@ -76,7 +76,7 @@ async function onOperatorSubmit(): Promise<void> {
 }
 
 .operator-error {
-  color: var(--danger, #c44);
+  color: var(--danger);
   font-size: 0.85rem;
   margin: 0;
 }
