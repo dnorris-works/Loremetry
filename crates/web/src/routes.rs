@@ -2,7 +2,7 @@ use axum::middleware;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::extract::{Path, Query};
 use axum::response::IntoResponse;
-use axum::routing::{get, post, put};
+use axum::routing::{get, patch, post, put};
 use axum::{Json, Router};
 use loremetry_core::analysis::pipeline;
 use loremetry_core::canopy::{self, MarketIntelRequest};
@@ -53,6 +53,7 @@ pub fn build_router(state: AppState) -> Router {
 
     let protected = Router::new()
         .route("/me", get(auth::auth_me))
+        .route("/me/preferences", patch(auth::update_preferences))
         // Primary: generic invoke bridge
         .route("/invoke", post(invoke::invoke_handler))
         // SSE

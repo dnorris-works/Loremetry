@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue';
-import { invoke } from '../api';
+import { invoke, buildAuthHeaders, getOperatorBypassToken } from '../api';
 import type { ModelInfo, ModelsResult } from '../types';
 
 // ── AI function model assignments ─────────────────────────────────────────────
@@ -66,19 +66,57 @@ function loadAssignments(): ModelAssignments {
 
 export type ThemeMode = 'dark' | 'light';
 
+const THEME_KEY = 'theme';
+
 function applyTheme(mode: ThemeMode): void {
   document.documentElement.setAttribute('data-theme', mode);
+  document.body.setAttribute('data-theme', mode);
 }
 
-const theme = ref<ThemeMode>(
-  (localStorage.getItem('theme') as ThemeMode) === 'light' ? 'light' : 'dark'
-);
+function readStoredTheme(): ThemeMode {
+  const stored = localStorage.getItem(THEME_KEY);
+  if (stored === 'dark' || stored === 'light') return stored;
+  return 'light';
+}
+
+const theme = ref<ThemeMode>(readStoredTheme());
 applyTheme(theme.value);
 
-function setTheme(mode: ThemeMode): void {
+async function saveThemeToServer(mode: ThemeMode): Promise<void> {
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const bypass = getOperatorBypassToken();
+    if (bypass) {
+      headers['x-loremetry-admin-bypass'] = bypass;
+    }
+    const authHeaders = await buildAuthHeaders();
+    authHeaders.forEach((v, k) => { headers[k] = v; });
+    if (!bypass && !headers.Authorization) return;
+
+    await fetch('/api/me/preferences', {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ theme: mode }),
+    });
+  } catch {
+    /* localStorage still holds preference */
+  }
+}
+
+function setTheme(mode: ThemeMode, opts?: { skipServer?: boolean }): void {
   theme.value = mode;
-  localStorage.setItem('theme', mode);
+  localStorage.setItem(THEME_KEY, mode);
   applyTheme(mode);
+  if (!opts?.skipServer) {
+    void saveThemeToServer(mode);
+  }
+}
+
+/** Apply account theme after session restore (server wins over stale localStorage). */
+export function hydrateThemeFromAccount(accountTheme: string | undefined | null): void {
+  if (accountTheme === 'light' || accountTheme === 'dark') {
+    setTheme(accountTheme, { skipServer: true });
+  }
 }
 
 const provider = ref(localStorage.getItem('provider') || 'tokenmix');
@@ -119,17 +157,19 @@ async function fetchModels(): Promise<{ success: boolean; error: string }> {
 }
 
 async function saveSettings(): Promise<void> {
-  localStorage.setItem('theme', theme.value);
+  localStorage.setItem(THEME_KEY, theme.value);
   localStorage.setItem('provider', provider.value);
   localStorage.setItem('modelAssignments', JSON.stringify(modelAssignments.value));
   localStorage.setItem('model', modelAssignments.value.default);
   localStorage.setItem('proseModel', modelAssignments.value.prose);
+  void saveThemeToServer(theme.value);
 }
 
 export function useSettings() {
   return {
     theme,
     setTheme,
+    hydrateThemeFromAccount,
     provider,
     model,
     proseModel,

@@ -472,12 +472,12 @@ onBeforeUnmount(() => {
 
 .editor-wrapper :deep(.chapter-editor-content)::selection,
 .editor-wrapper :deep(.chapter-editor-content) *::selection {
-  background: rgba(232, 97, 44, 0.25);
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
 }
 
 .editor-wrapper :deep(.chapter-editor-content:not(:focus))::selection,
 .editor-wrapper :deep(.chapter-editor-content:not(:focus)) *::selection {
-  background: rgba(232, 97, 44, 0.15);
+  background: var(--color-accent-subtle);
 }
 
 .editor-wrapper :deep(.chapter-editor-content p) {

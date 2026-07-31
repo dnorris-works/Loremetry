@@ -160,7 +160,7 @@ const lines = computed(() => analysisCtx.logLines.value);
   font-weight: 600;
   margin-top: 8px;
   padding: 5px 10px;
-  background: rgba(232, 97, 44, 0.08);
+  background: var(--color-accent-subtle);
   border-left: 3px solid var(--accent);
 }
 
@@ -172,8 +172,9 @@ const lines = computed(() => analysisCtx.logLines.value);
 .log-error .log-text { color: var(--danger); }
 .log-error { background: rgba(207, 102, 121, 0.08); }
 
-.log-warn .log-icon { color: #f5a623; }
-.log-warn .log-text { color: #dda040; }
+.log-warn .log-icon { color: var(--warning); }
+.log-warn .log-text { color: var(--color-warning); }
+.log-warn { background: color-mix(in srgb, var(--color-warning) 10%, transparent); }
 .log-warn { background: rgba(245, 166, 35, 0.06); }
 
 .log-item {

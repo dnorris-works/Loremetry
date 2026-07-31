@@ -47,3 +47,25 @@ pub async fn email_by_id(pool: &PgPool, id: Uuid) -> Option<String> {
         .ok()
         .flatten()
 }
+
+pub async fn theme_preference_by_id(pool: &PgPool, id: Uuid) -> Option<String> {
+    sqlx::query_scalar("SELECT theme_preference FROM users WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+}
+
+pub async fn set_theme_preference(pool: &PgPool, id: Uuid, theme: &str) -> Result<(), String> {
+    if theme != "light" && theme != "dark" {
+        return Err("theme must be light or dark".into());
+    }
+    sqlx::query("UPDATE users SET theme_preference = $2 WHERE id = $1")
+        .bind(id)
+        .bind(theme)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}

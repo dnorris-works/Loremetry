@@ -11,6 +11,8 @@ import { useCraftReportGroups } from '../composables/useCraftReportGroups';
 import { getChapterWordStats } from '../lib/manuscriptCache';
 import { estimateReportCosts } from '../lib/estimateCosts';
 import type { ReportTypeDef, Series } from '../types';
+import { useAuth } from '../composables/useAuth';
+import { reportAccessBadge, reportAccessLabel, isSubscriberRole } from '../lib/reportAccess';
 
 type VisibleReport = ReportTypeDef & { exists: boolean };
 
@@ -31,6 +33,15 @@ const analysisCtx = inject(analysisKey)!;
 const seriesCtx = inject(seriesKey)!;
 const platformCtx = inject(platformKey)!;
 const settings = useSettings();
+const auth = useAuth();
+
+const isSubscriber = computed(() =>
+  isSubscriberRole(auth.me.value?.role ?? '', auth.isAdmin.value),
+);
+
+function tierForReport(report: VisibleReport) {
+  return reportAccessBadge(report.min_tier, isSubscriber.value);
+}
 
 // ── Report types from DB ──────────────────────────────────────────────────────
 
@@ -400,18 +411,26 @@ function onStop(): void {
           v-for="report in section.reports"
           :key="report.id"
           class="report-card"
-          :class="{ disabled: reportsLocked || section.disabled }"
+          :class="{
+            disabled: reportsLocked || section.disabled || tierForReport(report) === 'locked',
+          }"
         >
           <div class="report-card-check">
             <input
               type="checkbox"
               :checked="selected.includes(report.id)"
-              :disabled="reportsLocked || section.disabled"
+              :disabled="reportsLocked || section.disabled || tierForReport(report) === 'locked'"
               @change="toggleReport(report.id)"
             />
           </div>
           <div class="report-card-content">
-            <div class="report-card-label">{{ report.label }}</div>
+            <div class="report-card-label-row">
+              <div class="report-card-label">{{ report.label }}</div>
+              <span
+                class="tier-badge"
+                :class="`tier-badge--${tierForReport(report)}`"
+              >{{ reportAccessLabel(tierForReport(report)) }}</span>
+            </div>
             <div class="report-card-desc">{{ report.description }}</div>
             <div class="report-card-meta">
               <span v-if="report.exists" class="report-card-exists">✓ exists</span>
@@ -531,7 +550,7 @@ function onStop(): void {
 }
 
 .report-cards-error {
-  color: var(--danger, #c44);
+  color: var(--danger);
 }
 
 .report-card {
@@ -589,6 +608,13 @@ function onStop(): void {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+.report-card-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .report-card-label {
@@ -677,7 +703,7 @@ function onStop(): void {
 
 .btn-stop {
   background: var(--danger);
-  color: white;
+  color: var(--color-on-accent);
   font-size: 12px;
   padding: 9px 12px;
   border-radius: var(--radius);
@@ -687,7 +713,7 @@ function onStop(): void {
 }
 
 .btn-stop:hover {
-  background: #a04050;
+  background: var(--color-accent-hover);
 }
 
 .force-resummarize-label {
@@ -761,8 +787,8 @@ function onStop(): void {
   gap: 8px;
   margin-top: 10px;
   padding: 6px 12px;
-  background: rgba(232, 97, 44, 0.06);
-  border: 1px solid rgba(232, 97, 44, 0.15);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   font-size: 12px;
   color: var(--accent);
@@ -771,7 +797,7 @@ function onStop(): void {
 .spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(232, 97, 44, 0.3);
+  border: 2px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;

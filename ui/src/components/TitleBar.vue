@@ -1,12 +1,21 @@
 <script setup lang="ts">
 import { inject } from 'vue';
 import { useAuth } from '../composables/useAuth';
+import { settingsKey } from '../injectionKeys';
+import type { ThemeMode } from '../composables/useSettings';
 
 const auth = useAuth();
+const settingsCtx = inject(settingsKey);
 const toggleSidebar = inject<() => void>('toggleSidebar');
 
 function onSignOut(): void {
   void auth.signOut();
+}
+
+function toggleTheme(): void {
+  if (!settingsCtx) return;
+  const next: ThemeMode = settingsCtx.theme.value === 'dark' ? 'light' : 'dark';
+  settingsCtx.setTheme(next);
 }
 </script>
 
@@ -23,7 +32,17 @@ function onSignOut(): void {
       </button>
       <span class="titlebar-label">Loremetry</span>
     </div>
-    <button type="button" class="titlebar-btn" @click="onSignOut">Sign out</button>
+    <div class="titlebar-actions">
+      <button
+        type="button"
+        class="titlebar-btn titlebar-theme"
+        :aria-label="settingsCtx?.theme.value === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+        @click="toggleTheme"
+      >
+        {{ settingsCtx?.theme.value === 'dark' ? '☀' : '☾' }}
+      </button>
+      <button type="button" class="titlebar-btn" @click="onSignOut">Sign out</button>
+    </div>
   </header>
 </template>
 
@@ -46,6 +65,13 @@ function onSignOut(): void {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+.titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .titlebar-menu {
@@ -93,6 +119,13 @@ function onSignOut(): void {
 }
 
 .titlebar-btn:hover {
-  border-color: var(--accent, #6b8cff);
+  border-color: var(--accent);
+}
+
+.titlebar-theme {
+  min-width: 32px;
+  padding: 4px 8px;
+  font-size: 14px;
+  line-height: 1;
 }
 </style>

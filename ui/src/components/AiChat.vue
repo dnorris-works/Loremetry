@@ -308,7 +308,7 @@ watch(() => props.chapterTitle, () => {
 .chat-selection-bar {
   border-top: 1px solid var(--border);
   flex-shrink: 0;
-  background: rgba(232, 97, 44, 0.04);
+  background: var(--color-accent-subtle);
 }
 
 .chat-selection-indicator {

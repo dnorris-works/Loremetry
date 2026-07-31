@@ -8,6 +8,7 @@ use axum::http::HeaderMap;
 use axum::http::request::Parts;
 use axum::http::{header::AUTHORIZATION, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use jsonwebtoken::{decode, decode_header, jwk::JwkSet, Algorithm, DecodingKey, Validation};
 use loremetry_core::platform_secrets::PlatformSecrets;
 use loremetry_core::users;
@@ -44,6 +45,7 @@ pub struct AuthUser {
     pub db_user_id: uuid::Uuid,
     pub email: String,
     pub role: String,
+    pub theme_preference: String,
     /// Operator break-glass (admin UI + platform secrets); not stored on Clerk users.
     pub break_glass: bool,
 }
@@ -65,6 +67,9 @@ impl AuthUser {
             db_user_id: id,
             email,
             role: "subscriber".into(),
+            theme_preference: users::theme_preference_by_id(&state.ctx.db.pool, id)
+                .await
+                .unwrap_or_else(|| "light".to_string()),
             break_glass: true,
         }
     }
@@ -226,11 +231,15 @@ pub async fn resolve_auth_user(state: &AppState, headers: &HeaderMap) -> Result<
     let email = claims.email.unwrap_or_default();
     let (db_user_id, role) =
         users::upsert_clerk_user(&state.ctx.db.pool, &claims.sub, &email).await?;
+    let theme_preference = users::theme_preference_by_id(&state.ctx.db.pool, db_user_id)
+        .await
+        .unwrap_or_else(|| "light".to_string());
     Ok(AuthUser {
         clerk_id: claims.sub,
         db_user_id,
         email,
         role,
+        theme_preference,
         break_glass: false,
     })
 }
@@ -314,6 +323,7 @@ pub async fn auth_session(
             "id": user.db_user_id,
             "email": user.email,
             "role": user.role,
+            "theme": user.theme_preference,
             "isAdmin": user.is_admin(),
             "breakGlass": user.break_glass,
         })),
@@ -327,9 +337,36 @@ pub async fn auth_me(auth: Authenticated) -> impl IntoResponse {
         "id": auth.user.db_user_id,
         "email": auth.user.email,
         "role": auth.user.role,
+        "theme": auth.user.theme_preference,
         "isAdmin": auth.user.is_admin(),
         "breakGlass": auth.user.break_glass,
     }))
+}
+
+#[derive(Deserialize)]
+pub struct PreferencesBody {
+    pub theme: String,
+}
+
+/// PATCH /api/me/preferences — persist UI preferences (theme).
+pub async fn update_preferences(
+    auth: Authenticated,
+    Json(body): Json<PreferencesBody>,
+) -> impl IntoResponse {
+    if let Err(e) = users::set_theme_preference(
+        &auth.state.ctx.db.pool,
+        auth.user.db_user_id,
+        body.theme.trim(),
+    )
+    .await
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(json!({ "error": e })),
+        )
+            .into_response();
+    }
+    ok_json(json!({ "success": true, "theme": body.theme.trim() }))
 }
 
 pub fn invoke_requires_operator(cmd: &str) -> bool {

@@ -7,14 +7,15 @@
     <script>
       (function () {
         var t = localStorage.getItem('theme');
-        document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+        document.body.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
       })();
     </script>
-    <script type="module" crossorigin src="/assets/index-B6LU1HtR.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DxyV_XP7.css">
+    <script type="module" crossorigin src="/assets/index-DEsw-zx8.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Cxj_aeYr.css">
   </head>
   <body>
     <div id="app"></div>
-    <div id="error-toast" style="display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#c0392b;color:#fff;padding:10px 20px;border-radius:6px;font-size:13px;z-index:9999;max-width:80%;text-align:center;"></div>
+    <div id="error-toast" class="error-toast" style="display:none"></div>
   </body>
 </html>

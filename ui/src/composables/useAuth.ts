@@ -7,11 +7,13 @@ import {
   registerAuthRequiredHandler,
   setAppSessionActive,
 } from '../api';
+import { hydrateThemeFromAccount } from './useSettings';
 
 export type MeResponse = {
   id: string;
   email: string;
   role: string;
+  theme?: string;
   isAdmin: boolean;
   breakGlass?: boolean;
 };
@@ -81,9 +83,11 @@ async function refreshMe(): Promise<boolean> {
       id: String(data.id ?? ''),
       email: data.email ?? '',
       role: data.role ?? '',
+      theme: data.theme,
       isAdmin: Boolean(data.isAdmin),
       breakGlass: data.breakGlass,
     };
+    hydrateThemeFromAccount(data.theme);
     enteredApp.value = true;
     setAppSessionActive(true);
     sessionError.value = '';
