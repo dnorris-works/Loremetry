@@ -166,5 +166,69 @@
     "user_template": "Genre context: {genre_context}\n\nCompetitor author catalogs:\n{author_summary}",
     "max_tokens": 2500,
     "json_mode": 0
+  },
+  {
+    "id": "ai_beta_reader",
+    "label": "AI Beta Reader (chapter)",
+    "system_prompt": "Beta reader for one fiction chapter.\n\nReturn ONLY JSON: {\"reaction\":\"≤3 sentences\",\"engagement\":0-100,\"put_down_risk\":0-100,\"put_down_reasons\":[\"≤8 words, max 3\"],\"highlights\":[\"≤8 words, max 3\"],\"friction\":[\"≤8 words, max 3\"]}",
+    "user_template": "Chapter: {chapter_title}\n\n{bible}\n\n---\n\n{chapter_text}",
+    "max_tokens": 600,
+    "json_mode": 1
+  },
+  {
+    "id": "cliffhanger_score",
+    "label": "Cliffhanger Score (chapter)",
+    "system_prompt": "Score chapter ending pull.\n\nReturn ONLY JSON: {\"score\":0-100,\"ending_type\":\"cliffhanger|hook|soft_landing|resolved|mixed\",\"why\":\"≤12 words\",\"ending_snippet\":\"≤40 words\"}",
+    "user_template": "Chapter: {chapter_title}\n\nFocus on the ending.\n\n---\n\n{chapter_text}",
+    "max_tokens": 200,
+    "json_mode": 1
+  },
+  {
+    "id": "hook_strength",
+    "label": "Hook Strength",
+    "system_prompt": "You evaluate whether a browsing reader would keep reading past page one.\nAssess opening hook: intrigue, voice, stakes, clarity, momentum.\nReturn ONLY JSON:\n{\n  \"score\": <0-100>,\n  \"verdict\": \"strong|mixed|weak\",\n  \"summary\": \"<2-3 sentences>\",\n  \"strengths\": [\"...\"],\n  \"weaknesses\": [\"...\"],\n  \"first_friction_point\": \"<where a reader might stop, or empty>\"\n}",
+    "user_template": "{bible}\n\n---\n\nOpening pages:\n{manuscript}",
+    "max_tokens": 800,
+    "json_mode": 1
+  },
+  {
+    "id": "pacing_curve",
+    "label": "Pacing Curve (chapter)",
+    "system_prompt": "Rate pacing of one chapter.\n\nReturn ONLY JSON: {\"pace_score\":0-100,\"drag_risk\":0-100,\"label\":\"racing|brisk|steady|slow|dragging\",\"why\":\"≤12 words\",\"drag_spots\":[\"≤8 words, max 2\"]}",
+    "user_template": "Chapter: {chapter_title}\n\n---\n\n{chapter_text}",
+    "max_tokens": 250,
+    "json_mode": 1
+  },
+  {
+    "id": "ai_beta_reader_batch",
+    "label": "AI Beta Reader Batch",
+    "system_prompt": "Beta reader. MULTIPLE chapters.\n\nReturn ONLY JSON: {\"chapters\":{\"<FILE>\":{\"reaction\":\"≤3 sentences\",\"engagement\":0-100,\"put_down_risk\":0-100,\"put_down_reasons\":[\"max 3\"],\"highlights\":[\"max 3\"],\"friction\":[\"max 3\"]}}}\n\nRules:\n- Include EVERY FILE key. Use exact FILE as JSON key.\n- Budget ≤350 output tokens per chapter. Prefer [] over padding.",
+    "user_template": "{bible}\n\n---\n\nBeta-read {chapter_count} chapter(s).\n\n{chapters_block}",
+    "max_tokens": 600,
+    "json_mode": 1
+  },
+  {
+    "id": "cliffhanger_score_batch",
+    "label": "Cliffhanger Score Batch",
+    "system_prompt": "You score fiction chapter endings. You receive MULTIPLE chapters.\n\nFor EACH chapter, focus on the ending pull into the next chapter.\n\nReturn ONLY JSON:\n{\n  \"chapters\": {\n    \"<exact FILE key>\": {\n      \"score\": <0-100>,\n      \"ending_type\": \"cliffhanger|hook|soft_landing|resolved|mixed\",\n      \"why\": \"<one sentence>\",\n      \"ending_snippet\": \"<last ~40 words>\"\n    }\n  }\n}\n\nRules:\n- Include EVERY FILE key. Use exact FILE as JSON key.",
+    "user_template": "Score endings for {chapter_count} chapter(s).\n\n{chapters_block}",
+    "max_tokens": 200,
+    "json_mode": 1
+  },
+  {
+    "id": "pacing_curve_batch",
+    "label": "Pacing Curve Batch",
+    "system_prompt": "You rate pacing of fiction chapters. You receive MULTIPLE chapters.\n\nReturn ONLY JSON:\n{\n  \"chapters\": {\n    \"<exact FILE key>\": {\n      \"pace_score\": <0-100>,\n      \"drag_risk\": <0-100>,\n      \"label\": \"racing|brisk|steady|slow|dragging\",\n      \"why\": \"<one sentence>\",\n      \"drag_spots\": [\"...\"]\n    }\n  }\n}\n\nRules:\n- Include EVERY FILE key. Use exact FILE as JSON key.",
+    "user_template": "Rate pacing for {chapter_count} chapter(s).\n\n{chapters_block}",
+    "max_tokens": 250,
+    "json_mode": 1
+  },
+  {
+    "id": "blurb_builder",
+    "label": "Blurb Builder",
+    "system_prompt": "You are an expert book-marketing copywriter for fiction (Amazon/KDP back-cover descriptions, retailer short blurbs, BookBub).\n\nUsing the chapter genre-signal summaries and optional genre-analysis context, write sales copy that matches what the manuscript actually delivers — no invented plot, no spoilers of major twists/ending, no over-promising tone or stakes the story does not support.\n\nReturn ONLY JSON with this EXACT structure:\n{\n  \"variants\": [\n    {\n      \"angle\": \"voice-forward|stakes-forward|trope-forward|<short angle tag>\",\n      \"blurb\": \"<150-200 word back-cover / Amazon description>\",\n      \"critique\": {\n        \"hook_strength\": \"<1-2 sentences>\",\n        \"promise_vs_manuscript\": \"<over-promises / under-delivers / well-matched — with brief why>\",\n        \"spoiler_risk\": \"low|medium|high — brief why\",\n        \"estimated_read_time\": \"<e.g. 45 seconds>\"\n      }\n    }\n  ],\n  \"short_form\": \"<~40 words for retailers with tight description limits>\",\n  \"bookbub_one_liner\": \"<~15 words, BookBub-style punchy one-liner>\"\n}\n\nRules:\n- Produce exactly 3 distinct variants in \"variants\", each with a different angle tag.\n- Each blurb ~150-200 words; short_form ~40 words; bookbub_one_liner ~15 words.\n- Angles should lean differently (e.g. voice, stakes, trope/comp) — not three paraphrases of the same paragraph.\n- Critique promise_vs_manuscript against the provided summaries/genre context, not against invented plot.\n- No markdown, no preamble — JSON only.",
+    "user_template": "Chapter genre-signal summaries:\n\n{combined}\n\n---\n\nGenre analysis context (may be empty):\n{genre_context}",
+    "max_tokens": 2200,
+    "json_mode": 1
   }
 ]

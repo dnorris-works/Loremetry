@@ -2,13 +2,430 @@
 
 use std::collections::HashMap;
 
-use super::chapters::{extract_title, build_combined_context};
+use super::chapters::{chapter_source_hash, extract_title, build_combined_context};
 use super::craft_audits::build_opening_excerpt;
 use super::{emit, err, extract_json_object, GenreResult};
 use crate::app_ctx::AppCtx;
+use crate::batch_prompt::{self, BatchChapterItem, CachedBatchItem, CRAFT_BATCH_WORD_BUDGET};
 use crate::db;
 use crate::documents;
 use crate::prompts;
+
+fn truncate_words(text: &str, max: usize) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() <= max {
+        return text.to_string();
+    }
+    words[..max].join(" ") + "\n\n[Truncated]"
+}
+
+async fn per_chapter_json(
+    app: &AppCtx,
+    database: &db::Db,
+    story_id: &str,
+    template_id: &str,
+    batch_template_id: &str,
+    cache_report_type: &str,
+    provider: &str,
+    api_key: &str,
+    model: &str,
+    bible: &str,
+    include_bible: bool,
+) -> Result<Vec<serde_json::Value>, String> {
+    let chapters = match documents::list_chapters_db(database, story_id).await {
+        Ok(c) => c,
+        Err(e) => return Err(e),
+    };
+    if chapters.is_empty() {
+        return Err("No chapter documents found. Upload manuscript chapters first.".into());
+    }
+
+    let bible_text = if include_bible { bible } else { "" };
+    let mut chapter_meta: Vec<(usize, String, String)> = Vec::new();
+    let mut batch_items: Vec<CachedBatchItem> = Vec::new();
+
+    for (i, chapter) in chapters.iter().enumerate() {
+        let content = chapter.content.trim();
+        if content.is_empty() {
+            continue;
+        }
+        let filename = documents::chapter_display_name(chapter);
+        let title = if !chapter.title.is_empty() {
+            chapter.title.clone()
+        } else {
+            extract_title(content).unwrap_or_else(|| filename.clone())
+        };
+        let chapter_text = truncate_words(content, 4000);
+
+        chapter_meta.push((i, filename.clone(), title.clone()));
+        batch_items.push(CachedBatchItem {
+            item: BatchChapterItem {
+                file: filename,
+                title,
+                text: chapter_text,
+            },
+            source_hash: chapter_source_hash(content),
+        });
+    }
+
+    emit(
+        app,
+        &format!(
+            "  Analyzing {} chapter(s) in batched AI calls...",
+            batch_items.len()
+        ),
+    );
+
+    let results = batch_prompt::process_chapters_batched(
+        app,
+        database,
+        provider,
+        api_key,
+        model,
+        batch_template_id,
+        template_id,
+        bible_text,
+        story_id,
+        Some(cache_report_type),
+        batch_items,
+        CRAFT_BATCH_WORD_BUDGET,
+        &[],
+    )
+    .await;
+
+    let mut rows = Vec::new();
+    for (i, filename, title) in chapter_meta {
+        if crate::is_cancelled() {
+            return Err("Cancelled.".into());
+        }
+
+        let value = results.get(&filename).cloned().ok_or_else(|| {
+            format!("No JSON for {}", filename)
+        })?;
+
+        let mut parsed = if value.is_object() {
+            value
+        } else {
+            return Err(format!("Invalid JSON object for {}", filename));
+        };
+
+        if let Some(obj) = parsed.as_object_mut() {
+            obj.insert("file".into(), serde_json::json!(filename));
+            obj.insert("title".into(), serde_json::json!(title));
+            obj.insert("chapter_index".into(), serde_json::json!(i));
+        }
+        rows.push(parsed);
+    }
+
+    Ok(rows)
+}
+
+pub async fn run_ai_beta_reader(
+    app: &AppCtx,
+    database: &db::Db,
+    story_id: &str,
+    provider: &str,
+    api_key: &str,
+    model: &str,
+    bible_path: &str,
+) -> GenreResult {
+    if !crate::stories::story_exists(database, story_id).await {
+        return err("Story not found.");
+    }
+    if api_key.is_empty() || model.is_empty() {
+        return err("An API key and model are required. Set them in Settings.");
+    }
+
+    let bible = prompts::load_bible_for_story(&app.db, story_id, bible_path).await;
+    emit(app, "Running AI beta reader (per chapter)...");
+    match per_chapter_json(
+        app,
+        database,
+        story_id,
+        "ai_beta_reader",
+        "ai_beta_reader_batch",
+        "ai_beta_reader",
+        provider,
+        api_key,
+        model,
+        &bible,
+        true,
+    )
+    .await
+    {
+        Ok(chapters) => {
+            let avg_eng: f64 = chapters
+                .iter()
+                .filter_map(|c| {
+                    c.get("engagement").and_then(|v| {
+                        v.as_f64().or_else(|| v.as_i64().map(|i| i as f64))
+                    })
+                })
+                .sum::<f64>()
+                / chapters.len().max(1) as f64;
+            let avg_risk: f64 = chapters
+                .iter()
+                .filter_map(|c| {
+                    c.get("put_down_risk").and_then(|v| {
+                        v.as_f64().or_else(|| v.as_i64().map(|i| i as f64))
+                    })
+                })
+                .sum::<f64>()
+                / chapters.len().max(1) as f64;
+            let report = serde_json::json!({
+                "schema": "ai_beta_reader_v1",
+                "avg_engagement": avg_eng.round() as i64,
+                "avg_put_down_risk": avg_risk.round() as i64,
+                "chapters": chapters,
+            })
+            .to_string();
+            let run_ts = chrono::Utc::now().to_rfc3339();
+            let _ = db::save_document_at(
+                &database.pool,
+                story_id,
+                "ai_beta_reader",
+                &report,
+                &run_ts,
+            )
+            .await;
+            emit(
+                app,
+                &format!("✓ AI beta reader — {} chapter(s).", chapters.len()),
+            );
+            GenreResult {
+                success: true,
+                report,
+                error: String::new(),
+                run_ts,
+            }
+        }
+        Err(e) => err(&e),
+    }
+}
+
+pub async fn run_cliffhanger_score(
+    app: &AppCtx,
+    database: &db::Db,
+    story_id: &str,
+    provider: &str,
+    api_key: &str,
+    model: &str,
+) -> GenreResult {
+    if !crate::stories::story_exists(database, story_id).await {
+        return err("Story not found.");
+    }
+    if api_key.is_empty() || model.is_empty() {
+        return err("An API key and model are required. Set them in Settings.");
+    }
+
+    emit(app, "Scoring chapter endings...");
+    match per_chapter_json(
+        app,
+        database,
+        story_id,
+        "cliffhanger_score",
+        "cliffhanger_score_batch",
+        "cliffhanger_score",
+        provider,
+        api_key,
+        model,
+        "",
+        false,
+    )
+    .await
+    {
+        Ok(chapters) => {
+            let avg: f64 = chapters
+                .iter()
+                .filter_map(|c| {
+                    c.get("score").and_then(|v| {
+                        v.as_f64().or_else(|| v.as_i64().map(|i| i as f64))
+                    })
+                })
+                .sum::<f64>()
+                / chapters.len().max(1) as f64;
+            let report = serde_json::json!({
+                "schema": "cliffhanger_score_v1",
+                "avg_score": avg.round() as i64,
+                "chapters": chapters,
+            })
+            .to_string();
+            let run_ts = chrono::Utc::now().to_rfc3339();
+            let _ = db::save_document_at(
+                &database.pool,
+                story_id,
+                "cliffhanger_score",
+                &report,
+                &run_ts,
+            )
+            .await;
+            emit(
+                app,
+                &format!("✓ Cliffhanger scores — avg {}.", avg.round() as i64),
+            );
+            GenreResult {
+                success: true,
+                report,
+                error: String::new(),
+                run_ts,
+            }
+        }
+        Err(e) => err(&e),
+    }
+}
+
+pub async fn run_pacing_curve(
+    app: &AppCtx,
+    database: &db::Db,
+    story_id: &str,
+    provider: &str,
+    api_key: &str,
+    model: &str,
+) -> GenreResult {
+    if !crate::stories::story_exists(database, story_id).await {
+        return err("Story not found.");
+    }
+    if api_key.is_empty() || model.is_empty() {
+        return err("An API key and model are required. Set them in Settings.");
+    }
+
+    emit(app, "Building pacing curve...");
+    match per_chapter_json(
+        app,
+        database,
+        story_id,
+        "pacing_curve",
+        "pacing_curve_batch",
+        "pacing_curve",
+        provider,
+        api_key,
+        model,
+        "",
+        false,
+    )
+    .await
+    {
+        Ok(chapters) => {
+            let report = serde_json::json!({
+                "schema": "pacing_curve_v1",
+                "chapters": chapters,
+            })
+            .to_string();
+            let run_ts = chrono::Utc::now().to_rfc3339();
+            let _ = db::save_document_at(
+                &database.pool,
+                story_id,
+                "pacing_curve",
+                &report,
+                &run_ts,
+            )
+            .await;
+            emit(
+                app,
+                &format!("✓ Pacing curve — {} chapter(s).", chapters.len()),
+            );
+            GenreResult {
+                success: true,
+                report,
+                error: String::new(),
+                run_ts,
+            }
+        }
+        Err(e) => err(&e),
+    }
+}
+
+pub async fn run_vellum_prep(app: &AppCtx, database: &db::Db, story_id: &str) -> GenreResult {
+    if !crate::stories::story_exists(database, story_id).await {
+        return err("Story not found.");
+    }
+
+    emit(app, "Preparing clean manuscript for Vellum / Atticus...");
+    let chapters = match documents::list_chapters_db(database, story_id).await {
+        Ok(c) => c,
+        Err(e) => return err(&e),
+    };
+    if chapters.is_empty() {
+        return err("No chapter documents found. Upload manuscript chapters first.");
+    }
+
+    let mut body = String::from("# Manuscript\n\n");
+    let mut chapter_count = 0usize;
+    for chapter in &chapters {
+        let content = chapter.content.trim();
+        if content.is_empty() {
+            continue;
+        }
+        let cleaned = clean_for_formatter(content);
+        if cleaned.trim().is_empty() {
+            continue;
+        }
+        if chapter_count > 0 {
+            body.push_str("\n\n\\page\n\n");
+        }
+        if !cleaned.lines().next().unwrap_or("").starts_with('#') {
+            let title = if !chapter.title.is_empty() {
+                chapter.title.clone()
+            } else {
+                extract_title(content).unwrap_or_else(|| format!("Chapter {}", chapter_count + 1))
+            };
+            body.push_str(&format!("# {}\n\n", title));
+        }
+        body.push_str(cleaned.trim());
+        body.push('\n');
+        chapter_count += 1;
+    }
+
+    let word_count = body.split_whitespace().count();
+    let report = serde_json::json!({
+        "schema": "vellum_prep_v1",
+        "clean_markdown": body,
+        "chapter_count": chapter_count,
+        "word_count": word_count,
+        "notes": [
+            "Clean Markdown stored in this report for import into Vellum or Atticus.",
+            "\\page markers separate chapters — replace with your formatter's page-break if needed.",
+            "Copy or export this report's manuscript text into Vellum/Atticus (or convert to .docx)."
+        ],
+    })
+    .to_string();
+    let run_ts = chrono::Utc::now().to_rfc3339();
+    let _ = db::save_document_at(&database.pool, story_id, "vellum_prep", &report, &run_ts).await;
+    emit(
+        app,
+        &format!(
+            "✓ Vellum prep — {} chapters, {} words.",
+            chapter_count, word_count
+        ),
+    );
+    GenreResult {
+        success: true,
+        report,
+        error: String::new(),
+        run_ts,
+    }
+}
+
+fn clean_for_formatter(content: &str) -> String {
+    let mut out = String::new();
+    for line in content.lines() {
+        let mut s = line.to_string();
+        while let Some(start) = s.find('<') {
+            if let Some(end) = s[start..].find('>') {
+                s.replace_range(start..start + end + 1, "");
+            } else {
+                break;
+            }
+        }
+        let trimmed = s.trim_end();
+        out.push_str(trimmed);
+        out.push('\n');
+    }
+    while out.contains("\n\n\n") {
+        out = out.replace("\n\n\n", "\n\n");
+    }
+    out
+}
 
 pub async fn run_hook_strength(
     app: &AppCtx,

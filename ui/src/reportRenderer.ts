@@ -60,6 +60,14 @@ function renderBySchema(data: any, docType: string): string {
   if (schema === 'show_dont_tell_v1') return renderShowDontTell(data);
   if (schema === 'ai_isms_v1') return renderAiIsms(data);
   if (schema === 'craft_audit_v1') return renderCraftAudit(data);
+  if (schema === 'ai_beta_reader_v1') return renderAiBetaReader(data);
+  if (schema === 'cliffhanger_score_v1') return renderCliffhangerScore(data);
+  if (schema === 'hook_strength_v1') return renderHookStrength(data);
+  if (schema === 'pacing_curve_v1') return renderPacingCurve(data);
+  if (schema === 'line_polish_v1') return renderLinePolish(data);
+  if (schema === 'blurb_builder_v1') return renderBlurbBuilder(data);
+  if (schema === 'print_production_v1') return renderPrintProduction(data);
+  if (schema === 'vellum_prep_v1') return renderVellumPrep(data);
 
   // Detect BISAC classification by structure or doc_type
   if (docType === 'bisac_classification' || (data.ebook && Array.isArray(data.ebook))) {
@@ -1015,6 +1023,147 @@ function renderCraftAudit(data: any): string {
     if (f.detail) html += `<p>${esc(f.detail)}</p>`;
     if (f.evidence) html += `<blockquote class="sdt-passage">${esc(f.evidence)}</blockquote>`;
     html += `</div>`;
+  }
+  html += `</section>`;
+  return html;
+}
+
+function renderAiBetaReader(data: any): string {
+  const chapters: any[] = data.chapters || [];
+  let html = `<div class="zeigarnik-score"><span class="zeigarnik-pct">${esc(String(data.avg_engagement ?? '—'))}</span><span class="zeigarnik-label">Avg engagement</span></div>`;
+  html += `<p class="report-hint">Avg put-down risk: ${esc(String(data.avg_put_down_risk ?? '—'))}</p>`;
+  for (const ch of chapters) {
+    html += `<section class="report-section"><h3>${esc(ch.title || ch.file || 'Chapter')}</h3>`;
+    html += `<p><strong>Engagement ${esc(String(ch.engagement ?? '—'))}</strong> · Put-down risk ${esc(String(ch.put_down_risk ?? '—'))}</p>`;
+    if (ch.reaction) html += `<p>${esc(ch.reaction)}</p>`;
+    if (Array.isArray(ch.highlights) && ch.highlights.length) {
+      html += `<p><strong>Highlights</strong></p><ul>${ch.highlights.map((h: string) => `<li>${esc(h)}</li>`).join('')}</ul>`;
+    }
+    if (Array.isArray(ch.friction) && ch.friction.length) {
+      html += `<p><strong>Friction</strong></p><ul>${ch.friction.map((h: string) => `<li>${esc(h)}</li>`).join('')}</ul>`;
+    }
+    if (Array.isArray(ch.put_down_reasons) && ch.put_down_reasons.length) {
+      html += `<p><strong>Put-down reasons</strong></p><ul>${ch.put_down_reasons.map((h: string) => `<li>${esc(h)}</li>`).join('')}</ul>`;
+    }
+    html += `</section>`;
+  }
+  return html;
+}
+
+function renderCliffhangerScore(data: any): string {
+  const chapters: any[] = data.chapters || [];
+  let html = `<div class="zeigarnik-score"><span class="zeigarnik-pct">${esc(String(data.avg_score ?? '—'))}</span><span class="zeigarnik-label">Avg ending pull</span></div>`;
+  html += `<table class="report-table"><thead><tr><th>Chapter</th><th>Score</th><th>Type</th><th>Why</th></tr></thead><tbody>`;
+  for (const ch of chapters) {
+    html += `<tr><td>${esc(ch.title || ch.file || '')}</td><td>${esc(String(ch.score ?? ''))}</td><td>${esc(ch.ending_type || '')}</td><td>${esc(ch.why || '')}</td></tr>`;
+  }
+  html += `</tbody></table>`;
+  return html;
+}
+
+function renderHookStrength(data: any): string {
+  let html = `<div class="zeigarnik-score"><span class="zeigarnik-pct">${esc(String(data.score ?? '—'))}</span><span class="zeigarnik-label">${esc(data.verdict || 'Hook')}</span></div>`;
+  if (data.summary) html += `<p>${esc(data.summary)}</p>`;
+  if (Array.isArray(data.strengths) && data.strengths.length) {
+    html += `<section class="report-section"><h3>Strengths</h3><ul>${data.strengths.map((s: string) => `<li>${esc(s)}</li>`).join('')}</ul></section>`;
+  }
+  if (Array.isArray(data.weaknesses) && data.weaknesses.length) {
+    html += `<section class="report-section"><h3>Weaknesses</h3><ul>${data.weaknesses.map((s: string) => `<li>${esc(s)}</li>`).join('')}</ul></section>`;
+  }
+  if (data.first_friction_point) {
+    html += `<p class="report-hint">First friction: ${esc(data.first_friction_point)}</p>`;
+  }
+  return html;
+}
+
+function renderPacingCurve(data: any): string {
+  const chapters: any[] = data.chapters || [];
+  let html = `<section class="report-section"><h3>Pacing by chapter</h3>`;
+  html += `<table class="report-table"><thead><tr><th>Chapter</th><th>Pace</th><th>Drag risk</th><th>Label</th><th>Why</th></tr></thead><tbody>`;
+  for (const ch of chapters) {
+    html += `<tr><td>${esc(ch.title || ch.file || '')}</td><td>${esc(String(ch.pace_score ?? ''))}</td><td>${esc(String(ch.drag_risk ?? ''))}</td><td>${esc(ch.label || '')}</td><td>${esc(ch.why || '')}</td></tr>`;
+  }
+  html += `</tbody></table></section>`;
+  return html;
+}
+
+function renderLinePolish(data: any): string {
+  const totals = data.totals || {};
+  let html = `<p class="report-hint">Heuristic scan — filter words ${esc(String(totals.filter_words ?? 0))}, echoes ${esc(String(totals.echoes ?? 0))}, adverbs ${esc(String(totals.adverbs ?? 0))}, passive ${esc(String(totals.passive ?? 0))}.</p>`;
+  for (const ch of data.chapters || []) {
+    const hits = ch.hits || {};
+    const counts = ['filter_words', 'echoes', 'adverbs', 'passive']
+      .map(k => `${k.replace('_', ' ')}: ${(hits[k] || []).length}`)
+      .join(' · ');
+    html += `<section class="report-section"><h3>${esc(ch.title || ch.file || '')}</h3><p class="report-hint">${esc(counts)}</p>`;
+    for (const key of ['filter_words', 'echoes', 'adverbs', 'passive']) {
+      const list = hits[key] || [];
+      if (!list.length) continue;
+      html += `<h4>${esc(key.replace(/_/g, ' '))}</h4><ul>`;
+      for (const h of list.slice(0, 15)) {
+        html += `<li><code>${esc(h.word || h.phrase || '')}</code> — ${esc(h.context || '')}</li>`;
+      }
+      if (list.length > 15) html += `<li class="muted">…and ${list.length - 15} more</li>`;
+      html += `</ul>`;
+    }
+    html += `</section>`;
+  }
+  return html;
+}
+
+function renderBlurbBuilder(data: any): string {
+  const variants: any[] = data.variants || [];
+  let html = `<section class="report-section"><h3>Blurb Builder</h3>`;
+  html += `<p class="report-hint">Three angles for Amazon, wide retailers, and back-cover copy.</p>`;
+  for (const v of variants) {
+    html += `<h4>${esc(v.angle || 'Variant')}</h4>`;
+    html += `<p class="blurb-text">${esc(v.blurb || '')}</p>`;
+    const c = v.critique || {};
+    if (c.hook_strength) html += `<p><strong>Hook:</strong> ${esc(c.hook_strength)}</p>`;
+    if (c.promise_vs_manuscript) html += `<p><strong>Promise vs manuscript:</strong> ${esc(c.promise_vs_manuscript)}</p>`;
+  }
+  if (data.short_form) {
+    html += `<h4>Short form (~40 words)</h4><p>${esc(data.short_form)}</p>`;
+  }
+  if (data.bookbub_one_liner) {
+    html += `<h4>BookBub one-liner</h4><p>${esc(data.bookbub_one_liner)}</p>`;
+  }
+  html += `</section>`;
+  return html;
+}
+
+function renderPrintProduction(data: any): string {
+  let html = `<section class="report-section"><h3>Print Production</h3>`;
+  html += `<p><strong>Word count:</strong> ${(data.word_count || 0).toLocaleString()}</p>`;
+  html += `<p><strong>Estimated pages:</strong> ${data.estimated_pages || '—'} (at ~250 words/page)</p>`;
+  html += `<p><strong>Trim size:</strong> ${esc(data.trim_size || '')} — ${esc(data.trim_rationale || '')}</p>`;
+  html += `<p><strong>Spine width:</strong> ${esc(data.spine_inches || '')} in</p>`;
+  html += `<p><strong>Paper:</strong> ${esc(data.paper_color || '')} / <strong>Ink:</strong> ${esc(data.ink || 'black')}</p>`;
+  const ingram: string[] = data.ingram_checklist || [];
+  if (ingram.length) {
+    html += `<h4>Ingram / wide print checklist</h4><ul>`;
+    for (const item of ingram) html += `<li>${esc(item)}</li>`;
+    html += `</ul>`;
+  }
+  const kdp: string[] = data.kdp_print_checklist || [];
+  if (kdp.length) {
+    html += `<h4>KDP Print checklist</h4><ul>`;
+    for (const item of kdp) html += `<li>${esc(item)}</li>`;
+    html += `</ul>`;
+  }
+  html += `</section>`;
+  return html;
+}
+
+function renderVellumPrep(data: any): string {
+  let html = `<section class="report-section"><h3>Clean manuscript ready</h3>`;
+  html += `<p>${esc(String(data.chapter_count ?? 0))} chapters · ${esc(String(data.word_count ?? 0))} words</p>`;
+  if (Array.isArray(data.notes)) {
+    html += `<ul>${data.notes.map((n: string) => `<li>${esc(n)}</li>`).join('')}</ul>`;
+  }
+  if (data.clean_markdown) {
+    const preview = String(data.clean_markdown).slice(0, 2000);
+    html += `<h4>Manuscript preview</h4><pre class="report-raw">${esc(preview)}${data.clean_markdown.length > 2000 ? '\n\n[Truncated — full text stored in report JSON]' : ''}</pre>`;
   }
   html += `</section>`;
   return html;

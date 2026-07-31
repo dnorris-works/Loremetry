@@ -1180,6 +1180,64 @@ async fn run_craft_pipeline_inner(app: AppCtx, request: CraftPipelineRequest) ->
             return r;
         }
     }
+    if request.selected.iter().any(|s| s == "ai_beta_reader") {
+        let r = super::publish_audits::run_ai_beta_reader(
+            &app,
+            &database,
+            &request.story_id,
+            &request.provider,
+            &request.api_key,
+            model_publish,
+            &request.bible_path,
+        )
+        .await;
+        if !r.success {
+            return r;
+        }
+        if crate::is_cancelled() {
+            return err("Cancelled.");
+        }
+    }
+    if request.selected.iter().any(|s| s == "cliffhanger_score") {
+        let r = super::publish_audits::run_cliffhanger_score(
+            &app,
+            &database,
+            &request.story_id,
+            &request.provider,
+            &request.api_key,
+            model_publish,
+        )
+        .await;
+        if !r.success {
+            return r;
+        }
+        if crate::is_cancelled() {
+            return err("Cancelled.");
+        }
+    }
+    if request.selected.iter().any(|s| s == "pacing_curve") {
+        let r = super::publish_audits::run_pacing_curve(
+            &app,
+            &database,
+            &request.story_id,
+            &request.provider,
+            &request.api_key,
+            model_publish,
+        )
+        .await;
+        if !r.success {
+            return r;
+        }
+        if crate::is_cancelled() {
+            return err("Cancelled.");
+        }
+    }
+    if request.selected.iter().any(|s| s == "vellum_prep") {
+        let r = super::publish_audits::run_vellum_prep(&app, &database, &request.story_id).await;
+        if !r.success {
+            return r;
+        }
+    }
 
     emit(&app, "✓ Done.");
     GenreResult { success: true, report: String::new(), error: String::new(), run_ts }

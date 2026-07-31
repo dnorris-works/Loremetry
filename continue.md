@@ -235,7 +235,7 @@ Provider API keys, Clerk issuer/publishable key, bootstrap admin → **Postgres*
 | Analysis E2E | **Partial** | KDP/Wide + craft/publish subset in core; synchronous in API |
 | Analyzer UI parity | **Mostly done** | Platform tabs, craft groups, saved panel; no help/spend footer |
 | Craft reports | **Done** | `craft_audits.rs`, `craft-report-groups.json`, pipeline loops |
-| Publish reports | **Partial** | 4 of 8 types; need `batch_prompt` for remainder |
+| Publish reports | **Done** | All 8 types + `batch_prompt.rs` |
 | User settings UI | **Missing** | Admin only; no 9-tab settings |
 | Marketing mode | **Missing** | Desktop-only |
 | Full desktop catalog parity | **Not v1 goal** | Phased port below |
@@ -250,7 +250,7 @@ Full parity is **not** a v1 blocker. When porting, follow this order:
 
 1. **Analyzer shell** — ~~platform tabs, craft groups, saved panel~~ **done**; freshness badges, help panel optional
 2. **Craft pipeline** — ~~`craft_audits.rs`, groups, `run_craft_pipeline`~~ **done**
-3. **Publish tab** — **partial** — finish `publish_audits.rs` (4 remaining) + renderer schemas + `batch_prompt`
+3. **Publish tab** — ~~finish `publish_audits.rs` (4 remaining) + renderer schemas + `batch_prompt`~~ **done**
 4. **Settings (user)** — AI model slots, Canopy/DataForSEO tests, story data / summary refresh, archived reports
 5. **Content ops** — `story_assets` migration, DOCX ingest, hash-merge upload, zip round-trip
 6. **Worker split** — long jobs off the API process

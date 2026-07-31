@@ -199,3 +199,11 @@ pub(crate) fn build_combined_context(summaries: &[db::ChapterSummaryRow]) -> Str
         .collect::<Vec<_>>()
         .join("\n\n---\n\n")
 }
+
+pub(crate) fn chapter_source_hash(cleaned_text: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    cleaned_text.trim().hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
