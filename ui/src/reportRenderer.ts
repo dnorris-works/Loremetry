@@ -59,6 +59,7 @@ function renderBySchema(data: any, docType: string): string {
   if (schema === 'continuity_v1') return renderContinuity(data);
   if (schema === 'show_dont_tell_v1') return renderShowDontTell(data);
   if (schema === 'ai_isms_v1') return renderAiIsms(data);
+  if (schema === 'craft_audit_v1') return renderCraftAudit(data);
 
   // Detect BISAC classification by structure or doc_type
   if (docType === 'bisac_classification' || (data.ebook && Array.isArray(data.ebook))) {
@@ -988,6 +989,34 @@ function renderActivityLog(data: any): string {
     html += `<span class="log-text">${text}</span></div>`;
   }
   html += `</div>`;
+  return html;
+}
+
+function renderCraftAudit(data: any): string {
+  const summary = data.summary || '';
+  const findings: any[] = data.findings || [];
+  let html = '';
+  if (data.audit_id) {
+    html += `<p class="report-hint">Audit: <code>${esc(data.audit_id)}</code></p>`;
+  }
+  if (summary) {
+    html += `<section class="report-section"><h3>Summary</h3><p>${esc(summary)}</p></section>`;
+  }
+  if (!findings.length) {
+    html += `<p class="muted">No material findings.</p>`;
+    return html;
+  }
+  html += `<section class="report-section"><h3>Findings (${findings.length})</h3>`;
+  for (const f of findings) {
+    const sev = esc(f.severity || 'note');
+    html += `<div class="sdt-violation">`;
+    html += `<div class="sdt-severity">${sev}${f.location ? ` · ${esc(f.location)}` : ''}</div>`;
+    html += `<h4>${esc(f.title || 'Finding')}</h4>`;
+    if (f.detail) html += `<p>${esc(f.detail)}</p>`;
+    if (f.evidence) html += `<blockquote class="sdt-passage">${esc(f.evidence)}</blockquote>`;
+    html += `</div>`;
+  }
+  html += `</section>`;
   return html;
 }
 

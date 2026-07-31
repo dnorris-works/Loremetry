@@ -7,11 +7,13 @@ import type {
   AnalysisState,
   ReportEnvelope,
   SidebarReportGroup,
+  SidebarReport,
   Series,
   LogLine,
   Finding,
   ModelInfo,
 } from './types';
+import type { PlatformId } from './composables/usePlatform';
 import type { ContinuityScope } from './composables/useAnalysis';
 import type { ModelAssignments, FolderStructure, ThemeMode } from './composables/useSettings';
 
@@ -40,7 +42,12 @@ export interface AnalysisContext {
   logLines: Ref<LogLine[]>;
   refreshState: (folder: string) => Promise<void>;
   runAnalyze: (folder: string, forceResummarize: boolean, platform: string) => Promise<void>;
-  runCraftAnalysis: (folder: string, selected: string[], continuityScope: ContinuityScope) => Promise<void>;
+  runCraftAnalysis: (
+    folder: string,
+    selected: string[],
+    continuityScope: ContinuityScope,
+    seriesIdForAudits?: number,
+  ) => Promise<void>;
   runMarketIntel: (folder: string) => Promise<void>;
   cancelOperation: () => Promise<void>;
   clearLog: () => void;
@@ -52,9 +59,9 @@ export const analysisKey: InjectionKey<AnalysisContext> = Symbol('analysis');
 // ── Platform ──────────────────────────────────────────────────────────────────
 
 export interface PlatformContext {
-  platform: Ref<'kdp' | 'wide' | 'craft'>;
+  platform: Ref<PlatformId>;
   isKdp: ComputedRef<boolean>;
-  setPlatform: (p: 'kdp' | 'wide' | 'craft') => void;
+  setPlatform: (p: PlatformId) => void;
 }
 
 export const platformKey: InjectionKey<PlatformContext> = Symbol('platform');
@@ -81,8 +88,10 @@ export const settingsKey: InjectionKey<SettingsContext> = Symbol('settings');
 
 export interface ReportsContext {
   sidebarGroups: Ref<SidebarReportGroup[]>;
+  savedReports: Ref<SidebarReport[]>;
   currentReport: Ref<ReportEnvelope | null>;
   loadSidebarReports: (folder: string, platform: string) => Promise<void>;
+  loadSavedReports: (folder: string) => Promise<void>;
   openReport: (id: number) => Promise<ReportEnvelope>;
   deleteReport: (id: number) => Promise<void>;
   closeReport: () => void;

@@ -102,7 +102,12 @@ export type ContinuityScope = { mode: 'manuscript' } | { mode: 'series'; seriesI
  * Runs the craft pipeline via a single backend command.
  * The backend handles ordering, AI calls, and storage.
  */
-async function runCraftAnalysis(folder: string, selected: string[], continuityScope: ContinuityScope): Promise<void> {
+async function runCraftAnalysis(
+  folder: string,
+  selected: string[],
+  continuityScope: ContinuityScope,
+  seriesIdForAudits?: number,
+): Promise<void> {
   if (!folder) { appendLog('✗ No story selected.'); return; }
 
   const s = useSettings();
@@ -111,6 +116,9 @@ async function runCraftAnalysis(folder: string, selected: string[], continuitySc
   isWorking.value = true;
 
   let serverSelected = [...selected];
+  const resolvedSeriesId = continuityScope.mode === 'series'
+    ? continuityScope.seriesId
+    : (seriesIdForAudits ?? 0);
 
   try {
     const cached = await listCachedChapters(folder);
@@ -158,8 +166,9 @@ async function runCraftAnalysis(folder: string, selected: string[], continuitySc
         model_continuity: s.modelFor('continuity'),
         model_sdt: s.modelFor('showDontTell'),
         model_ai_isms: s.modelFor('aiIsms'),
+        model_prose: s.modelFor('prose'),
         continuity_scope: continuityScope.mode,
-        series_id: continuityScope.mode === 'series' ? continuityScope.seriesId : 0,
+        series_id: resolvedSeriesId,
       },
     });
     if (!result.success) {

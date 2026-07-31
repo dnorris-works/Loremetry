@@ -117,6 +117,13 @@ export interface SidebarReportVersion {
   generated_at: string;
 }
 
+export interface SidebarReport {
+  id: number;
+  doc_type: string;
+  label: string;
+  generated_at: string;
+}
+
 export interface SidebarReportGroup {
   doc_type: string;
   label: string;

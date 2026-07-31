@@ -1,0 +1,57 @@
+{
+  "dedicated_handlers": [
+    "zeigarnik_analysis",
+    "continuity_check",
+    "show_dont_tell",
+    "ai_isms"
+  ],
+  "groups": [
+    {
+      "id": "prose",
+      "label": "Prose",
+      "subtitle": "Line-level craft and voice",
+      "reportIds": ["show_dont_tell", "ai_isms"]
+    },
+    {
+      "id": "structure",
+      "label": "Structure & Pacing",
+      "subtitle": "Shape, rhythm, and viewpoint",
+      "reportIds": ["story_beat_placement", "scene_sequel_balance", "pov_discipline"]
+    },
+    {
+      "id": "plot",
+      "label": "Plot & Continuity",
+      "subtitle": "Setup, payoff, and contradictions",
+      "reportIds": [
+        "continuity_check",
+        "chekhovs_gun",
+        "red_herring_vs_abandoned",
+        "foreshadowing_twist_fairness",
+        "macguffin_clarity",
+        "timeline_flashback"
+      ]
+    },
+    {
+      "id": "character",
+      "label": "Character & Theme",
+      "subtitle": "Motivation, meaning, and contrast",
+      "reportIds": ["want_vs_need", "thematic_throughline", "mirror_foil_character"]
+    },
+    {
+      "id": "engagement",
+      "label": "Reader Engagement",
+      "subtitle": "Tension, irony, and rising stakes",
+      "reportIds": ["zeigarnik_analysis", "dramatic_irony", "stakes_escalation"]
+    },
+    {
+      "id": "series",
+      "label": "Series",
+      "subtitle": "Patterns across multiple books",
+      "reportIds": [
+        "cross_book_setup_payoff",
+        "series_pacing_comparator",
+        "recurring_motif_theme_series"
+      ]
+    }
+  ]
+}

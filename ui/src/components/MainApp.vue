@@ -15,6 +15,7 @@ import type { Story, Finding, Series } from '../types';
 import TitleBar from './TitleBar.vue';
 import Sidebar from './Sidebar.vue';
 import AnalyzerPanel from './AnalyzerPanel.vue';
+import SavedReportsPanel from './SavedReportsPanel.vue';
 import ReportsViewer from './ReportsViewer.vue';
 import AdminPanel from './AdminPanel.vue';
 import StoryForm from './StoryForm.vue';
@@ -191,7 +192,7 @@ watch(() => storiesCtx.activeStoryId.value, (id) => {
 });
 
 watch(() => platformCtx.platform.value, () => {
-  if (storiesCtx.activeFolder.value) {
+  if (storiesCtx.activeFolder.value && platformCtx.platform.value !== 'saved') {
     reportsCtx.loadSidebarReports(storiesCtx.activeFolder.value, platformCtx.platform.value);
   }
 });
@@ -247,7 +248,10 @@ onMounted(() => {
       />
 
       <template v-else-if="appMode === 'analyzer'">
-        <AnalyzerPanel v-if="activePanel === 'analyzer'" />
+        <SavedReportsPanel
+          v-if="activePanel === 'analyzer' && platformCtx.platform.value === 'saved'"
+        />
+        <AnalyzerPanel v-else-if="activePanel === 'analyzer'" />
         <ReportsViewer v-if="activePanel === 'reports'" />
         <AdminPanel v-if="activePanel === 'admin'" />
         <StoryForm

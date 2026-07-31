@@ -2013,7 +2013,14 @@ pub async fn get_sidebar_reports(db: &Db, folder: String, platform: String) -> R
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
-            if !plats.contains(&platform) {
+            let included = if platform == "saved" {
+                versions_by_type.contains_key(&id)
+            } else if platform == "kdp" {
+                plats.iter().any(|p| p == "kdp" || p == "wide")
+            } else {
+                plats.contains(&platform)
+            };
+            if !included {
                 return None;
             }
             let versions = versions_by_type.remove(&id)?;

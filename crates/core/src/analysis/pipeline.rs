@@ -910,6 +910,8 @@ pub struct CraftPipelineRequest {
     pub series_id:        i64,
     #[serde(default)]
     pub bible_path:       String,
+    #[serde(default)]
+    pub model_prose:      String,
 }
 
 /// Runs the selected craft-platform reports in the correct order.
@@ -1063,6 +1065,120 @@ async fn run_craft_pipeline_inner(app: AppCtx, request: CraftPipelineRequest) ->
             return ai;
         }
         if crate::is_cancelled() { return err("Cancelled."); }
+    }
+
+    let model_craft = if request.model_continuity.is_empty() {
+        &request.model
+    } else {
+        &request.model_continuity
+    };
+    for audit_id in crate::craft_report_groups::manuscript_craft_audit_ids() {
+        if !request.selected.iter().any(|s| s == audit_id.as_str()) {
+            continue;
+        }
+        let r = super::craft_audits::run_manuscript_craft_audit(
+            &app,
+            &database,
+            &request.story_id,
+            &audit_id,
+            &request.provider,
+            &request.api_key,
+            model_craft,
+            &request.bible_path,
+        )
+        .await;
+        if !r.success {
+            return r;
+        }
+        if crate::is_cancelled() {
+            return err("Cancelled.");
+        }
+    }
+    let series_id = if request.series_id > 0 {
+        request.series_id
+    } else {
+        0
+    };
+    for audit_id in crate::craft_report_groups::series_report_ids() {
+        if !request.selected.iter().any(|s| s == audit_id.as_str()) {
+            continue;
+        }
+        let r = super::craft_audits::run_series_craft_audit(
+            &app,
+            &database,
+            series_id,
+            &audit_id,
+            &request.provider,
+            &request.api_key,
+            model_craft,
+            &request.bible_path,
+        )
+        .await;
+        if !r.success {
+            return r;
+        }
+        if crate::is_cancelled() {
+            return err("Cancelled.");
+        }
+    }
+
+    let model_publish = if request.model_summaries.is_empty() {
+        &request.model
+    } else {
+        &request.model_summaries
+    };
+    let model_prose = if request.model_prose.is_empty() {
+        &request.model
+    } else {
+        &request.model_prose
+    };
+
+    if request.selected.iter().any(|s| s == "hook_strength") {
+        let r = super::publish_audits::run_hook_strength(
+            &app,
+            &database,
+            &request.story_id,
+            &request.provider,
+            &request.api_key,
+            model_publish,
+            &request.bible_path,
+        )
+        .await;
+        if !r.success {
+            return r;
+        }
+        if crate::is_cancelled() {
+            return err("Cancelled.");
+        }
+    }
+    if request.selected.iter().any(|s| s == "line_polish") {
+        let r = super::publish_audits::run_line_polish(&app, &database, &request.story_id).await;
+        if !r.success {
+            return r;
+        }
+    }
+    if request.selected.iter().any(|s| s == "blurb_builder") {
+        let r = super::publish_audits::run_blurb_builder(
+            &app,
+            &database,
+            &request.story_id,
+            &request.provider,
+            &request.api_key,
+            model_prose,
+        )
+        .await;
+        if !r.success {
+            return r;
+        }
+        if crate::is_cancelled() {
+            return err("Cancelled.");
+        }
+    }
+    if request.selected.iter().any(|s| s == "print_production") {
+        let r = super::publish_audits::run_print_production(&app, &database, &request.story_id).await;
+        if !r.success {
+            return r;
+        }
     }
 
     emit(&app, "✓ Done.");

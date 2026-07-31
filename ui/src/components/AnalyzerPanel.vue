@@ -5,9 +5,24 @@ import type { ContinuityScope } from '../composables/useAnalysis';
 import { useSettings } from '../composables/useSettings';
 import { storiesKey, analysisKey, seriesKey, platformKey } from '../injectionKeys';
 import LogStream from './LogStream.vue';
+import AnalyzerPlatformTabs from './AnalyzerPlatformTabs.vue';
 import { useReportTypes } from '../composables/useReportTypes';
+import { useCraftReportGroups } from '../composables/useCraftReportGroups';
 import { getChapterWordStats } from '../lib/manuscriptCache';
 import { estimateReportCosts } from '../lib/estimateCosts';
+import type { ReportTypeDef, Series } from '../types';
+
+type VisibleReport = ReportTypeDef & { exists: boolean };
+
+type ReportSection = {
+  id: string;
+  label: string;
+  subtitle: string;
+  reports: VisibleReport[];
+  showHeader: boolean;
+  disabled: boolean;
+  disabledReason: string;
+};
 
 // ── Injections ────────────────────────────────────────────────────────────────
 
@@ -20,9 +35,26 @@ const settings = useSettings();
 // ── Report types from DB ──────────────────────────────────────────────────────
 
 const { reportTypes, loadError, loaded: reportTypesLoaded, getDependants } = useReportTypes();
+const { craftReportGroups, seriesReportIds, loadCraftReportGroups } = useCraftReportGroups();
 
 onMounted(() => {
+  loadCraftReportGroups();
   fetchCostEstimates();
+});
+
+function reportMatchesPlatform(report: ReportTypeDef, plat: string): boolean {
+  if (plat === 'kdp') {
+    return report.platforms.includes('kdp') || report.platforms.includes('wide');
+  }
+  return report.platforms.includes(plat);
+}
+
+const activeStorySeries = computed((): Series | null => {
+  const folder = storiesCtx.activeFolder.value;
+  if (!folder) return null;
+  return seriesCtx.series.value.find(s =>
+    s.books.some(b => b.story_id === folder),
+  ) ?? null;
 });
 
 // ── Local state ───────────────────────────────────────────────────────────────
@@ -61,14 +93,59 @@ const existsMap = computed(() => {
   } as Record<string, boolean>;
 });
 
-const visibleReports = computed(() => {
+const visibleReports = computed((): VisibleReport[] => {
   const plat = platformCtx.platform.value;
   return reportTypes.value
-    .filter(r => r.platforms.includes(plat))
+    .filter(r => reportMatchesPlatform(r, plat) && r.id !== 'chapter_summaries')
     .map(r => ({
       ...r,
       exists: existsMap.value[r.id] ?? false,
     }));
+});
+
+function sectionAvailability(groupId: string): { disabled: boolean; reason: string } {
+  if (groupId === 'series') {
+    if (!storiesCtx.activeFolder.value) {
+      return { disabled: true, reason: 'Select a story first.' };
+    }
+    if (!activeStorySeries.value) {
+      return { disabled: true, reason: 'Add this story to a series in the Series panel.' };
+    }
+  }
+  return { disabled: false, reason: '' };
+}
+
+const reportSections = computed((): ReportSection[] => {
+  const reports = visibleReports.value;
+  if (platformCtx.platform.value !== 'craft') {
+    return [{
+      id: 'all',
+      label: '',
+      subtitle: '',
+      reports,
+      showHeader: false,
+      disabled: false,
+      disabledReason: '',
+    }];
+  }
+
+  const byId = new Map(reports.map(r => [r.id, r]));
+  return craftReportGroups.value
+    .map(group => {
+      const availability = sectionAvailability(group.id);
+      return {
+        id: group.id,
+        label: group.label,
+        subtitle: availability.disabled ? availability.reason : group.subtitle,
+        reports: group.reportIds
+          .map(id => byId.get(id))
+          .filter((r): r is VisibleReport => r != null),
+        showHeader: true,
+        disabled: availability.disabled,
+        disabledReason: availability.reason,
+      };
+    })
+    .filter(group => group.reports.length > 0);
 });
 
 const canSelectReports = computed(() => Boolean(storiesCtx.activeFolder.value));
@@ -205,13 +282,19 @@ watch(() => reportTypes.value, () => fetchCostEstimates());
 function onGetReports(): void {
   const folder = storiesCtx.activeFolder.value;
   hasRun.value = true;
-  if (platformCtx.platform.value === 'craft') {
-    const scope: ContinuityScope = continuityScopeMode.value === 'series' && continuitySeriesId.value != null
-      ? { mode: 'series', seriesId: continuitySeriesId.value }
+  const plat = platformCtx.platform.value;
+  if (plat === 'craft' || plat === 'publish') {
+    const hasSeriesReports = selected.value.some(id => seriesReportIds.value.includes(id));
+    const continuityInSeriesMode = selected.value.includes('continuity_check')
+      && continuityScopeMode.value === 'series'
+      && continuitySeriesId.value != null;
+    const seriesId = continuitySeriesId.value ?? activeStorySeries.value?.id ?? null;
+    const scope: ContinuityScope = (hasSeriesReports || continuityInSeriesMode) && seriesId != null
+      ? { mode: 'series', seriesId }
       : { mode: 'manuscript' };
-    analysisCtx.runCraftAnalysis(folder, selected.value, scope);
+    analysisCtx.runCraftAnalysis(folder, selected.value, scope, seriesId ?? undefined);
   } else {
-    analysisCtx.runAnalyze(folder, forceResummarize.value, platformCtx.platform.value);
+    analysisCtx.runAnalyze(folder, forceResummarize.value, plat);
   }
 }
 
@@ -238,24 +321,7 @@ function onStop(): void {
       </template>
     </p>
 
-    <!-- Platform tabs -->
-    <div class="platform-tabs">
-      <button
-        class="platform-tab"
-        :class="{ active: platformCtx.platform.value === 'kdp' }"
-        @click="platformCtx.setPlatform('kdp')"
-      >KDP</button>
-      <button
-        class="platform-tab"
-        :class="{ active: platformCtx.platform.value === 'wide' }"
-        @click="platformCtx.setPlatform('wide')"
-      >Wide</button>
-      <button
-        class="platform-tab"
-        :class="{ active: platformCtx.platform.value === 'craft' }"
-        @click="platformCtx.setPlatform('craft')"
-      >Craft</button>
-    </div>
+    <AnalyzerPlatformTabs />
 
     <!-- Actions (top) -->
     <div class="analyzer-actions">
@@ -283,14 +349,16 @@ function onStop(): void {
         @click="onStop"
       >Stop</button>
 
-      <label v-if="platformCtx.platform.value !== 'craft'" class="force-resummarize-label">
+      <label v-if="platformCtx.platform.value === 'kdp'" class="force-resummarize-label">
         <input v-model="forceResummarize" type="checkbox" :disabled="reportsLocked" />
         Force re-summarize
       </label>
     </div>
 
-    <!-- Continuity Check scope (only relevant when that report is selected) -->
-    <div v-if="platformCtx.platform.value === 'craft' && selected.includes('continuity_check')" class="continuity-scope-row">
+    <div
+      v-if="(platformCtx.platform.value === 'craft' || platformCtx.platform.value === 'publish') && (selected.includes('continuity_check') || selected.some(id => seriesReportIds.includes(id)))"
+      class="continuity-scope-row"
+    >
       <span class="continuity-scope-label">Continuity Check scope:</span>
       <label class="scope-radio">
         <input v-model="continuityScopeMode" type="radio" value="manuscript" />
@@ -323,29 +391,35 @@ function onStop(): void {
       <code>SELECT COUNT(*) FROM lore.report_types;</code>
     </div>
     <div v-else class="report-cards">
-      <div
-        v-for="report in visibleReports"
-        :key="report.id"
-        class="report-card"
-        :class="{ disabled: reportsLocked }"
-      >
-        <div class="report-card-check">
-          <input
-            type="checkbox"
-            :checked="selected.includes(report.id)"
-            :disabled="reportsLocked"
-            @change="toggleReport(report.id)"
-          />
+      <template v-for="section in reportSections" :key="section.id">
+        <div v-if="section.showHeader" class="report-section-header">
+          <div class="report-section-title">{{ section.label }}</div>
+          <div class="report-section-subtitle">{{ section.subtitle }}</div>
         </div>
-        <div class="report-card-content">
-          <div class="report-card-label">{{ report.label }}</div>
-          <div class="report-card-desc">{{ report.description }}</div>
-          <div class="report-card-meta">
-            <span v-if="report.exists" class="report-card-exists">✓ exists</span>
-            <span v-if="costEstimates[report.id] != null" class="report-card-cost">{{ formatCost(costEstimates[report.id]) }}</span>
+        <div
+          v-for="report in section.reports"
+          :key="report.id"
+          class="report-card"
+          :class="{ disabled: reportsLocked || section.disabled }"
+        >
+          <div class="report-card-check">
+            <input
+              type="checkbox"
+              :checked="selected.includes(report.id)"
+              :disabled="reportsLocked || section.disabled"
+              @change="toggleReport(report.id)"
+            />
+          </div>
+          <div class="report-card-content">
+            <div class="report-card-label">{{ report.label }}</div>
+            <div class="report-card-desc">{{ report.description }}</div>
+            <div class="report-card-meta">
+              <span v-if="report.exists" class="report-card-exists">✓ exists</span>
+              <span v-if="costEstimates[report.id] != null" class="report-card-cost">{{ formatCost(costEstimates[report.id]) }}</span>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
     </div>
 
     <!-- Activity indicator -->
@@ -384,7 +458,24 @@ function onStop(): void {
   line-height: 1.5;
 }
 
-/* ── Platform tabs ─────────────────────────────────────────────────────────── */
+.report-section-header {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+.report-section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.report-section-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ── Platform tabs (legacy) ──────────────────────────────────────────────── */
 
 .platform-tabs {
   display: flex;

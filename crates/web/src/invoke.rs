@@ -190,6 +190,9 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
             Ok(json!(null))
         }
         "list_report_types_cmd" => to_val(db::list_report_types_cmd(&db).await?),
+        "list_craft_report_groups_cmd" => {
+            to_val(loremetry_core::craft_report_groups::list_craft_report_groups_cmd().await?)
+        }
         "list_reports_cmd" => {
             let folder = take_story_id(&args)?;
             to_val(db::list_reports_cmd(&db, folder).await?)

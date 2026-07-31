@@ -1,12 +1,15 @@
 import { ref, computed } from 'vue';
 
-const platform = ref<'kdp' | 'wide' | 'craft'>(
-  (localStorage.getItem('platform') as 'kdp' | 'wide' | 'craft') || 'kdp'
+export type PlatformId = 'kdp' | 'craft' | 'publish' | 'saved';
+
+const stored = localStorage.getItem('platform');
+const platform = ref<PlatformId>(
+  stored === 'wide' ? 'kdp' : (stored as PlatformId) || 'kdp',
 );
 
 const isKdp = computed(() => platform.value === 'kdp');
 
-function setPlatform(p: 'kdp' | 'wide' | 'craft'): void {
+function setPlatform(p: PlatformId): void {
   platform.value = p;
   localStorage.setItem('platform', p);
 }
