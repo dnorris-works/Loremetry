@@ -1722,9 +1722,10 @@ pub async fn save_document(pool: &PgPool, story_id: &str, doc_type: &str, conten
 }
 
 pub async fn save_document_at(pool: &PgPool, story_id: &str, doc_type: &str, content: &str, timestamp: &str) -> Result<(), String> {
+    archive_documents_for_type(pool, story_id, doc_type, "superseded").await?;
     sqlx::query(
-        "INSERT INTO story_documents (story_id, doc_type, content, generated_at)
-         VALUES ($1, $2, $3, $4)",
+        "INSERT INTO story_documents (story_id, doc_type, content, generated_at, status)
+         VALUES ($1, $2, $3, $4, 'current')",
     )
     .bind(story_id)
     .bind(doc_type)
@@ -1736,9 +1737,52 @@ pub async fn save_document_at(pool: &PgPool, story_id: &str, doc_type: &str, con
     Ok(())
 }
 
+/// Mark current snapshots of a report type as archived before saving a new version.
+pub async fn archive_documents_for_type(
+    pool: &PgPool,
+    story_id: &str,
+    doc_type: &str,
+    reason: &str,
+) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "UPDATE story_documents SET status = 'archived', archived_at = $1, archive_reason = $2
+         WHERE story_id = $3 AND doc_type = $4 AND status = 'current'",
+    )
+    .bind(&now)
+    .bind(reason)
+    .bind(story_id)
+    .bind(doc_type)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Archive every current report for a story (e.g. manuscript or summaries changed).
+pub async fn archive_all_current_reports(
+    pool: &PgPool,
+    story_id: &str,
+    reason: &str,
+) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "UPDATE story_documents SET status = 'archived', archived_at = $1, archive_reason = $2
+         WHERE story_id = $3 AND status = 'current'",
+    )
+    .bind(&now)
+    .bind(reason)
+    .bind(story_id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub async fn get_document(pool: &PgPool, story_id: &str, doc_type: &str) -> Option<String> {
     sqlx::query_scalar::<_, String>(
-        "SELECT content FROM story_documents WHERE story_id = $1 AND doc_type = $2 ORDER BY generated_at DESC LIMIT 1",
+        "SELECT content FROM story_documents WHERE story_id = $1 AND doc_type = $2 AND status = 'current'
+         ORDER BY generated_at DESC LIMIT 1",
     )
     .bind(story_id)
     .bind(doc_type)
@@ -1769,7 +1813,8 @@ pub struct ReportEnvelope {
 
 pub async fn list_documents(pool: &PgPool, story_id: &str) -> Vec<DocMeta> {
     let rows = sqlx::query(
-        "SELECT id, doc_type, generated_at FROM story_documents WHERE story_id = $1 ORDER BY generated_at DESC",
+        "SELECT id, doc_type, generated_at FROM story_documents
+         WHERE story_id = $1 AND status = 'current' ORDER BY generated_at DESC",
     )
     .bind(story_id)
     .fetch_all(pool)
@@ -2039,6 +2084,130 @@ pub async fn get_sidebar_reports(db: &Db, folder: String, platform: String) -> R
         .collect();
 
     Ok(groups)
+}
+
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct ArchivedReportRow {
+    pub id:            i64,
+    pub doc_type:      String,
+    pub label:         String,
+    pub generated_at:  String,
+    pub archived_at:   String,
+    pub archive_reason: String,
+}
+
+pub async fn list_archived_reports(db: &Db, story_id: &str) -> Result<Vec<ArchivedReportRow>, String> {
+    let rows = sqlx::query(
+        "SELECT id, doc_type, generated_at, archived_at, archive_reason
+         FROM story_documents
+         WHERE story_id = $1 AND status = 'archived'
+         ORDER BY archived_at DESC, id DESC",
+    )
+    .bind(story_id)
+    .fetch_all(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut out = Vec::new();
+    for r in rows {
+        let id: i64 = r.try_get(0).unwrap_or(0);
+        let doc_type: String = r.try_get(1).unwrap_or_default();
+        let generated_at: String = r.try_get(2).unwrap_or_default();
+        let archived_at: String = r.try_get(3).unwrap_or_default();
+        let archive_reason: String = r.try_get(4).unwrap_or_default();
+        let label = label_for_doc_type(&db.pool, &doc_type).await;
+        out.push(ArchivedReportRow {
+            id,
+            doc_type,
+            label,
+            generated_at,
+            archived_at,
+            archive_reason,
+        });
+    }
+    Ok(out)
+}
+
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct ChapterSummaryStatusRow {
+    pub file:            String,
+    pub title:           String,
+    pub word_count:      i64,
+    pub updated_at:      String,
+    pub summary_preview: String,
+}
+
+pub async fn list_chapter_summary_status(pool: &PgPool, story_id: &str) -> Vec<ChapterSummaryStatusRow> {
+    sqlx::query(
+        "SELECT file, title, word_count, updated_at, signals
+         FROM chapter_summaries WHERE story_id = $1 ORDER BY file",
+    )
+    .bind(story_id)
+    .fetch_all(pool)
+    .await
+    .ok()
+    .map(|rows| {
+        rows.into_iter()
+            .filter_map(|r| {
+                let signals: String = r.try_get(4).ok()?;
+                if signals.trim().is_empty() {
+                    return None;
+                }
+                let preview: String = signals.chars().take(160).collect();
+                let summary_preview = if signals.chars().count() > 160 {
+                    format!("{preview}…")
+                } else {
+                    preview
+                };
+                Some(ChapterSummaryStatusRow {
+                    file: r.try_get(0).ok()?,
+                    title: r.try_get(1).ok()?,
+                    word_count: r.try_get(2).ok()?,
+                    updated_at: r.try_get(3).ok()?,
+                    summary_preview,
+                })
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct StoryArtifactStateResponse {
+    pub chapter_count: usize,
+    pub chapters:      Vec<ChapterSummaryStatusRow>,
+    pub artifacts:     Vec<(String, String)>,
+}
+
+pub async fn get_story_artifact_state(db: &Db, story_id: &str) -> Result<StoryArtifactStateResponse, String> {
+    if !crate::stories::story_exists(db, story_id).await {
+        return Err("Story not found.".into());
+    }
+    let pool = &db.pool;
+    let chapters = list_chapter_summary_status(pool, story_id).await;
+    let summary_count = chapter_summary_count(pool, story_id).await;
+    let artifacts = vec![
+        ("summaries".to_string(), artifact_label(summary_count > 0)),
+        ("genre_data".to_string(), artifact_label(load_genre_data(pool, story_id).await.is_some())),
+        ("genre_ranking".to_string(), artifact_label(has_genre_rankings(pool, story_id).await)),
+        ("categories".to_string(), artifact_label(has_category_results(pool, story_id).await)),
+        ("kdp_keywords".to_string(), artifact_label(load_kdp_keywords(pool, story_id).await.is_some())),
+        ("mi_search_terms".to_string(), artifact_label(!load_mi_search_terms(pool, story_id).await.is_empty())),
+        ("discovery_keywords".to_string(), artifact_label(!load_discovery_keywords(pool, story_id).await.is_empty())),
+        ("keyword_search".to_string(), artifact_label(has_keyword_search_results(pool, story_id).await)),
+        ("bisac".to_string(), artifact_label(has_bisac_classifications(pool, story_id).await)),
+        ("zeigarnik".to_string(), artifact_label(has_zeigarnik_analysis(pool, story_id).await)),
+    ];
+
+    Ok(StoryArtifactStateResponse {
+        chapter_count: chapters.len(),
+        chapters,
+        artifacts,
+    })
+}
+
+fn artifact_label(ready: bool) -> String {
+    if ready { "ready".to_string() } else { "missing".to_string() }
 }
 
 // ── BISAC classifications ──────────────────────────────────────────────

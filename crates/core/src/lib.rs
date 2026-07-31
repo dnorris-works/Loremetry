@@ -19,6 +19,7 @@ pub mod prompts;
 pub mod secrets;
 pub mod series;
 pub mod stories;
+pub mod story_settings;
 pub mod users;
 pub mod usage;
 pub mod winningcat;

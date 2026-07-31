@@ -97,6 +97,29 @@ export interface SavedReportMeta {
   saved_at: string;
 }
 
+export interface ArchivedReportRow {
+  id: number;
+  doc_type: string;
+  label: string;
+  generated_at: string;
+  archived_at: string;
+  archive_reason: string;
+}
+
+export interface ChapterSummaryStatusRow {
+  file: string;
+  title: string;
+  word_count: number;
+  updated_at: string;
+  summary_preview: string;
+}
+
+export interface StoryArtifactStateResponse {
+  chapter_count: number;
+  chapters: ChapterSummaryStatusRow[];
+  artifacts: [string, string][];
+}
+
 export interface ReportEnvelope {
   id: number;
   doc_type: string;

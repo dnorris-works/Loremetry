@@ -197,6 +197,23 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
             let folder = take_story_id(&args)?;
             to_val(db::list_reports_cmd(&db, folder).await?)
         }
+        "get_story_artifact_state" => {
+            let folder = take_story_id(&args)?;
+            to_val(loremetry_core::story_settings::get_story_artifact_state(app, folder).await?)
+        }
+        "refresh_chapter_summaries" => {
+            let request: FolderRequest = take_request(&args)?;
+            to_val(loremetry_core::story_settings::refresh_chapter_summaries(app, request).await?)
+        }
+        "clear_chapter_summaries" => {
+            let folder = take_story_id(&args)?;
+            loremetry_core::story_settings::clear_chapter_summaries(app, folder).await?;
+            Ok(json!(null))
+        }
+        "get_archived_reports" => {
+            let folder = take_story_id(&args)?;
+            to_val(loremetry_core::story_settings::get_archived_reports(app, folder).await?)
+        }
 
         // ── Settings / external APIs ─────────────────────────────────────────
         "list_models" => {

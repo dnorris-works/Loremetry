@@ -379,6 +379,9 @@ function formatTimestamp(ts: string): string {
     </div>
 
     <div class="nav-section settings-section">
+      <button class="nav-item nav-item-muted" @click="showPanel('settings')">
+        Settings
+      </button>
       <button v-if="isAdmin" class="nav-item nav-item-muted" @click="showPanel('admin')">
         Admin
       </button>

@@ -18,6 +18,7 @@ import AnalyzerPanel from './AnalyzerPanel.vue';
 import SavedReportsPanel from './SavedReportsPanel.vue';
 import ReportsViewer from './ReportsViewer.vue';
 import AdminPanel from './AdminPanel.vue';
+import SettingsPanel from './settings/SettingsPanel.vue';
 import StoryForm from './StoryForm.vue';
 import StorySourcesPanel from './StorySourcesPanel.vue';
 import SeriesForm from './SeriesForm.vue';
@@ -52,7 +53,7 @@ const appMode = ref<AppMode>('analyzer');
 provide('appMode', appMode);
 provide('setAppMode', (mode: AppMode) => { appMode.value = mode; });
 
-type Panel = 'analyzer' | 'reports' | 'admin' | 'story-form' | 'series' | 'manuscript' | 'new-document' | 'sources';
+type Panel = 'analyzer' | 'reports' | 'admin' | 'settings' | 'story-form' | 'series' | 'manuscript' | 'new-document' | 'sources';
 const activePanel = ref<Panel>('analyzer');
 const sidebarOpen = ref(false);
 const sourcesWizard = ref(false);
@@ -254,6 +255,7 @@ onMounted(() => {
         <AnalyzerPanel v-else-if="activePanel === 'analyzer'" />
         <ReportsViewer v-if="activePanel === 'reports'" />
         <AdminPanel v-if="activePanel === 'admin'" />
+        <SettingsPanel v-if="activePanel === 'settings'" />
         <StoryForm
           v-if="activePanel === 'story-form'"
           :story="editingStory"

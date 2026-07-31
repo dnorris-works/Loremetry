@@ -1,20 +1,10 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref } from 'vue';
 import { adminFetch, adminUploadFile, invoke } from '../api';
-import { settingsKey, showPanelKey } from '../injectionKeys';
-import type { ModelInfo, StaleCleanupResult, WinningCatImportResult } from '../types';
-import { useReportTypes } from '../composables/useReportTypes';
+import { showPanelKey } from '../injectionKeys';
+import type { StaleCleanupResult, WinningCatImportResult } from '../types';
 
 const showPanel = inject(showPanelKey)!;
-const settingsCtx = inject(settingsKey)!;
-const { reportTypes, loadReportTypes } = useReportTypes();
-
-onMounted(() => {
-  void loadReportTypes();
-});
-
-const savedMsg = ref('');
-const modelFetchStatus = ref('');
 
 const platformStatus = ref<{
   anthropic: boolean;
@@ -88,61 +78,6 @@ const sqlError = ref('');
 const sqlMeta = ref('');
 const sqlColumns = ref<string[]>([]);
 const sqlRows = ref<unknown[][]>([]);
-
-type ModelSort = 'price' | 'provider';
-const modelSort = ref<ModelSort>('price');
-
-const sortedModels = computed(() => {
-  return [...settingsCtx.models.value].sort((a, b) => {
-    if (modelSort.value === 'provider') {
-      const provA = a.owned_by.toLowerCase();
-      const provB = b.owned_by.toLowerCase();
-      if (provA !== provB) return provA.localeCompare(provB);
-    }
-    const priceA = a.input_price ?? Infinity;
-    const priceB = b.input_price ?? Infinity;
-    return priceA - priceB;
-  });
-});
-
-type Tier = 'basic' | 'capable' | 'strong';
-const TIER_RANK: Record<Tier, number> = { basic: 0, capable: 1, strong: 2 };
-
-function modelTier(m: ModelInfo): Tier {
-  const price = m.input_price ?? 0;
-  if (price <= 0.001) return 'basic';
-  if (price <= 0.01) return 'capable';
-  return 'strong';
-}
-
-function minTierFor(fnKey: string): Tier {
-  if (fnKey === 'prose') return 'strong';
-  const tiers = reportTypes.value
-    .filter(r => r.model_slot === fnKey)
-    .map(r => (r.min_tier as Tier) || 'basic');
-  if (tiers.length === 0) return 'basic';
-  return tiers.reduce((best, t) => (TIER_RANK[t] > TIER_RANK[best] ? t : best), 'basic' as Tier);
-}
-
-function modelFitLabel(m: ModelInfo, fnKey: string): string {
-  const tier = modelTier(m);
-  const min = minTierFor(fnKey);
-  if (TIER_RANK[tier] >= TIER_RANK[min]) return ' ✓';
-  return ' ⚠';
-}
-
-function fnOptionLabel(m: ModelInfo, fnKey: string): string {
-  return m.id + modelFitLabel(m, fnKey);
-}
-
-function modelLabel(m: ModelInfo): string {
-  let label = m.id;
-  if (m.owned_by) label += ` (${m.owned_by})`;
-  if (m.input_price != null && m.output_price != null) {
-    label += ` — $${m.input_price}/$${m.output_price} per 1K tokens`;
-  }
-  return label;
-}
 
 onMounted(() => {
   loadDbTables();
@@ -397,23 +332,6 @@ function formatCell(value: unknown): string {
   return String(value);
 }
 
-async function onFetchModels(): Promise<void> {
-  modelFetchStatus.value = 'Fetching models...';
-  const result = await settingsCtx.fetchModels();
-  modelFetchStatus.value = result.success
-    ? `${settingsCtx.models.value.length} models loaded.`
-    : result.error;
-}
-
-function onSave(): void {
-  settingsCtx.saveSettings().then(() => {
-    savedMsg.value = '✓ Saved';
-    setTimeout(() => { savedMsg.value = ''; }, 2000);
-  }).catch((e) => {
-    savedMsg.value = 'Save failed: ' + String(e);
-  });
-}
-
 async function onWinningCatFile(ev: Event): Promise<void> {
   const input = ev.target as HTMLInputElement;
   const file = input.files?.[0];
@@ -637,130 +555,7 @@ async function onRemoveStale(): Promise<void> {
     </div>
 
     <div class="settings-section-divider"></div>
-
-    <!-- Appearance -->
-    <h3 class="section-title">Appearance</h3>
-        <div class="settings-form">
-          <label class="field-label">Theme</label>
-          <div class="provider-options">
-            <label class="provider-option" :class="{ active: settingsCtx.theme.value === 'dark' }">
-              <input
-                type="radio"
-                name="theme"
-                value="dark"
-                :checked="settingsCtx.theme.value === 'dark'"
-                @change="settingsCtx.setTheme('dark')"
-              />
-              Dark
-            </label>
-            <label class="provider-option" :class="{ active: settingsCtx.theme.value === 'light' }">
-              <input
-                type="radio"
-                name="theme"
-                value="light"
-                :checked="settingsCtx.theme.value === 'light'"
-                @change="settingsCtx.setTheme('light')"
-              />
-              Light
-            </label>
-          </div>
-        </div>
-
-        <!-- AI provider -->
-        <div class="settings-section-divider"></div>
-        <h3 class="section-title">AI provider &amp; models</h3>
-        <div class="settings-form">
-          <label class="field-label">Provider (this browser)</label>
-          <div class="provider-options">
-            <label class="provider-option">
-              <input type="radio" v-model="settingsCtx.provider.value" value="claude" />
-              Claude
-            </label>
-            <label class="provider-option">
-              <input type="radio" v-model="settingsCtx.provider.value" value="tokenmix" />
-              TokenMix
-            </label>
-          </div>
-
-          <label class="field-label">
-            Default model
-            <span class="model-hint">Fetch models first, then assign each function below.</span>
-          </label>
-          <div class="model-row">
-            <select v-model="settingsCtx.modelAssignments.value.default">
-              <option v-if="sortedModels.length === 0" value="" disabled>No models loaded</option>
-              <option v-for="m in sortedModels" :key="m.id" :value="m.id">{{ modelLabel(m) }}</option>
-            </select>
-            <button type="button" class="btn btn-sm" @click="onFetchModels">Fetch models</button>
-          </div>
-          <div class="status-msg">{{ modelFetchStatus }}</div>
-
-          <div v-if="sortedModels.length > 0" class="model-sort-row">
-            <span class="model-sort-label">Sort:</span>
-            <button type="button" class="model-sort-btn" :class="{ active: modelSort === 'price' }" @click="modelSort = 'price'">Price</button>
-            <button type="button" class="model-sort-btn" :class="{ active: modelSort === 'provider' }" @click="modelSort = 'provider'">Provider</button>
-          </div>
-
-          <div v-if="sortedModels.length > 0" class="model-assignments">
-            <div class="model-assign-header">Model per function</div>
-            <div class="model-assign-row">
-              <div class="model-assign-label"><strong>Chapter summaries</strong></div>
-              <select v-model="settingsCtx.modelAssignments.value.summaries">
-                <option value="">(Use default)</option>
-                <option v-for="m in sortedModels" :key="m.id" :value="m.id">{{ fnOptionLabel(m, 'summaries') }}</option>
-              </select>
-            </div>
-            <div class="model-assign-row">
-              <div class="model-assign-label"><strong>Genre analysis</strong></div>
-              <select v-model="settingsCtx.modelAssignments.value.genre">
-                <option value="">(Use default)</option>
-                <option v-for="m in sortedModels" :key="m.id" :value="m.id">{{ fnOptionLabel(m, 'genre') }}</option>
-              </select>
-            </div>
-            <div class="model-assign-row">
-              <div class="model-assign-label"><strong>Keywords &amp; categories</strong></div>
-              <select v-model="settingsCtx.modelAssignments.value.keywords">
-                <option value="">(Use default)</option>
-                <option v-for="m in sortedModels" :key="m.id" :value="m.id">{{ fnOptionLabel(m, 'keywords') }}</option>
-              </select>
-            </div>
-            <div class="model-assign-row">
-              <div class="model-assign-label"><strong>Continuity</strong></div>
-              <select v-model="settingsCtx.modelAssignments.value.continuity">
-                <option value="">(Use default)</option>
-                <option v-for="m in sortedModels" :key="m.id" :value="m.id">{{ fnOptionLabel(m, 'continuity') }}</option>
-              </select>
-            </div>
-            <div class="model-assign-row">
-              <div class="model-assign-label"><strong>Show don't tell</strong></div>
-              <select v-model="settingsCtx.modelAssignments.value.showDontTell">
-                <option value="">(Use default)</option>
-                <option v-for="m in sortedModels" :key="m.id" :value="m.id">{{ fnOptionLabel(m, 'showDontTell') }}</option>
-              </select>
-            </div>
-            <div class="model-assign-row">
-              <div class="model-assign-label"><strong>AI-isms</strong></div>
-              <select v-model="settingsCtx.modelAssignments.value.aiIsms">
-                <option value="">(Use default)</option>
-                <option v-for="m in sortedModels" :key="m.id" :value="m.id">{{ fnOptionLabel(m, 'aiIsms') }}</option>
-              </select>
-            </div>
-            <div class="model-assign-row">
-              <div class="model-assign-label"><strong>Prose suggestions</strong></div>
-              <select v-model="settingsCtx.modelAssignments.value.prose">
-                <option value="">(Use default)</option>
-                <option v-for="m in sortedModels" :key="m.id" :value="m.id">{{ fnOptionLabel(m, 'prose') }}</option>
-              </select>
-            </div>
-          </div>
-
-          <button type="button" class="btn" @click="onSave">Save settings</button>
-          <div class="settings-saved">{{ savedMsg }}</div>
-        </div>
-
-        <!-- WinningCat -->
-        <div class="settings-section-divider"></div>
-        <h3 class="section-title">WinningCat catalog</h3>
+    <h3 class="section-title">WinningCat catalog</h3>
         <div class="settings-form">
           <p class="panel-desc">Import browse-node CSV into the server database.</p>
           <label class="btn file-btn" :class="{ disabled: importDisabled }">

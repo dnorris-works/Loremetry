@@ -165,6 +165,42 @@ async function saveSettings(): Promise<void> {
   void saveThemeToServer(theme.value);
 }
 
+async function testCanopy(): Promise<{ success: boolean; error: string }> {
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const bypass = getOperatorBypassToken();
+    if (bypass) headers['x-loremetry-admin-bypass'] = bypass;
+    const authHeaders = await buildAuthHeaders();
+    authHeaders.forEach((v, k) => { headers[k] = v; });
+    const res = await fetch('/api/settings/test-canopy', { method: 'POST', headers });
+    if (!res.ok) {
+      return { success: false, error: `HTTP ${res.status}` };
+    }
+    const data = await res.json() as { success?: boolean; error?: string };
+    return { success: Boolean(data.success), error: data.error || '' };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+async function testDataforseo(): Promise<{ success: boolean; error: string }> {
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const bypass = getOperatorBypassToken();
+    if (bypass) headers['x-loremetry-admin-bypass'] = bypass;
+    const authHeaders = await buildAuthHeaders();
+    authHeaders.forEach((v, k) => { headers[k] = v; });
+    const res = await fetch('/api/settings/test-dataforseo', { method: 'POST', headers });
+    if (!res.ok) {
+      return { success: false, error: `HTTP ${res.status}` };
+    }
+    const data = await res.json() as { success?: boolean; error?: string };
+    return { success: Boolean(data.success), error: data.error || '' };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
 export function useSettings() {
   return {
     theme,
@@ -179,5 +215,7 @@ export function useSettings() {
     folderStructure,
     fetchModels,
     saveSettings,
+    testCanopy,
+    testDataforseo,
   };
 }

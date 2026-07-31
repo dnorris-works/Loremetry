@@ -80,6 +80,8 @@ export interface SettingsContext {
   folderStructure: Ref<FolderStructure>;
   fetchModels: () => Promise<{ success: boolean; error: string }>;
   saveSettings: () => Promise<void>;
+  testCanopy: () => Promise<{ success: boolean; error: string }>;
+  testDataforseo: () => Promise<{ success: boolean; error: string }>;
 }
 
 export const settingsKey: InjectionKey<SettingsContext> = Symbol('settings');
