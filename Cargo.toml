@@ -2,3 +2,6 @@
 resolver = "2"
 members = ["crates/core", "crates/web"]
 default-members = ["crates/web"]
+exclude = ["src-tauri"]
+
+# Web app only. Desktop Tauri app lives in Loremetry-Desktop (separate repo).
