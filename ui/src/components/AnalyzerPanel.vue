@@ -617,6 +617,32 @@ function onStop(): void {
   flex-wrap: wrap;
 }
 
+.report-card-label-row :deep(.tier-badge) {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
+}
+
+.report-card-label-row :deep(.tier-badge--free) {
+  color: var(--color-tier-free);
+  background: color-mix(in srgb, var(--color-tier-free) 14%, transparent);
+}
+
+.report-card-label-row :deep(.tier-badge--subscriber) {
+  color: var(--color-tier-subscriber);
+  background: color-mix(in srgb, var(--color-tier-subscriber) 14%, transparent);
+}
+
+.report-card-label-row :deep(.tier-badge--locked) {
+  color: var(--color-text-tertiary);
+  background: color-mix(in srgb, var(--color-tier-locked) 35%, transparent);
+}
+
 .report-card-label {
   font-size: 13px;
   font-weight: 600;
@@ -672,7 +698,7 @@ function onStop(): void {
   background: var(--accent);
   border: none;
   border-radius: var(--radius);
-  color: #fff;
+  color: var(--color-on-accent);
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;

@@ -633,7 +633,7 @@ function formatTimestamp(ts: string): string {
 
 .mode-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--color-on-accent);
 }
 
 .mode-btn:not(.active):hover {

@@ -39,7 +39,7 @@ function toggleTheme(): void {
         :aria-label="settingsCtx?.theme.value === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
         @click="toggleTheme"
       >
-        {{ settingsCtx?.theme.value === 'dark' ? '☀' : '☾' }}
+        {{ settingsCtx?.theme.value === 'dark' ? 'Light' : 'Dark' }}
       </button>
       <button type="button" class="titlebar-btn" @click="onSignOut">Sign out</button>
     </div>
