@@ -156,6 +156,15 @@ pub fn wrap_single_response(raw: &str) -> Result<serde_json::Value, String> {
     serde_json::from_str(&obj).map_err(|e| format!("Parse error: {} | {}", e, &obj[..obj.len().min(200)]))
 }
 
+/// Extract a JSON array field from a per-chapter batch value object.
+pub fn chapter_array_field(value: &serde_json::Value, field: &str) -> Vec<serde_json::Value> {
+    value
+        .get(field)
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
 /// Run batched calls with per-chapter fallback when a batch fails or omits files.
 pub async fn process_chapters_batched(
     app: &AppCtx,

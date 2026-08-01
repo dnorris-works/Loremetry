@@ -10,6 +10,7 @@ use base64::Engine;
 use reqwest::Client;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::app_ctx::AppCtx;
@@ -261,6 +262,97 @@ impl DataForSeoClient {
         self.google_search_volume(&keywords).await?;
         Ok(())
     }
+
+    /// Google autocomplete suggestions for seed expansion (wide keyword search).
+    pub async fn google_autocomplete_suggestions(
+        &self,
+        seeds: &[String],
+        max_per_seed: u32,
+    ) -> Result<Vec<String>, String> {
+        let seeds = normalize_keyword_list(seeds);
+        if seeds.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let tasks: Vec<Value> = seeds
+            .iter()
+            .map(|seed| {
+                serde_json::json!({
+                    "keyword": seed,
+                    "location_code": 2840,
+                    "language_code": "en",
+                    "limit": max_per_seed.max(5),
+                })
+            })
+            .collect();
+
+        let resp = self.post("/serp/google/autocomplete/live/advanced", &tasks).await?;
+        let mut collected = Vec::new();
+        let mut seen = HashSet::new();
+
+        if let Some(tasks_arr) = resp["tasks"].as_array() {
+            for task in tasks_arr {
+                if let Some(results_arr) = task["result"].as_array() {
+                    for result in results_arr {
+                        let mut values = Vec::new();
+                        collect_string_fields(result, &mut values, &["keyword", "suggestion", "title"]);
+                        for value in values {
+                            let v = value.trim();
+                            if v.is_empty() {
+                                continue;
+                            }
+                            let key = v.to_lowercase();
+                            if seen.insert(key) {
+                                collected.push(v.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(collected)
+    }
+}
+
+fn collect_string_fields(value: &Value, out: &mut Vec<String>, keys: &[&str]) {
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map {
+                if keys.iter().any(|wanted| wanted.eq_ignore_ascii_case(k)) {
+                    if let Some(s) = v.as_str() {
+                        let trimmed = s.trim();
+                        if !trimmed.is_empty() {
+                            out.push(trimmed.to_string());
+                        }
+                    }
+                }
+                collect_string_fields(v, out, keys);
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                collect_string_fields(item, out, keys);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn normalize_keyword_list(raw: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for k in raw {
+        let trimmed = k.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let normalized = trimmed.to_lowercase();
+        if seen.insert(normalized) {
+            out.push(trimmed.to_string());
+        }
+    }
+    out
 }
 
 // ── Tauri commands ────────────────────────────────────────────────────────────

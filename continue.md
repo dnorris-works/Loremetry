@@ -153,38 +153,37 @@ The web app has real backend work (KDP/Wide pipeline, auth, Postgres) but **desk
 | Analyzer tabs | **KDP/Wide \| Craft \| Publish \| Saved** | **Done** — `AnalyzerPlatformTabs.vue` |
 | Saved reports | `SavedReportsPanel.vue` | **Done** — `SavedReportsPanel.vue` |
 | Settings | **9-tab** `SettingsPanel.vue` | `AdminPanel.vue` (operator: secrets, SQL) only |
-| Help | `HelpPanel.vue` + `src/help/reports.md` | Missing |
+| Help | `HelpPanel.vue` + `src/help/reports.md` | **Done** |
 | Craft UI grouping | `useCraftReportGroups.ts` + `craft-report-groups.json` | **Done** — grouped `AnalyzerPanel.vue` |
 | Marketing | Campaigns, creatives, platform accounts | **Done** — Marketing mode + `campaigns.rs` |
 | Manuscript editor | `ManuscriptViewer.vue` + suggest-fix | `ManuscriptViewer.vue` exists — verify parity |
-| Cost badges | `reportCostPricing.ts` | `lib/estimateCosts.ts` — partial |
-| Freshness badges | `check_analysis_state` UX | **Partial** — exists badges on cards; no full freshness API |
+| Cost badges | `reportCostPricing.ts` | **Done** — `lib/reportCostPricing.ts` + AnalyzerPanel |
+| Freshness badges | `check_analysis_state` UX | **Done** — migration 012 + Analyzer badges |
+| AI spend footer | `StatusFooter.vue` + `useAiSpend.ts` | **Done** |
 
 ### Reports & analysis (`crates/core/src/analysis/`)
 
-**Ported to web core:** `chapters`, `genres`, `categories`, `keywords`, `bisac`, `pipeline`, `zeigarnik`, `continuity`, `show_dont_tell`, `ai_isms`, `readability`, **`craft_audits`**, **`publish_audits` (partial)**
+**Ported to web core:** `chapters`, `genres`, `categories`, `keywords`, `bisac`, `pipeline`, `zeigarnik`, `continuity`, `show_dont_tell`, `ai_isms`, `readability`, `craft_audits`, **`publish_audits` (all 8 publish types)**, **`craft_prose_checks`**, **`content_advisory`**, **`chapter_stats`**
 
-**Not ported (desktop only):**
+**Desktop parity gaps (remaining):**
 
-| Module | Role |
-|--------|------|
-| `craft_prose_checks.rs` | Batched SDT + AI-isms |
-| `content_advisory.rs` | Wide content & maturity advisory |
-| `publish_audits.rs` (remainder) | `ai_beta_reader`, `cliffhanger_score`, `pacing_curve`, `vellum_prep` — need `batch_prompt.rs` |
-| `chapter_stats.rs` | Deterministic chapter fingerprints |
+| Area | Notes |
+|------|-------|
+| `wide_analysis` bundle doc | KDP `analysis` doc exists; full `wide_analysis_v1` combined report + `wide_paste` assembly not wired in pipeline |
+| `google_keyword_search` report doc | DataForSEO enriches discovery keywords inline; standalone Google keyword report not saved |
+| `chapter_fingerprints` table | `chapter_stats.rs` ported; deterministic fingerprints used for display/`is_prose_summary`; no separate DB table yet |
+| Report catalog UI | `lore.report_types` seed is a subset of desktop (~40 types); craft/publish types load from DB migrations/admin |
 
-**Report catalog (~40 types on desktop, partial on web):**
+**Report catalog:**
 
-- **KDP/Wide visible:** `analysis`, `wide_analysis`, `mi_search_terms`, `keyword_search`, `competition_report`, `review_mining`, `author_analysis` — backend largely ported; UI thinner
-- **Craft:** desktop ~22 types in 6 groups; web **generic craft audits ported** via `craft_audits.rs` + `run_craft_pipeline`
-- **Publish:** 8 types on desktop — **4 ported** (`hook_strength`, `line_polish`, `blurb_builder`, `print_production`); 4 need `batch_prompt`
-- **Infrastructure (hidden):** chapter_summaries, genre_analysis, etc. — partially in pipeline; no Settings → Story Data UI
+- **KDP/Wide:** `analyze_story` runs KDP or wide path; content maturity advisory runs on wide; competition/review/author via market intel
+- **Craft:** generic audits via `craft_audits.rs`; SDT + AI-isms use **combined batched pass** when both selected (`craft_prose_checks.rs`)
+- **Publish:** all 8 types in `publish_audits.rs` with `batch_prompt.rs` (`ai_beta_reader`, `cliffhanger_score`, `pacing_curve`, `vellum_prep`, etc.)
 
 **Data / UX gaps:**
 
-- `lore.saved_reports` — saved panel wired; archived-reports settings UI missing
-- Report freshness badges / `check_analysis_state` on backend `AnalysisState` — partial
-- `reportRenderer.ts` — craft audit schema added; verify publish schemas for all ported types
+- `lore.saved_reports` — saved panel wired; archived-reports in Settings **done**
+- `reportRenderer.ts` — publish + wide schemas aligned with desktop (incl. `content_maturity_advisory_v1`, `wide_analysis_v1`, fingerprint display in chapter summaries)
 - Series-scoped continuity + craft series reports — **wired** in craft pipeline + AnalyzerPanel
 
 ---
@@ -233,14 +232,14 @@ Provider API keys, Clerk issuer/publishable key, bootstrap admin → **Postgres*
 | Asset upload (slots/kinds) | **Done** | MD + DOCX via `story_assets`; hash merge; zip import/export |
 | Asset list / edit / delete UI | **Done** | documents API + Story sources panel |
 | Zip download + manifest | **Done** | `GET /api/stories/{id}/export.zip` |
-| Report types metadata | **Partial** | `lore.report_types` seeded; craft groups copied |
-| Analysis E2E | **Partial** | KDP/Wide + craft/publish subset in core; **worker queue** |
-| Analyzer UI parity | **Mostly done** | Platform tabs, craft groups, saved panel; no help/spend footer |
+| Report types metadata | **Done** | Full desktop catalog + `hidden` column (`013_report_catalog.sql`) |
+| Analysis E2E | **Done** | Selective `analyze_story` (`selected`, ebook/print); wide bundle; craft/publish; worker queue |
+| Analyzer UI parity | **Done** | Dep overrides, setup alerts, publish formats, summary cost confirm, resizable sidebar |
 | Craft reports | **Done** | `craft_audits.rs`, `craft-report-groups.json`, pipeline loops |
 | Publish reports | **Done** | All 8 types + `batch_prompt.rs` |
 | User settings UI | **Done** | SettingsPanel — General, AI, Canopy, DataForSEO, Story Data, Archived |
 | Marketing mode | **Done** | Campaigns, creatives, platform accounts, landing pages |
-| Full desktop catalog parity | **Not v1 goal** | Phased port below |
+| Full desktop catalog parity | **Done** | Catalog seed + selective KDP/Wide pipeline + Analyzer shell |
 
 Do **not** re-scaffold from zero — extend what exists.
 
@@ -248,17 +247,18 @@ Do **not** re-scaffold from zero — extend what exists.
 
 ## Phased port priority (backlog)
 
-Full parity is **not** a v1 blocker. When porting, follow this order:
+Desktop look/act parity for Analyzer (catalog, selective pipeline, shell UX) is **done**. Remaining intentional web-only differences: Clerk auth, `story_assets` slots, job worker, Admin for DB/WinningCat (not user Settings Folders/Database tabs).
 
-1. **Analyzer shell** — ~~platform tabs, craft groups, saved panel~~ **done**; freshness badges, help panel optional
-2. **Craft pipeline** — ~~`craft_audits.rs`, groups, `run_craft_pipeline`~~ **done**
-3. **Publish tab** — ~~finish `publish_audits.rs` (4 remaining) + renderer schemas + `batch_prompt`~~ **done**
-4. **Settings (user)** — ~~AI model slots, Canopy/DataForSEO tests, story data / summary refresh, archived reports~~ **done**
-5. **Content ops** — ~~`story_assets` migration, DOCX ingest, hash-merge upload, zip round-trip~~ **done**
-6. **Worker split** — ~~long jobs off the API process~~ **done** (`lore.jobs`, `loremetry-worker`, job SSE)
-7. **Marketing mode** — ~~optional later~~ **done** (`011_ad_marketing`, campaigns API, Marketing UI)
+Historical order (all complete):
 
-**Parallel track:** web-native content model (`story_assets`, DOCX, zip, worker) can proceed alongside UI/report parity.
+1. **Analyzer shell** — platform tabs, craft groups, saved panel, freshness, help, spend footer, dep overrides, publish formats, resizable sidebar
+2. **Craft pipeline** — `craft_audits.rs`, groups, `run_craft_pipeline`
+3. **Publish tab** — `publish_audits.rs` + renderer + `batch_prompt`
+4. **Settings (user)** — AI model slots, Canopy/DataForSEO tests, story data / summary refresh, archived reports
+5. **Content ops** — `story_assets`, DOCX, hash-merge upload, zip round-trip
+6. **Worker split** — `lore.jobs`, job SSE
+7. **Marketing mode** — `011_ad_marketing`, campaigns API, Marketing UI
+8. **Catalog + selective analyze** — migration `013`, full `seed_report_types`, `selected`/`publish_ebook`/`publish_print`, wide bundle, `estimate_summary_refresh_cost`
 
 ---
 

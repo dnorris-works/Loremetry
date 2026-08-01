@@ -645,6 +645,108 @@ pub async fn estimate_report_costs(
     })
 }
 
+#[derive(Deserialize)]
+pub struct SummaryRefreshEstimateRequest {
+    #[serde(alias = "folder")]
+    pub story_id: String,
+    #[serde(default)]
+    pub input_price: Option<f64>,
+    #[serde(default)]
+    pub output_price: Option<f64>,
+}
+
+#[derive(Serialize)]
+pub struct SummaryRefreshEstimateResult {
+    pub success: bool,
+    pub files: Vec<String>,
+    pub chapter_count: usize,
+    pub input_tokens: usize,
+    pub output_tokens: usize,
+    pub estimated_cost: Option<f64>,
+    pub error: String,
+}
+
+/// Estimate the one-time cost to refresh chapter summaries for changed/new chapters only.
+pub async fn estimate_summary_refresh_cost(
+    app: AppCtx,
+    request: SummaryRefreshEstimateRequest,
+) -> Result<SummaryRefreshEstimateResult, String> {
+    const WORDS_TO_TOKENS: f64 = 1.3;
+    const SYSTEM_PROMPT_TOKENS: usize = 400;
+    const SUMMARY_OUTPUT_TOKENS: usize = 600;
+
+    if !crate::stories::story_exists(&app.db, &request.story_id).await {
+        return Ok(SummaryRefreshEstimateResult {
+            success: false,
+            files: Vec::new(),
+            chapter_count: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            estimated_cost: None,
+            error: "Story not found.".to_string(),
+        });
+    }
+
+    let chapters = documents::list_chapters_db(&app.db, &request.story_id)
+        .await
+        .unwrap_or_default();
+    let summary_hashes = crate::db::load_chapter_summary_hashes(&app.db.pool, &request.story_id).await;
+    let trunc_limit = {
+        let params = crate::db::load_report_cost_params(&app.db.pool, "chapter_summaries").await;
+        if params.truncation > 0 { params.truncation } else { 2000 }
+    };
+
+    let mut files_to_refresh: Vec<String> = Vec::new();
+    let mut input_tokens = 0usize;
+    let mut output_tokens = 0usize;
+
+    for chapter in &chapters {
+        let file = documents::chapter_display_name(chapter);
+        let cleaned = crate::manuscript_fingerprint::clean_for_ai(&chapter.content);
+        if cleaned.is_empty() {
+            continue;
+        }
+        let hash = crate::manuscript_fingerprint::chapter_source_hash(&cleaned);
+        let needs_refresh = match summary_hashes.get(&file) {
+            None => true,
+            Some(stored) if stored.is_empty() || stored != &hash => true,
+            Some(_) => false,
+        };
+        if needs_refresh {
+            files_to_refresh.push(file);
+            let word_count = cleaned.split_whitespace().count();
+            let truncated = word_count.min(trunc_limit);
+            input_tokens += (truncated as f64 * WORDS_TO_TOKENS) as usize + SYSTEM_PROMPT_TOKENS;
+            output_tokens += SUMMARY_OUTPUT_TOKENS;
+        }
+    }
+
+    let estimated_cost = match (request.input_price, request.output_price) {
+        (Some(input_price), Some(output_price))
+            if input_price >= 0.0 && output_price >= 0.0 =>
+        {
+            if input_tokens > 0 || output_tokens > 0 {
+                let cost = (input_tokens as f64 / 1000.0 * input_price)
+                    + (output_tokens as f64 / 1000.0 * output_price);
+                Some((cost * 1000.0).round() / 1000.0)
+            } else {
+                Some(0.0)
+            }
+        }
+        _ => None,
+    };
+
+    Ok(SummaryRefreshEstimateResult {
+        success: true,
+        files: files_to_refresh.clone(),
+        chapter_count: files_to_refresh.len(),
+        input_tokens,
+        output_tokens,
+        estimated_cost,
+        error: String::new(),
+    })
+}
+
 // ── AI Chat with context ──────────────────────────────────────────────────────
 
 #[derive(Deserialize)]

@@ -48,6 +48,10 @@ function renderBySchema(data: any, docType: string): string {
   if (schema === 'review_mining_v1') return renderReviewMining(data);
   if (schema === 'author_analysis_v1') return renderAuthorAnalysis(data);
   if (schema === 'analysis_v1') return renderCombinedAnalysis(data);
+  if (schema === 'wide_analysis_v1') return renderWideCombinedAnalysis(data);
+  if (schema === 'google_keyword_search_v1') return renderGoogleKeywordSearch(data);
+  if (schema === 'content_maturity_advisory_v1') return renderContentMaturityAdvisory(data);
+  if (schema === 'wide_paste_v1') return renderWidePaste(data);
   if (schema === 'kdp_paste_v1') return renderKdpPaste(data);
   if (schema === 'chapter_summaries_v1') return renderChapterSummaries(data);
   if (schema === 'keyword_search_v1') return renderKeywordSearch(data);
@@ -72,6 +76,9 @@ function renderBySchema(data: any, docType: string): string {
   // Detect BISAC classification by structure or doc_type
   if (docType === 'bisac_classification' || (data.ebook && Array.isArray(data.ebook))) {
     return renderBisacSection(data);
+  }
+  if (docType === 'content_maturity_advisory' && data.heat_level) {
+    return renderContentMaturityAdvisory(data);
   }
 
   // Unknown schema — dump as formatted JSON
@@ -442,6 +449,49 @@ function renderCombinedAnalysis(data: any): string {
   return html;
 }
 
+function renderWideCombinedAnalysis(data: any): string {
+  const sections = data.sections || {};
+  let html = '';
+
+  if (sections.genre_ranking) {
+    try {
+      html += renderGenreRanking(JSON.parse(sections.genre_ranking));
+    } catch { html += renderRawSection('Genre Ranking', sections.genre_ranking); }
+  }
+  if (sections.bisac) {
+    try {
+      html += renderBisacSection(JSON.parse(sections.bisac));
+    } catch { html += renderRawSection('BISAC Classification', sections.bisac); }
+  }
+  if (sections.discovery_keywords) {
+    try {
+      html += renderDiscoveryKeywords(JSON.parse(sections.discovery_keywords));
+    } catch { html += renderRawSection('Discovery Keywords', sections.discovery_keywords); }
+  }
+  if (sections.google_keywords) {
+    try {
+      html += renderGoogleKeywordSearch(JSON.parse(sections.google_keywords));
+    } catch { html += renderRawSection('Google Keyword Search', sections.google_keywords); }
+  }
+  if (sections.content_advisory) {
+    try {
+      html += renderContentMaturityAdvisory(JSON.parse(sections.content_advisory));
+    } catch { html += renderRawSection('Content Advisory', sections.content_advisory); }
+  }
+  if (sections.wide_paste) {
+    try {
+      html += renderWidePaste(JSON.parse(sections.wide_paste));
+    } catch { html += renderRawSection('Wide Paste', sections.wide_paste); }
+  }
+  if (sections.positioning) {
+    try {
+      html += renderPositioning(JSON.parse(sections.positioning));
+    } catch { html += renderRawSection('Positioning', sections.positioning); }
+  }
+
+  return html;
+}
+
 // ── Genre Ranking Section ─────────────────────────────────────────────────────
 
 function renderGenreRanking(data: any): string {
@@ -627,22 +677,148 @@ function renderKdpPaste(data: any): string {
 
 // ── Chapter Summaries Report ──────────────────────────────────────────────────
 
+function formatChapterSignals(signals: string): string {
+  if (!signals) return '';
+  try {
+    const parsed = JSON.parse(signals);
+    if (parsed?.schema === 'chapter_fingerprint_v1') {
+      const lex = parsed.lexicon && typeof parsed.lexicon === 'object'
+        ? Object.entries(parsed.lexicon as Record<string, number>)
+            .sort((a, b) => b[1] - a[1])
+            .map(([k, v]) => `${k} (${v})`)
+            .join(', ')
+        : '';
+      const base = `${parsed.pov || '?'} · ${parsed.tense || '?'} · ${parsed.dialogue_pct ?? 0}% dialogue`;
+      return lex ? `${base} · ${lex}` : base;
+    }
+  } catch {
+    // legacy prose blob
+  }
+  return signals;
+}
+
 function renderChapterSummaries(data: any): string {
   const chapters: any[] = data.chapters || [];
   if (!chapters.length) return '<p class="muted">No chapter summaries available.</p>';
 
   const totalWords = data.total_words || chapters.reduce((sum: number, c: any) => sum + (c.word_count || 0), 0);
   let html = `<p class="report-hint">${chapters.length} chapters, ${totalWords.toLocaleString()} total words</p>`;
-  html += `<table class="report-table"><thead><tr><th>#</th><th>Chapter</th><th>Words</th><th>Genre Signals</th></tr></thead><tbody>`;
+  html += `<table class="report-table"><thead><tr><th>#</th><th>Chapter</th><th>Words</th><th>Signals / fingerprint</th></tr></thead><tbody>`;
   chapters.forEach((ch, i) => {
+    const summary = formatChapterSignals(ch.signals || '');
     html += `<tr>
       <td>${i + 1}</td>
       <td><strong>${esc(ch.title || ch.file)}</strong></td>
       <td>${(ch.word_count || 0).toLocaleString()}</td>
-      <td>${esc(ch.signals || '').substring(0, 200)}${(ch.signals || '').length > 200 ? '...' : ''}</td>
+      <td>${esc(summary).substring(0, 280)}${summary.length > 280 ? '...' : ''}</td>
     </tr>`;
   });
   html += `</tbody></table>`;
+  return html;
+}
+
+function renderGoogleKeywordSearch(data: any): string {
+  const keywords: any[] = data.keywords || [];
+  if (!keywords.length) return '<p class="muted">No Google keyword search results available. Add DataForSEO credentials in Admin.</p>';
+
+  let html = `<p class="report-hint">${keywords.length} keywords analyzed (Google search volume)</p>`;
+  html += `<table class="report-table"><thead><tr><th>Keyword</th><th>Est. Monthly Searches</th><th>Competition</th><th>CPC</th></tr></thead><tbody>`;
+  for (const k of keywords) {
+    const compClass = k.competition === 'LOW' ? 'class="report-color-success"' :
+                      k.competition === 'HIGH' ? 'class="report-color-danger"' : '';
+    html += `<tr>
+      <td class="keyword-cell">${esc(k.keyword)}</td>
+      <td>${esc(k.searches)}</td>
+      <td ${compClass}><strong>${esc(k.competition)}</strong></td>
+      <td>${esc(k.cpc || '')}</td>
+    </tr>`;
+  }
+  html += `</tbody></table>`;
+  return html;
+}
+
+function renderContentMaturityAdvisory(data: any): string {
+  let html = `<section class="report-section"><h3>Content &amp; Maturity Advisory</h3>`;
+  html += `<p class="report-hint">Use when filling content-rating and age-guidance fields on Apple Books, Kobo, Google Play, and Ingram.</p>`;
+
+  if (data.heat_level) {
+    html += `<p><strong>Heat level:</strong> ${esc(data.heat_level)}</p>`;
+  }
+  if (data.age_guidance) {
+    html += `<p><strong>Age guidance:</strong> ${esc(data.age_guidance)}</p>`;
+  }
+  if (data.maturity_rating_suggestion) {
+    html += `<p><strong>Overall:</strong> ${esc(data.maturity_rating_suggestion)}</p>`;
+  }
+
+  const warnings: string[] = data.content_warnings || [];
+  if (warnings.length) {
+    html += `<h4>Content warnings</h4><ul>`;
+    for (const w of warnings) html += `<li>${esc(w)}</li>`;
+    html += `</ul>`;
+  }
+
+  const notes = data.platform_notes || {};
+  const platforms = [
+    ['apple_books', 'Apple Books'],
+    ['kobo', 'Kobo'],
+    ['google_play', 'Google Play'],
+    ['ingram', 'Ingram / wide print'],
+  ] as const;
+  html += `<h4>Platform notes</h4>`;
+  for (const [key, label] of platforms) {
+    if (notes[key]) {
+      html += `<p><strong>${esc(label)}:</strong> ${esc(notes[key])}</p>`;
+    }
+  }
+  if (data.library_notes) {
+    html += `<p><strong>Library / OverDrive:</strong> ${esc(data.library_notes)}</p>`;
+  }
+
+  html += `</section>`;
+  return html;
+}
+
+function renderWidePaste(data: any): string {
+  const labels = data.genre_labels || {};
+  let html = `<section class="report-section"><h3>Wide Metadata &mdash; Ready to Paste</h3>`;
+  html += `<p class="report-hint">Copy into Draft2Digital, PublishDrive, IngramSpark, or store dashboards. Verify BISAC codes at bisg.org before submitting.</p>`;
+
+  if (labels.ebook || labels.print) {
+    html += `<div class="two-col">`;
+    if (labels.ebook) html += `<div><h4>Genre label (ebook)</h4><p>${esc(labels.ebook)}</p></div>`;
+    if (labels.print) html += `<div><h4>Genre label (print)</h4><p>${esc(labels.print)}</p></div>`;
+    html += `</div>`;
+  }
+
+  const renderBisacList = (title: string, items: any[]) => {
+    if (!items?.length) return '';
+    let block = `<h4>${esc(title)}</h4><ol class="category-list">`;
+    for (const b of items) {
+      block += `<li><code>${esc(b.code)}</code> — ${esc(b.heading)}</li>`;
+    }
+    block += `</ol>`;
+    return block;
+  };
+
+  html += renderBisacList('BISAC (ebook)', data.bisac_ebook || []);
+  html += renderBisacList('BISAC (print)', data.bisac_print || []);
+
+  const keywords: string[] = data.discovery_keywords || [];
+  if (keywords.length) {
+    html += `<h4>Discovery keywords</h4>`;
+    html += `<table class="report-table"><thead><tr><th>#</th><th>Phrase</th></tr></thead><tbody>`;
+    keywords.forEach((kw, i) => {
+      html += `<tr><td>${i + 1}</td><td class="keyword-cell">${esc(kw)}</td></tr>`;
+    });
+    html += `</tbody></table>`;
+  }
+
+  if (data.maturity_note) {
+    html += `<h4>Content / maturity</h4><p>${esc(data.maturity_note)}</p>`;
+  }
+
+  html += `</section>`;
   return html;
 }
 

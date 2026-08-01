@@ -51,7 +51,13 @@ export interface AnalysisContext {
   isWorking: Ref<boolean>;
   logLines: Ref<LogLine[]>;
   refreshState: (folder: string) => Promise<void>;
-  runAnalyze: (folder: string, forceResummarize: boolean, platform: string) => Promise<void>;
+  runAnalyze: (
+    folder: string,
+    forceResummarize: boolean,
+    platform: string,
+    selected?: string[],
+    formats?: { publishEbook: boolean; publishPrint: boolean },
+  ) => Promise<void>;
   runCraftAnalysis: (
     folder: string,
     selected: string[],

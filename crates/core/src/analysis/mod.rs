@@ -23,6 +23,9 @@ pub mod show_dont_tell;
 pub mod ai_isms;
 pub mod craft_audits;
 pub mod publish_audits;
+pub mod chapter_stats;
+pub mod content_advisory;
+pub mod craft_prose_checks;
 
 use serde::{Deserialize, Serialize};
 use crate::app_ctx::AppCtx;
@@ -60,14 +63,26 @@ pub struct AnalyzeStoryRequest {
     #[serde(default)]
     pub canopy_api_key:    String,
     #[serde(default)]
-    pub platform:          String,  // "kdp" or "wide"
+    pub platform:          String,  // "kdp" or "wide" (wide remapped to kdp for gating)
     #[serde(default)]
     pub dataforseo_login:  String,
     #[serde(default)]
     pub dataforseo_password: String,
     #[serde(default)]
     pub run_time:          String,  // local datetime from when user clicked the button
+    #[serde(default)]
+    pub selected:          Vec<String>,
+    #[serde(default = "default_true")]
+    pub publish_ebook:     bool,
+    #[serde(default = "default_true")]
+    pub publish_print:     bool,
+    #[serde(default)]
+    pub genre_model:       String,
+    #[serde(default)]
+    pub summaries_model:   String,
 }
+
+fn default_true() -> bool { true }
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 

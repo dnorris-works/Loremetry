@@ -3,14 +3,14 @@ import { inject, ref, computed, watch, onMounted } from 'vue';
 import { invoke } from '../api';
 import type { ContinuityScope } from '../composables/useAnalysis';
 import { useSettings } from '../composables/useSettings';
-import { storiesKey, analysisKey, seriesKey, platformKey } from '../injectionKeys';
+import { storiesKey, analysisKey, seriesKey, platformKey, showPanelKey } from '../injectionKeys';
 import LogStream from './LogStream.vue';
 import AnalyzerPlatformTabs from './AnalyzerPlatformTabs.vue';
 import { useReportTypes } from '../composables/useReportTypes';
 import { useCraftReportGroups } from '../composables/useCraftReportGroups';
 import { getChapterWordStats } from '../lib/manuscriptCache';
 import { estimateReportCosts } from '../lib/estimateCosts';
-import { buildRunQueue } from '../reportDependencies';
+import { buildRunQueue, collectPrerequisites } from '../reportDependencies';
 import { isAiConfigured, resolveModelPrices } from '../lib/reportCostPricing';
 import type { ReportTypeDef, Series } from '../types';
 import { useAuth } from '../composables/useAuth';
@@ -18,6 +18,12 @@ import { reportAccessBadge, reportAccessLabel, isSubscriberRole } from '../lib/r
 
 type VisibleReport = ReportTypeDef & {
   exists: boolean;
+  freshness: 'fresh' | 'stale' | 'missing';
+};
+
+type DepRow = {
+  id: string;
+  label: string;
   freshness: 'fresh' | 'stale' | 'missing';
 };
 
@@ -37,6 +43,7 @@ const storiesCtx = inject(storiesKey)!;
 const analysisCtx = inject(analysisKey)!;
 const seriesCtx = inject(seriesKey)!;
 const platformCtx = inject(platformKey)!;
+const showPanel = inject(showPanelKey);
 const settings = useSettings();
 const auth = useAuth();
 
@@ -50,20 +57,13 @@ function tierForReport(report: VisibleReport) {
 
 // ── Report types from DB ──────────────────────────────────────────────────────
 
-const { reportTypes, loadError, loaded: reportTypesLoaded, getDependants } = useReportTypes();
+const { reportTypes, loadError, loaded: reportTypesLoaded } = useReportTypes();
 const { craftReportGroups, seriesReportIds, loadCraftReportGroups } = useCraftReportGroups();
 
 onMounted(() => {
   loadCraftReportGroups();
   fetchCostEstimates();
 });
-
-function reportMatchesPlatform(report: ReportTypeDef, plat: string): boolean {
-  if (plat === 'kdp') {
-    return report.platforms.includes('kdp') || report.platforms.includes('wide');
-  }
-  return report.platforms.includes(plat);
-}
 
 const activeStorySeries = computed((): Series | null => {
   const folder = storiesCtx.activeFolder.value;
@@ -76,7 +76,10 @@ const activeStorySeries = computed((): Series | null => {
 // ── Local state ───────────────────────────────────────────────────────────────
 
 const selected = ref<string[]>([]);
+const depRunOverrides = ref<Record<string, boolean>>({});
 const forceResummarize = ref(false);
+const publishEbook = ref(true);
+const publishPrint = ref(true);
 const hasRun = ref(false);
 const continuityScopeMode = ref<'manuscript' | 'series'>('manuscript');
 const continuitySeriesId = ref<number | null>(null);
@@ -141,7 +144,7 @@ function getReportFreshness(reportId: string): 'fresh' | 'stale' | 'missing' {
 const visibleReports = computed((): VisibleReport[] => {
   const plat = platformCtx.platform.value;
   return reportTypes.value
-    .filter(r => reportMatchesPlatform(r, plat) && r.id !== 'chapter_summaries')
+    .filter(r => r.platforms.includes(plat) && r.id !== 'chapter_summaries')
     .map(r => ({
       ...r,
       exists: existsMap.value[r.id] ?? false,
@@ -232,28 +235,86 @@ const canSelectReports = computed(() => Boolean(storiesCtx.activeFolder.value));
 
 const reportsLocked = computed(() => analysisCtx.isWorking.value || !canSelectReports.value);
 
+const setupIssues = computed(() => {
+  const plat = platformCtx.platform.value;
+  if (plat === 'craft' || plat === 'publish') return settings.checkCraftAnalyzeSetup();
+  return settings.checkPublishAnalyzeSetup();
+});
+
+const marketIntelSetupIssues = computed(() => settings.checkMarketIntelSetup());
+
+function openSettings(): void {
+  showPanel?.('settings');
+}
+
 const getReportsDisabled = computed(() => {
-  return reportsLocked.value || selected.value.length === 0;
+  return reportsLocked.value || selected.value.length === 0 || setupIssues.value.length > 0;
 });
 
 // ── Checkbox logic ────────────────────────────────────────────────────────────
 
-function toggleReport(id: string): void {
-  if (reportsLocked.value) return;
+function defaultDepRuns(depId: string): boolean {
+  return getReportFreshness(depId) !== 'fresh';
+}
+
+function isDepInRunQueue(depId: string): boolean {
+  if (depId in depRunOverrides.value) {
+    return depRunOverrides.value[depId];
+  }
+  return defaultDepRuns(depId);
+}
+
+function setDepRunOverride(depId: string, run: boolean): void {
+  depRunOverrides.value = { ...depRunOverrides.value, [depId]: run };
+}
+
+function onDepCheckboxChange(depId: string, event: Event): void {
+  const target = event.target;
+  if (target instanceof HTMLInputElement) {
+    setDepRunOverride(depId, target.checked);
+  }
+}
+
+function prerequisitesForReport(reportId: string): DepRow[] {
+  return collectPrerequisites(reportId, reportTypes.value).map(id => ({
+    id,
+    label: reportTypes.value.find(r => r.id === id)?.label ?? id,
+    freshness: getReportFreshness(id),
+  }));
+}
+
+function toggleReport(id: string, disabled = false): void {
+  if (disabled || reportsLocked.value) return;
   const sel = new Set(selected.value);
-  const dependants = getDependants(id);
 
   if (sel.has(id)) {
-    // Unchecking: remove this and its dependants
     sel.delete(id);
-    for (const dep of dependants) {
-      sel.delete(dep);
-    }
   } else {
-    // Checking: add this and its dependants
     sel.add(id);
-    for (const dep of dependants) {
-      sel.add(dep);
+  }
+
+  selected.value = [...sel];
+}
+
+function groupSelectionState(reports: VisibleReport[]): 'all' | 'some' | 'none' {
+  const ids = reports.map(r => r.id);
+  const count = ids.filter(id => selected.value.includes(id)).length;
+  if (count === 0) return 'none';
+  if (count === ids.length) return 'all';
+  return 'some';
+}
+
+function toggleGroupSelection(reports: VisibleReport[], disabled = false): void {
+  if (disabled || reportsLocked.value) return;
+  const ids = reports.map(r => r.id);
+  const sel = new Set(selected.value);
+  const selectAll = groupSelectionState(reports) !== 'all';
+
+  for (const id of ids) {
+    if (selectAll) {
+      sel.add(id);
+    } else {
+      sel.delete(id);
     }
   }
 
@@ -263,9 +324,11 @@ function toggleReport(id: string): void {
 // Reset selection when platform or story changes
 watch(() => platformCtx.platform.value, () => {
   selected.value = [];
+  depRunOverrides.value = {};
 });
 
 watch(() => storiesCtx.activeFolder.value, (folder) => {
+  depRunOverrides.value = {};
   if (!folder) {
     selected.value = [];
   }
@@ -277,7 +340,7 @@ const costEstimates = ref<Record<string, number | null>>({});
 const costEstimatesLoaded = ref(false);
 
 const aiConfigured = computed(() =>
-  isAiConfigured('', settings.model.value),
+  isAiConfigured('ok', settings.model.value),
 );
 
 const reportsToRun = computed(() => {
@@ -286,17 +349,107 @@ const reportsToRun = computed(() => {
     const def = reportTypes.value.find(r => r.id === id);
     return def?.platforms.includes(plat);
   });
-  return buildRunQueue(
-    primaries,
-    reportTypes.value,
-    depId => getReportFreshness(depId) !== 'fresh',
-  );
+  return buildRunQueue(primaries, reportTypes.value, isDepInRunQueue);
 });
 
 function isAiReport(reportId: string): boolean {
   const rt = reportTypes.value.find(r => r.id === reportId);
   if (!rt) return true;
   return rt.cost_output_max > 0 || rt.cost_per_chapter || rt.cost_fixed_calls > 0;
+}
+
+function hasSummaryDependency(reportId: string, visited = new Set<string>()): boolean {
+  if (reportId === 'chapter_summaries') return true;
+  if (visited.has(reportId)) return false;
+  visited.add(reportId);
+
+  const report = reportTypes.value.find(r => r.id === reportId);
+  if (!report) return false;
+  return report.depends_on.some(dep => hasSummaryDependency(dep, visited));
+}
+
+function selectionNeedsSummaries(): boolean {
+  return reportsToRun.value.includes('chapter_summaries')
+    || reportsToRun.value.some(id => hasSummaryDependency(id));
+}
+
+function pricingForReport(reportId: string): ReturnType<typeof resolveModelPrices> {
+  const modelId = settings.modelFor(reportToModelFn(reportId));
+  return resolveModelPrices(modelId, settings.models.value);
+}
+
+function depStatusLabel(freshness: 'fresh' | 'stale' | 'missing'): string {
+  if (freshness === 'fresh') return 'has run';
+  if (freshness === 'stale') return 'stale — re-run recommended';
+  return 'not run yet';
+}
+
+async function maybeRefreshSummariesBeforeRun(folder: string): Promise<boolean> {
+  if (!selectionNeedsSummaries() || !summaryStatus.value.needsRefresh) {
+    return true;
+  }
+
+  const summaryPricing = pricingForReport('chapter_summaries');
+
+  let msg = 'Some chapters need AI summarization before these reports can run.\n\n';
+  try {
+    const estimate = await invoke<{
+      success: boolean;
+      chapter_count: number;
+      input_tokens: number;
+      output_tokens: number;
+      estimated_cost: number | null;
+      error: string;
+    }>('estimate_summary_refresh_cost', {
+      request: {
+        folder,
+        input_price: summaryPricing.available ? summaryPricing.input_price : undefined,
+        output_price: summaryPricing.available ? summaryPricing.output_price : undefined,
+      },
+    });
+    const count = estimate.success ? estimate.chapter_count : 0;
+    if (count > 0) {
+      msg += `Chapters to summarize: ${count}\n`;
+      if (estimate.input_tokens > 0) {
+        msg += `Estimated tokens: ~${estimate.input_tokens.toLocaleString()} in / ~${estimate.output_tokens.toLocaleString()} out\n`;
+      }
+      if (estimate.estimated_cost != null && summaryPricing.available) {
+        msg += `Estimated cost: ${formatCost(estimate.estimated_cost)}\n`;
+      } else if (!summaryPricing.available) {
+        msg += 'Estimated cost: pricing unavailable — fetch models in Settings → AI Models\n';
+      }
+    } else {
+      msg += `${summaryStatus.value.text}\n`;
+    }
+  } catch {
+    msg += `${summaryStatus.value.text}\n`;
+  }
+  msg += '\nSummarize chapters now?';
+
+  if (!confirm(msg)) return false;
+
+  try {
+    await invoke('refresh_chapter_summaries', {
+      request: {
+        folder,
+        provider: settings.provider.value,
+        api_key: '',
+        model: settings.modelFor('summaries'),
+      },
+    });
+    await analysisCtx.refreshState(folder);
+  } catch (e) {
+    console.error('refresh_chapter_summaries:', e);
+    alert('Failed to refresh chapter summaries. Please try again.');
+    return false;
+  }
+
+  const s = analysisCtx.analysisState.value;
+  if (s && (s.summary_missing_count > 0 || s.summary_stale_count > 0)) {
+    alert('Chapter summaries are still not up to date after refresh. Please resolve chapter read errors and try again.');
+    return false;
+  }
+  return true;
 }
 
 const reportsMissingPricing = computed(() =>
@@ -436,22 +589,40 @@ watch(() => reportTypes.value, () => fetchCostEstimates());
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-function onGetReports(): void {
+async function onGetReports(): Promise<void> {
   const folder = storiesCtx.activeFolder.value;
+  if (!folder) return;
+  if (setupIssues.value.length > 0) {
+    alert(setupIssues.value.map(i => i.message).join('\n'));
+    return;
+  }
+
+  const ready = await maybeRefreshSummariesBeforeRun(folder);
+  if (!ready) return;
+
   hasRun.value = true;
   const plat = platformCtx.platform.value;
+  const toRun = reportsToRun.value.filter(id => {
+    const def = reportTypes.value.find(r => r.id === id);
+    return def?.platforms.includes(plat);
+  });
+  if (toRun.length === 0) return;
+
   if (plat === 'craft' || plat === 'publish') {
-    const hasSeriesReports = selected.value.some(id => seriesReportIds.value.includes(id));
-    const continuityInSeriesMode = selected.value.includes('continuity_check')
+    const hasSeriesReports = toRun.some(id => seriesReportIds.value.includes(id));
+    const continuityInSeriesMode = toRun.includes('continuity_check')
       && continuityScopeMode.value === 'series'
       && continuitySeriesId.value != null;
     const seriesId = continuitySeriesId.value ?? activeStorySeries.value?.id ?? null;
     const scope: ContinuityScope = (hasSeriesReports || continuityInSeriesMode) && seriesId != null
       ? { mode: 'series', seriesId }
       : { mode: 'manuscript' };
-    analysisCtx.runCraftAnalysis(folder, selected.value, scope, seriesId ?? undefined);
+    analysisCtx.runCraftAnalysis(folder, toRun, scope, seriesId ?? undefined);
   } else {
-    analysisCtx.runAnalyze(folder, forceResummarize.value, plat);
+    analysisCtx.runAnalyze(folder, forceResummarize.value, 'kdp', toRun, {
+      publishEbook: publishEbook.value,
+      publishPrint: publishPrint.value,
+    });
   }
 }
 
@@ -499,6 +670,30 @@ async function onRefreshSummaries(): Promise<void> {
 
     <AnalyzerPlatformTabs />
 
+    <div v-if="platformCtx.isKdp.value" class="publish-formats-row">
+      <span>Publishing formats:</span>
+      <label><input v-model="publishEbook" type="checkbox" /> Ebook</label>
+      <label><input v-model="publishPrint" type="checkbox" /> Print</label>
+    </div>
+
+    <div v-if="setupIssues.length > 0" class="setup-alert setup-alert--warning">
+      <div class="setup-alert-title">Setup required before running reports</div>
+      <ul class="setup-alert-list">
+        <li v-for="issue in setupIssues" :key="issue.id">{{ issue.message }}</li>
+      </ul>
+      <button type="button" class="btn btn-secondary btn-small" @click="openSettings">Open Settings</button>
+    </div>
+
+    <div
+      v-if="platformCtx.isKdp.value && marketIntelSetupIssues.length > 0"
+      class="setup-alert setup-alert--info"
+    >
+      <div class="setup-alert-title">Market Intel also needs</div>
+      <ul class="setup-alert-list">
+        <li v-for="issue in marketIntelSetupIssues" :key="`mi-${issue.id}`">{{ issue.message }}</li>
+      </ul>
+    </div>
+
     <!-- Actions (top) -->
     <div class="analyzer-actions">
       <button
@@ -515,7 +710,7 @@ async function onRefreshSummaries(): Promise<void> {
         v-if="platformCtx.isKdp.value"
         class="btn btn-secondary"
         title="Run market intelligence via Canopy API"
-        :disabled="analysisCtx.isWorking.value || !canSelectReports || !analysisCtx.analysisState.value?.has_search_terms"
+        :disabled="analysisCtx.isWorking.value || !canSelectReports || !analysisCtx.analysisState.value?.has_search_terms || marketIntelSetupIssues.length > 0"
         @click="onMarketIntel"
       >Market Intel</button>
 
@@ -525,9 +720,12 @@ async function onRefreshSummaries(): Promise<void> {
         @click="onStop"
       >Stop</button>
 
-      <label v-if="platformCtx.platform.value === 'kdp'" class="force-resummarize-label">
+      <label
+        v-if="platformCtx.platform.value !== 'craft' && platformCtx.platform.value !== 'publish'"
+        class="force-resummarize-label"
+      >
         <input v-model="forceResummarize" type="checkbox" :disabled="reportsLocked" />
-        Force re-summarize
+        Force re-scan
       </label>
     </div>
 
@@ -597,8 +795,18 @@ async function onRefreshSummaries(): Promise<void> {
     <div v-else class="report-cards">
       <template v-for="section in reportSections" :key="section.id">
         <div v-if="section.showHeader" class="report-section-header">
-          <div class="report-section-title">{{ section.label }}</div>
-          <div class="report-section-subtitle">{{ section.subtitle }}</div>
+          <label class="craft-group-select">
+            <input
+              type="checkbox"
+              :checked="groupSelectionState(section.reports) === 'all'"
+              :disabled="reportsLocked || section.disabled"
+              @change="toggleGroupSelection(section.reports, reportsLocked || section.disabled)"
+            />
+          </label>
+          <div class="craft-group-titles">
+            <div class="report-section-title">{{ section.label }}</div>
+            <div class="report-section-subtitle">{{ section.subtitle }}</div>
+          </div>
         </div>
         <div
           v-for="report in section.reports"
@@ -613,7 +821,7 @@ async function onRefreshSummaries(): Promise<void> {
               type="checkbox"
               :checked="selected.includes(report.id)"
               :disabled="reportsLocked || section.disabled || tierForReport(report) === 'locked'"
-              @change="toggleReport(report.id)"
+              @change="toggleReport(report.id, reportsLocked || section.disabled || tierForReport(report) === 'locked')"
             />
           </div>
           <div class="report-card-content">
@@ -635,6 +843,38 @@ async function onRefreshSummaries(): Promise<void> {
                 class="report-card-status report-card-status--stale"
               >stale — re-run to refresh</span>
               <span class="report-card-cost">{{ reportRunCost(report.id, isAiReport(report.id)) }}</span>
+            </div>
+            <div
+              v-if="selected.includes(report.id) && prerequisitesForReport(report.id).length > 0"
+              class="report-deps"
+            >
+              <div class="report-deps-heading">Also runs</div>
+              <div
+                v-for="dep in prerequisitesForReport(report.id)"
+                :key="`${report.id}-${dep.id}`"
+                class="report-dep-row"
+              >
+                <input
+                  type="checkbox"
+                  :checked="isDepInRunQueue(dep.id)"
+                  @change="onDepCheckboxChange(dep.id, $event)"
+                />
+                <div class="report-dep-body">
+                  <div class="report-dep-title-row">
+                    <span class="report-dep-label">{{ dep.label }}</span>
+                    <span class="report-dep-cost">
+                      {{ isDepInRunQueue(dep.id) ? reportRunCost(dep.id, isAiReport(dep.id)) : '—' }}
+                    </span>
+                  </div>
+                  <span
+                    class="report-dep-status"
+                    :class="{
+                      'report-card-status--fresh': dep.freshness === 'fresh',
+                      'report-card-status--stale': dep.freshness === 'stale',
+                    }"
+                  >{{ depStatusLabel(dep.freshness) }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -679,8 +919,30 @@ async function onRefreshSummaries(): Promise<void> {
 
 .report-section-header {
   grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   margin-top: 8px;
   margin-bottom: 4px;
+}
+
+.craft-group-select {
+  display: flex;
+  align-items: center;
+  padding-top: 2px;
+  cursor: pointer;
+}
+
+.craft-group-select input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.craft-group-titles {
+  flex: 1;
+  min-width: 0;
 }
 
 .report-section-title {
@@ -691,6 +953,124 @@ async function onRefreshSummaries(): Promise<void> {
 
 .report-section-subtitle {
   font-size: 12px;
+  color: var(--text-muted);
+}
+
+.publish-formats-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.publish-formats-row label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.publish-formats-row input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.setup-alert {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.setup-alert--warning {
+  border-color: color-mix(in srgb, var(--warning, #d4a017) 45%, var(--border));
+  background: color-mix(in srgb, var(--warning, #d4a017) 8%, var(--surface));
+}
+
+.setup-alert--info {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+
+.setup-alert-title {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.setup-alert-list {
+  margin: 0 0 10px;
+  padding-left: 1.2em;
+  color: var(--text-muted);
+}
+
+.report-deps {
+  margin-top: 10px;
+  padding-top: 10px;
+  padding-left: 12px;
+  border-top: 1px solid var(--border);
+  border-left: 2px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.report-deps-heading {
+  font-size: 11px;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.report-dep-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.report-dep-row + .report-dep-row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.report-dep-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  cursor: pointer;
+}
+
+.report-dep-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.report-dep-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.report-dep-label {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.report-dep-cost {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.report-dep-status {
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
   color: var(--text-muted);
 }
 

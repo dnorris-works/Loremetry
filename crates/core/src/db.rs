@@ -306,17 +306,22 @@ async fn seed_bisac_if_empty(pool: &PgPool) -> Result<(), String> {
 async fn seed_report_types(pool: &PgPool) -> Result<(), String> {
     // (id, label, description, platforms, depends_on,
     //  cost_truncation, cost_output_max, cost_per_chapter, cost_fixed_calls, model_slot, min_tier)
+    // Keep in sync with Loremetry-Desktop seed_report_types (+ web-only readability_analysis).
     let rows: &[(&str, &str, &str, &str, &str, i64, i64, i64, i64, &str, &str)] = &[
-        ("chapter_summaries", "Chapter Summaries", "Extract genre signals from each chapter of the manuscript.", "kdp,wide,craft", "", 8000, 600, 1, 0, "summaries", "basic"),
-        ("genre_analysis", "Genre Analysis", "Industry genre classification, KDP paths, comps, and reader demographic.", "kdp,wide", "chapter_summaries", 0, 1200, 0, 1, "genre", "capable"),
-        ("genre_ranking", "Genre Ranking", "Score the manuscript against all known genres independently.", "kdp,wide", "chapter_summaries,genre_analysis", 0, 1200, 0, 1, "genre", "capable"),
-        ("kdp_categories", "KDP Categories", "Find the best-fit Amazon categories with discoverability stats.", "kdp", "chapter_summaries,genre_analysis,genre_ranking", 0, 1200, 0, 2, "keywords", "basic"),
-        ("kdp_keywords", "KDP Keywords", "Optimize the 7 keyword strings for KDP discoverability.", "kdp", "chapter_summaries,genre_analysis,genre_ranking", 0, 1200, 0, 1, "keywords", "basic"),
-        ("bisac_classification", "BISAC Classification", "Select BISAC subject codes for KDP Print and Ingram distribution.", "kdp,wide", "chapter_summaries,genre_analysis", 0, 1200, 0, 2, "keywords", "basic"),
-        ("mi_search_terms", "Search Terms", "Generate competition search phrases for market analysis.", "kdp", "chapter_summaries,genre_analysis", 0, 300, 0, 1, "keywords", "basic"),
-        ("discovery_keywords", "Discovery Keywords", "Keywords optimized for Apple Books, Kobo, Google Play, and SEO.", "wide", "chapter_summaries,genre_analysis", 0, 1200, 0, 1, "keywords", "basic"),
-        ("analysis", "Full Analysis", "Combined report: categories, BISAC, keywords, and positioning all in one.", "kdp", "chapter_summaries,genre_analysis,genre_ranking,kdp_categories,kdp_keywords,bisac_classification,mi_search_terms", 4000, 1000, 0, 1, "default", "basic"),
-        ("keyword_search", "Keyword Search Results", "Amazon keyword search volume and competition estimates.", "kdp", "chapter_summaries,genre_analysis,genre_ranking", 4000, 1000, 0, 1, "keywords", "basic"),
+        ("chapter_summaries", "Chapter Summaries", "AI genre-signal summary per chapter (up to 2000 words each).", "kdp,wide", "", 2000, 600, 1, 1, "summaries", "basic"),
+        ("genre_analysis", "Genre Analysis - KDP/Wide", "Industry genre classification, master-list ranking, KDP paths, comps, and reader demographic.", "kdp,wide", "chapter_summaries", 0, 1200, 0, 3, "genre", "capable"),
+        ("genre_ranking", "Genre Ranking - KDP/Wide", "Score the manuscript against all known genres independently.", "kdp,wide", "chapter_summaries,genre_analysis", 0, 1200, 0, 1, "genre", "capable"),
+        ("kdp_categories", "KDP Categories", "Find the best-fit Amazon categories with discoverability stats.", "kdp", "chapter_summaries,genre_analysis", 0, 1200, 0, 2, "keywords", "basic"),
+        ("kdp_keywords", "KDP Keywords", "Optimize the 7 keyword strings for KDP discoverability.", "kdp", "chapter_summaries,genre_analysis", 0, 1200, 0, 1, "keywords", "basic"),
+        ("bisac_classification", "BISAC Classification", "Select BISAC subject codes for Ingram, wide distributors, and print metadata.", "wide", "chapter_summaries,genre_analysis", 0, 1200, 0, 2, "keywords", "basic"),
+        ("mi_search_terms", "Search Terms", "Generate competition search phrases for market analysis.", "kdp", "chapter_summaries,analysis", 0, 300, 0, 1, "keywords", "basic"),
+        ("discovery_keywords", "Discovery Keywords", "Keywords optimized for Apple Books, Kobo, Google Play, and SEO.", "wide", "chapter_summaries", 0, 1200, 0, 1, "keywords", "basic"),
+        ("google_keyword_search", "Google Keyword Search", "Google search volume and competition for wide-store SEO phrases.", "wide", "chapter_summaries,discovery_keywords", 0, 0, 0, 0, "keywords", "basic"),
+        ("content_maturity_advisory", "Content & Maturity Advisory", "Heat level, content warnings, and age guidance for Apple Books, Kobo, and wide distributors.", "wide", "chapter_summaries", 0, 1200, 0, 1, "genre", "capable"),
+        ("wide_metadata_paste", "Wide Metadata Paste Sheet", "Copy-ready BISAC codes, discovery keywords, and content notes for aggregators and wide stores.", "wide", "bisac_classification,discovery_keywords", 0, 0, 0, 0, "default", "basic"),
+        ("wide_analysis", "Wide Analysis - Wide", "BISAC, discovery keywords, Google SEO, content advisory, and ready-to-paste wide metadata.", "kdp", "chapter_summaries", 4000, 1200, 0, 5, "default", "basic"),
+        ("analysis", "KDP Analysis", "Genre, Kindle & paperback categories, print BISAC, seven keywords, and ready-to-paste KDP metadata.", "kdp", "chapter_summaries,mi_search_terms", 4000, 1200, 0, 7, "default", "basic"),
+        ("keyword_search", "Keyword Search Results", "Amazon keyword volume and competition data from DataForSEO.", "kdp", "chapter_summaries,analysis", 4000, 1000, 0, 1, "keywords", "basic"),
         ("competition_report", "Competition Analysis", "Market landscape: how competitive the niche is, who dominates.", "kdp", "mi_search_terms", 4000, 1000, 0, 1, "default", "basic"),
         ("review_mining", "Reader Review Intelligence", "Reader insights extracted from competitor book reviews.", "kdp", "mi_search_terms", 4000, 1000, 0, 1, "default", "basic"),
         ("author_analysis", "Competitor Author Analysis", "Competitor pricing, release cadence, and series strategy.", "kdp", "mi_search_terms", 4000, 1000, 0, 1, "default", "basic"),
@@ -325,6 +330,30 @@ async fn seed_report_types(pool: &PgPool) -> Result<(), String> {
         ("continuity_check", "Continuity Check", "AI-assisted scan for contradicted facts — within a manuscript or across a whole series.", "craft", "", 6000, 4000, 1, 3, "continuity", "capable"),
         ("show_dont_tell", "Show Don't Tell", "AI-assisted check for telling instead of showing — flags violations with surrounding manuscript text.", "craft", "", 4000, 4000, 1, 0, "showDontTell", "capable"),
         ("ai_isms", "AI-isms", "AI-assisted check for prose habits that often read as machine-generated — flags passages with surrounding manuscript text.", "craft", "", 4000, 4000, 1, 0, "aiIsms", "capable"),
+        ("chekhovs_gun", "Chekhov's Gun", "Finds early significant elements and checks they pay off later.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("red_herring_vs_abandoned", "Red Herring vs Abandoned", "Separates intentional misdirection from dropped plot threads.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("foreshadowing_twist_fairness", "Foreshadowing & Twist Fairness", "Checks foreshadowing distribution and twist fairness.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("macguffin_clarity", "MacGuffin Clarity", "Checks the driving object or goal is clear and motivating.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("want_vs_need", "Want vs Need", "External want vs internal need and character growth.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("thematic_throughline", "Thematic Throughline", "Theme consistency across scenes, subplots, and arcs.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("mirror_foil_character", "Mirror/Foil Characters", "Reflect/contrast pairings and thematic payoff.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("pov_discipline", "POV Discipline", "POV shifts, head-hopping, and information leaks.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("story_beat_placement", "Story Beat Placement", "Beat timing vs story frameworks — early, late, or missing.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("scene_sequel_balance", "Scene/Sequel Balance", "Action scene vs reflective sequel ratio.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("timeline_flashback", "Timeline / Flashback", "Timeline and flashback clarity and purpose.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("dramatic_irony", "Dramatic Irony", "Reader-knows-more moments — tension, humor, or dread.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("stakes_escalation", "Stakes Escalation", "Rising stakes across the arc; plateaus and reversals.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("cross_book_setup_payoff", "Cross-Book Setup/Payoff", "Series setups planted earlier that must pay off later.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("series_pacing_comparator", "Series Pacing Comparator", "Pacing curves compared across books in a series.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("recurring_motif_theme_series", "Recurring Motif/Theme (Series)", "Motifs and themes tracked across the series.", "craft", "", 0, 4000, 0, 1, "continuity", "capable"),
+        ("ai_beta_reader", "AI Beta Reader", "Chapter-by-chapter reader reactions and put-it-down risk.", "publish", "", 4000, 1200, 1, 0, "prose", "strong"),
+        ("cliffhanger_score", "Cliffhanger Score", "How hard each chapter ending pulls into the next.", "publish", "", 4000, 500, 1, 0, "summaries", "basic"),
+        ("hook_strength", "Hook Strength", "Would a browsing reader keep going past page one?", "publish", "", 0, 1200, 0, 1, "summaries", "basic"),
+        ("pacing_curve", "Pacing Curve", "Where the story drags — per-chapter pace scores.", "publish", "", 4000, 600, 1, 0, "summaries", "basic"),
+        ("blurb_builder", "Blurb Builder", "Amazon, back-cover, and BookBub description variants from your manuscript.", "publish", "chapter_summaries", 0, 3000, 0, 1, "prose", "strong"),
+        ("print_production", "Print Production", "Page count, trim size, spine width, and Ingram/KDP print checklists.", "publish", "", 0, 0, 0, 0, "default", "basic"),
+        ("line_polish", "Line-level Polish", "Filter words, echoes, adverbs, and passive voice (heuristic).", "publish", "", 0, 0, 0, 0, "default", "basic"),
+        ("vellum_prep", "Vellum & Atticus Prep", "Clean manuscript export for formatter import.", "publish", "", 0, 0, 0, 0, "default", "basic"),
     ];
 
     for (id, label, description, platforms, depends_on, trunc, out_max, per_ch, fixed, slot, tier) in rows {
@@ -360,6 +389,18 @@ async fn seed_report_types(pool: &PgPool) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     }
+
+    // Hide intermediate / infrastructure types from the Analyzer picker (desktop parity).
+    sqlx::query(
+        "UPDATE report_types SET hidden = 1 WHERE id IN (
+            'chapter_summaries', 'genre_ranking', 'genre_analysis', 'kdp_categories', 'kdp_keywords',
+            'bisac_classification', 'discovery_keywords', 'google_keyword_search',
+            'content_maturity_advisory', 'wide_metadata_paste'
+        )",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
 
     Ok(())
 }
@@ -2050,7 +2091,7 @@ pub async fn list_report_types_cmd(db: &Db) -> Result<Vec<ReportTypeDef>, String
     let rows = sqlx::query(
         "SELECT id, label, description, platforms, depends_on, model_slot, min_tier,
                 cost_truncation, cost_output_max, cost_per_chapter, cost_fixed_calls
-         FROM report_types ORDER BY id",
+         FROM report_types WHERE COALESCE(hidden, 0) = 0 ORDER BY id",
     )
     .fetch_all(&db.pool)
     .await
@@ -2396,6 +2437,33 @@ pub async fn has_bisac_classifications(pool: &PgPool, story_id: &str) -> bool {
     .fetch_one(pool)
     .await
     .unwrap_or(false)
+}
+
+/// Load BISAC classifications for a story+format ("ebook" | "print").
+pub async fn load_bisac_classifications(
+    pool: &PgPool,
+    story_id: &str,
+    format: &str,
+) -> Vec<(String, String, u8, String)> {
+    let rows = sqlx::query(
+        "SELECT code, heading, confidence, COALESCE(reason, '') FROM bisac_classifications
+         WHERE story_id = $1 AND format = $2 ORDER BY confidence DESC",
+    )
+    .bind(story_id)
+    .bind(format)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    rows.into_iter()
+        .filter_map(|r| {
+            let code: String = r.try_get(0).ok()?;
+            let heading: String = r.try_get(1).ok()?;
+            let confidence: i32 = r.try_get(2).ok()?;
+            let reason: String = r.try_get(3).ok()?;
+            Some((code, heading, confidence as u8, reason))
+        })
+        .collect()
 }
 
 // ── Top-level KDP categories (derived from catalog) ─────────────────────

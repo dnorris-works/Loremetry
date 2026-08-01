@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, provide } from 'vue';
+import { ref, watch, onMounted, provide, computed } from 'vue';
 import { useStories } from '../composables/useStories';
 import { useAnalysis } from '../composables/useAnalysis';
 import { usePlatform } from '../composables/usePlatform';
@@ -7,6 +7,7 @@ import { useSettings } from '../composables/useSettings';
 import { useReports } from '../composables/useReports';
 import { useSeries } from '../composables/useSeries';
 import { useCampaigns } from '../composables/useCampaigns';
+import { useResizableWidth } from '../composables/useResizableWidth';
 import {
   storiesKey, analysisKey, platformKey, settingsKey,
   reportsKey, seriesKey, campaignsKey, showPanelKey, openManuscriptEditorKey,
@@ -71,10 +72,22 @@ provide('setAppMode', (mode: AppMode) => {
 
 type Panel = 'analyzer' | 'reports' | 'admin' | 'settings' | 'help' | 'story-form' | 'series' | 'manuscript' | 'new-document' | 'sources' | 'campaigns' | 'campaign-detail' | 'campaign-form' | 'platform-accounts';
 const activePanel = ref<Panel>('analyzer');
+const prevPanel = ref<Panel>('analyzer');
 const sidebarOpen = ref(false);
 const sourcesWizard = ref(false);
 const panelBeforeNewDoc = ref<Panel>('analyzer');
 const modeBeforeNewDoc = ref<AppMode>('analyzer');
+
+const { width: sidebarWidth, startResize: startSidebarResize } = useResizableWidth({
+  storageKey: 'sidebar-width',
+  defaultWidth: 220,
+  min: 160,
+  max: 480,
+});
+
+const appRootStyle = computed(() => ({
+  '--sidebar-w': `${sidebarWidth.value}px`,
+}));
 
 function toggleSidebar(): void {
   sidebarOpen.value = !sidebarOpen.value;
@@ -89,9 +102,12 @@ provide('closeSidebar', closeSidebar);
 
 function showPanel(name: Panel): void {
   if ((name === 'settings' || name === 'help') && activePanel.value === name) {
-    activePanel.value = 'analyzer';
+    activePanel.value = prevPanel.value;
     sidebarOpen.value = false;
     return;
+  }
+  if ((name === 'settings' || name === 'help') && activePanel.value !== name) {
+    prevPanel.value = activePanel.value;
   }
   activePanel.value = name;
   sidebarOpen.value = false;
@@ -274,7 +290,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div id="app-root" :class="{ 'sidebar-drawer-open': sidebarOpen }">
+  <div id="app-root" :class="{ 'sidebar-drawer-open': sidebarOpen }" :style="appRootStyle">
     <div
       v-if="sidebarOpen"
       class="sidebar-backdrop"
@@ -282,7 +298,14 @@ onMounted(() => {
       @click="closeSidebar"
     />
     <TitleBar />
-    <Sidebar @open-story-form="openStoryForm" @open-series-form="openSeriesForm" />
+    <div class="sidebar-column">
+      <Sidebar @open-story-form="openStoryForm" @open-series-form="openSeriesForm" />
+      <div
+        class="sidebar-resizer"
+        title="Drag to resize"
+        @mousedown="startSidebarResize"
+      />
+    </div>
     <main id="main">
       <NewDocumentForm
         v-if="activePanel === 'new-document'"
@@ -360,13 +383,42 @@ onMounted(() => {
 #app-root {
   display: grid;
   grid-template-rows: var(--titlebar-h, 28px) 1fr auto;
-  grid-template-columns: var(--sidebar-w, 220px) minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   grid-template-areas:
     "titlebar titlebar"
     "sidebar main"
     "footer footer";
   height: 100vh;
   overflow: hidden;
+}
+
+.sidebar-column {
+  grid-area: sidebar;
+  display: flex;
+  width: var(--sidebar-w, 220px);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sidebar-column :deep(#sidebar) {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.sidebar-resizer {
+  flex-shrink: 0;
+  width: 5px;
+  margin-right: -2px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 5;
+}
+
+.sidebar-resizer:hover,
+.sidebar-resizer:active {
+  background: var(--accent, #4a9eff);
+  opacity: 0.5;
 }
 
 #main {
@@ -396,7 +448,7 @@ onMounted(() => {
       "main";
   }
 
-  #app-root :deep(#sidebar) {
+  .sidebar-column {
     position: fixed;
     top: var(--titlebar-h, 28px);
     left: 0;
@@ -408,9 +460,13 @@ onMounted(() => {
     box-shadow: none;
   }
 
-  #app-root.sidebar-drawer-open :deep(#sidebar) {
+  #app-root.sidebar-drawer-open .sidebar-column {
     transform: translateX(0);
     box-shadow: 4px 0 24px var(--color-shadow);
+  }
+
+  .sidebar-resizer {
+    display: none;
   }
 
   .sidebar-backdrop {

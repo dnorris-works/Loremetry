@@ -313,6 +313,10 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
             let request: CostEstimateRequest = take_request(&args)?;
             to_val(commands::estimate_report_costs(app, request).await?)
         }
+        "estimate_summary_refresh_cost" => {
+            let request: commands::SummaryRefreshEstimateRequest = take_request(&args)?;
+            to_val(commands::estimate_summary_refresh_cost(app, request).await?)
+        }
 
         // ── Misc analysis commands ───────────────────────────────────────────
         "analyze_csv" => {

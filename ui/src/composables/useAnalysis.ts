@@ -14,6 +14,7 @@ import { cachedChapterToInput as zeigarnikChapterInput, runZeigarnikAnalysis } f
 import { cachedChapterToInput as readabilityChapterInput, runReadabilityAnalysis } from '../lib/readability';
 
 import { useSettings } from './useSettings';
+import { refreshAiSpend } from './useAiSpend';
 
 const analysisState = ref<AnalysisState | null>(null);
 const isWorking = ref(false);
@@ -93,8 +94,15 @@ async function finishQueuedJob(jobId: string): Promise<void> {
   }
 }
 
-async function runAnalyze(folder: string, forceResummarize: boolean, platform: string): Promise<void> {
+async function runAnalyze(
+  folder: string,
+  forceResummarize: boolean,
+  platform: string,
+  selected: string[] = [],
+  formats: { publishEbook: boolean; publishPrint: boolean } = { publishEbook: true, publishPrint: true },
+): Promise<void> {
   if (!folder) { appendLog('✗ No story selected.'); return; }
+  const s = useSettings();
   const { provider, model } = getSettings();
 
   clearLog();
@@ -108,6 +116,11 @@ async function runAnalyze(folder: string, forceResummarize: boolean, platform: s
         force_resummarize: forceResummarize,
         platform,
         run_time: runTime,
+        selected,
+        publish_ebook: formats.publishEbook,
+        publish_print: formats.publishPrint,
+        genre_model: s.modelFor('genre'),
+        summaries_model: s.modelFor('summaries'),
       },
     });
     await finishQueuedJob(queued.job_id);
@@ -115,6 +128,7 @@ async function runAnalyze(folder: string, forceResummarize: boolean, platform: s
     appendLog('✗ ' + String(e));
   } finally {
     isWorking.value = false;
+    void refreshAiSpend();
     saveLog(folder, runTime);
   }
 }
@@ -199,6 +213,7 @@ async function runCraftAnalysis(
     appendLog('✗ ' + String(e));
   } finally {
     isWorking.value = false;
+    void refreshAiSpend();
     saveLog(folder, new Date().toISOString());
   }
 }
@@ -219,6 +234,7 @@ async function runMarketIntel(folder: string): Promise<void> {
     appendLog('✗ ' + String(e));
   } finally {
     isWorking.value = false;
+    void refreshAiSpend();
     saveLog(folder, new Date().toISOString());
   }
 }

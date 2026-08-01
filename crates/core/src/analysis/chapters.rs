@@ -202,3 +202,15 @@ pub(crate) fn build_combined_context(summaries: &[db::ChapterSummaryRow]) -> Str
         .collect::<Vec<_>>()
         .join("\n\n---\n\n")
 }
+
+/// True when `signals` holds AI prose, not a legacy fingerprint JSON blob.
+pub fn is_prose_summary(signals: &str) -> bool {
+    let s = signals.trim();
+    if s.is_empty() {
+        return false;
+    }
+    if super::chapter_stats::ChapterFingerprint::from_storage(s).is_some() {
+        return false;
+    }
+    true
+}

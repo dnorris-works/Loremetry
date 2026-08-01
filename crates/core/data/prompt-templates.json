@@ -230,5 +230,29 @@
     "user_template": "Chapter genre-signal summaries:\n\n{combined}\n\n---\n\nGenre analysis context (may be empty):\n{genre_context}",
     "max_tokens": 2200,
     "json_mode": 1
+  },
+  {
+    "id": "craft_prose_checks_single",
+    "label": "Craft Prose Checks: Single Chapter",
+    "system_prompt": "You are a fiction craft editor. Check ONE chapter for BOTH show-don't-tell violations AND AI-isms in a single pass.\n\nReturn ONLY JSON:\n{\n  \"sdt_findings\": [\n    {\"telling_text\":\"<max 15 words>\",\"context\":\"<1-2 sentences>\",\"why\":\"<one sentence>\",\"severity\":\"minor|moderate|major\"}\n  ],\n  \"ai_isms_findings\": [\n    {\"telling_text\":\"<max 15 words>\",\"context\":\"<1-2 sentences>\",\"why\":\"<one sentence>\",\"severity\":\"minor|moderate|major\"}\n  ]\n}\n\nRules:\n- Maximum 8 findings per list. Return [] when clean.\n- SDT = telling emotion/judgment instead of showing.\n- AI-isms = synthetic/template-sounding prose habits.",
+    "user_template": "Chapter: {chapter_title}\n\n{bible}\n\n---\n\n{chapter_text}",
+    "max_tokens": 1200,
+    "json_mode": 1
+  },
+  {
+    "id": "craft_prose_checks_batch",
+    "label": "Craft Prose Checks: Batch",
+    "system_prompt": "Craft editor. MULTIPLE chapters — show-don't-tell AND AI-isms in one pass.\n\nReturn ONLY JSON: {\"chapters\":{\"<FILE>\":{\"sdt_findings\":[],\"ai_isms_findings\":[]}}}\nMax 6 per list per chapter.\n\nRules:\n- Include EVERY FILE key. Use exact FILE as JSON key.\n- Budget ≤350 output tokens per chapter. Prefer [] over padding.",
+    "user_template": "Check {chapter_count} chapter(s) for show-don't-tell and AI-isms.\n\n{chapters_block}",
+    "max_tokens": 2000,
+    "json_mode": 1
+  },
+  {
+    "id": "content_maturity_advisory",
+    "label": "Content & Maturity Advisory",
+    "system_prompt": "Publishing compliance advisor for wide ebook distribution (Apple Books, Kobo, Google Play, Ingram, library channels).\n\nUsing genre context and per-chapter content signals, produce age/maturity guidance authors can use when filling store content-rating fields. Do NOT invent plot events not supported by the signals.\n\nReturn ONLY JSON:\n{\n  \"heat_level\": \"none|clean|sweet|sensual|explicit\",\n  \"age_guidance\": \"12+|14+|16+|18+\",\n  \"content_warnings\": [\"≤8 words each, max 6\"],\n  \"maturity_rating_suggestion\": \"≤2 sentences — overall store-facing maturity label\",\n  \"platform_notes\": {\n    \"apple_books\": \"≤2 sentences — explicit content, age rating, common rejection risks\",\n    \"kobo\": \"≤2 sentences\",\n    \"google_play\": \"≤2 sentences\",\n    \"ingram\": \"≤2 sentences — print/wide metadata context\"\n  },\n  \"library_notes\": \"≤2 sentences — OverDrive/library discovery if relevant\"\n}\nNo markdown/preamble.",
+    "user_template": "Genre (ebook): {industry_ebook}\nGenre (print): {industry_print}\nReader demographic: {reader_demographic}\nGenre signals: {genre_signals}\n\nAggregated chapter signals ({chapter_count} chapters):\n- Heat levels seen: {heat_summary}\n- Faith market signals: {faith_summary}\n- Tropes: {tropes_summary}",
+    "max_tokens": 900,
+    "json_mode": 1
   }
 ]

@@ -1,7 +1,7 @@
 // analysis/keywords.rs — KDP keyword optimization, search term generation,
 // discovery keywords, and Canopy-based keyword search.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use serde::Deserialize;
 
 use super::{emit, err, extract_json_object, GenreResult};
@@ -528,5 +528,142 @@ pub(crate) async fn run_keyword_searches_dataforseo(
         }
     }
     let _ = app.emit("cdp:log", &format!("✓ {} total Amazon keywords.", all_results.len()));
+    all_results
+}
+
+/// Derive Google SEO seeds from genre label + discovery phrases (wide distribution).
+pub(crate) fn derive_wide_keyword_seeds(
+    industry_ebook: &str,
+    discovery_phrases: &[String],
+) -> Vec<String> {
+    let mut seeds = derive_keyword_seeds(industry_ebook, &[]);
+    for phrase in discovery_phrases.iter().take(5) {
+        let p = phrase.trim().to_lowercase();
+        if !p.is_empty() && !seeds.iter().any(|s| s.eq_ignore_ascii_case(&p)) {
+            seeds.push(p);
+        }
+    }
+    seeds
+}
+
+/// Google search volume research for wide-store SEO (DataForSEO only).
+pub(crate) async fn run_google_keyword_searches_dataforseo(
+    app: &AppCtx,
+    story_id: &str,
+    seeds: &[String],
+    dataforseo_login: &str,
+    dataforseo_password: &str,
+) -> Vec<KeywordResult> {
+    if seeds.is_empty() {
+        return Vec::new();
+    }
+
+    let client = match crate::dataforseo::DataForSeoClient::new(dataforseo_login, dataforseo_password) {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = app.emit("cdp:log", &format!("⚠ DataForSEO client error: {}", e));
+            return Vec::new();
+        }
+    };
+
+    let mut candidates: HashSet<String> = HashSet::new();
+    for seed in seeds {
+        candidates.insert(seed.trim().to_lowercase());
+    }
+
+    let _ = app.emit("cdp:log", &format!("DataForSEO: Expanding {} Google seed(s)...", seeds.len()));
+    if let Ok(suggestions) = client.google_autocomplete_suggestions(seeds, 15).await {
+        let _ = app.emit("cdp:log", &format!("  ✓ {} Google autocomplete suggestions.", suggestions.len()));
+        let _ = app
+            .usage
+            .record_external(
+                app.user_id(),
+                "dataforseo",
+                "dataforseo",
+                "google_autocomplete_suggestions",
+                Some(story_id),
+            )
+            .await;
+        for s in suggestions {
+            let t = s.trim().to_lowercase();
+            if !t.is_empty() {
+                candidates.insert(t);
+            }
+        }
+    }
+
+    let keywords: Vec<String> = candidates.into_iter().take(80).collect();
+    if keywords.is_empty() {
+        return Vec::new();
+    }
+
+    let _ = app.emit("cdp:log", &format!("DataForSEO: Getting Google volume for {} keyword(s)...", keywords.len()));
+    let volumes = match client.google_search_volume(&keywords).await {
+        Ok(v) => {
+            let _ = app
+                .usage
+                .record_external(
+                    app.user_id(),
+                    "dataforseo",
+                    "dataforseo",
+                    "google_search_volume",
+                    Some(story_id),
+                )
+                .await;
+            v
+        }
+        Err(e) => {
+            let _ = app.emit("cdp:log", &format!("  ⚠ Google volume lookup failed: {}", e));
+            return Vec::new();
+        }
+    };
+
+    let mut all_results: Vec<KeywordResult> = volumes
+        .into_iter()
+        .map(|v| KeywordResult {
+            keyword: v.keyword,
+            searches: format!("{}", v.search_volume),
+            competition: v.competition,
+            estimated_earnings: if v.cpc > 0.0 {
+                format!("${:.2} CPC", v.cpc)
+            } else {
+                String::new()
+            },
+        })
+        .collect();
+
+    all_results.sort_by(|a, b| {
+        let av = a.searches.parse::<u64>().unwrap_or(0);
+        let bv = b.searches.parse::<u64>().unwrap_or(0);
+        bv.cmp(&av).then_with(|| a.keyword.cmp(&b.keyword))
+    });
+
+    // Persist under a reserved seed so Amazon keyword rows stay distinct.
+    if !all_results.is_empty() {
+        let database = app.db.as_ref();
+        let rows: Vec<(String, String, String, String)> = all_results
+            .iter()
+            .map(|r| {
+                (
+                    r.keyword.clone(),
+                    r.searches.clone(),
+                    r.competition.clone(),
+                    r.estimated_earnings.clone(),
+                )
+            })
+            .collect();
+        let _ = crate::db::replace_keyword_search_results(
+            &database.pool,
+            story_id,
+            "__google__",
+            &rows,
+        )
+        .await;
+    }
+
+    let _ = app.emit(
+        "cdp:log",
+        &format!("✓ DataForSEO: {} Google keywords with volume data.", all_results.len()),
+    );
     all_results
 }

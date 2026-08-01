@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue';
 import { invoke, buildAuthHeaders, getOperatorBypassToken } from '../api';
 import type { ModelInfo, ModelsResult } from '../types';
+import { findPricedModel } from '../lib/reportCostPricing';
 
 // ── AI function model assignments ─────────────────────────────────────────────
 // Each AI function can have its own model. Empty means "use the default model."
@@ -201,6 +202,36 @@ async function testDataforseo(): Promise<{ success: boolean; error: string }> {
   }
 }
 
+export type SetupIssue = { id: string; message: string };
+
+function checkAiSetup(): SetupIssue[] {
+  const issues: SetupIssue[] = [];
+  if (!modelAssignments.value.default.trim()) {
+    issues.push({
+      id: 'default-model',
+      message: 'Select a default model with published pricing in Settings → AI Models.',
+    });
+  } else if (!findPricedModel(modelAssignments.value.default, models.value)) {
+    issues.push({
+      id: 'default-model-pricing',
+      message: 'The selected default model has no published pricing. Fetch models and choose a priced model.',
+    });
+  }
+  return issues;
+}
+
+function checkPublishAnalyzeSetup(): SetupIssue[] {
+  return checkAiSetup();
+}
+
+function checkCraftAnalyzeSetup(): SetupIssue[] {
+  return checkAiSetup();
+}
+
+function checkMarketIntelSetup(): SetupIssue[] {
+  return checkAiSetup();
+}
+
 export function useSettings() {
   return {
     theme,
@@ -217,5 +248,8 @@ export function useSettings() {
     saveSettings,
     testCanopy,
     testDataforseo,
+    checkPublishAnalyzeSetup,
+    checkCraftAnalyzeSetup,
+    checkMarketIntelSetup,
   };
 }
