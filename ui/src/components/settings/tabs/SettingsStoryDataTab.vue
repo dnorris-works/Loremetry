@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue';
 import { invoke } from '../../../api';
-import { storiesKey, analysisKey, settingsKey } from '../../../injectionKeys';
+import { storiesKey, analysisKey } from '../../../injectionKeys';
 import type { StoryArtifactStateResponse } from '../../../types';
 
 const props = defineProps<{
@@ -10,7 +10,6 @@ const props = defineProps<{
 
 const storiesCtx = inject(storiesKey)!;
 const analysisCtx = inject(analysisKey)!;
-const settingsCtx = inject(settingsKey)!;
 
 const state = ref<StoryArtifactStateResponse | null>(null);
 const loading = ref(false);
@@ -47,9 +46,6 @@ async function onRefreshSummaries(): Promise<void> {
   try {
     const msg = await invoke<string>('refresh_chapter_summaries', {
       folder,
-      provider: settingsCtx.provider.value,
-      api_key: '',
-      model: settingsCtx.modelFor('summaries') || settingsCtx.model.value,
     });
     actionMsg.value = msg || 'Chapter summaries refreshed.';
     await loadState();

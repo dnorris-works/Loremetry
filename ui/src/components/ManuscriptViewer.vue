@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, inject } from 'vue';
 import { invoke } from '../api';
-import { useSettings } from '../composables/useSettings';
 import { formatMarkdown } from '../formatMarkdown';
 import ChapterEditor from './ChapterEditor.vue';
 import type { Finding } from '../types';
@@ -18,7 +17,6 @@ const emit = defineEmits<{
   (e: 'close'): void;
 }>();
 
-const settings = useSettings();
 const bumpFileTree = inject<() => void>('bumpFileTree', () => {});
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -43,12 +41,6 @@ const isReadMode = computed(() => !finding.value?.tellingText);
 async function onSuggestFix(): Promise<void> {
   if (!finding.value) return;
 
-  const proseModel = settings.modelFor('prose');
-  if (!proseModel) {
-    suggestionError.value = 'No model set. Go to Settings.';
-    return;
-  }
-
   suggestion.value = '';
   suggestionError.value = '';
   loadingSuggestion.value = true;
@@ -57,8 +49,6 @@ async function onSuggestFix(): Promise<void> {
     if (finding.value.reportType === 'show_dont_tell') {
       const result = await invoke<{ success: boolean; suggestions: string; error: string }>('suggest_sdt_fix', {
         request: {
-          provider: settings.provider.value,
-          model: proseModel,
           telling_text: finding.value.tellingText,
           context: finding.value.context,
           why: finding.value.why,
@@ -71,8 +61,6 @@ async function onSuggestFix(): Promise<void> {
     } else if (finding.value.reportType === 'ai_isms') {
       const result = await invoke<{ success: boolean; suggestions: string; error: string }>('suggest_ai_isms_fix', {
         request: {
-          provider: settings.provider.value,
-          model: proseModel,
           telling_text: finding.value.tellingText,
           context: finding.value.context,
           why: finding.value.why,
@@ -85,8 +73,6 @@ async function onSuggestFix(): Promise<void> {
     } else if (finding.value.reportType === 'continuity') {
       const result = await invoke<{ success: boolean; suggestions: string; error: string }>('suggest_continuity_fix', {
         request: {
-          provider: settings.provider.value,
-          model: proseModel,
           entity: finding.value.entity || '',
           attribute: finding.value.attribute || '',
           explanation: finding.value.explanation || '',

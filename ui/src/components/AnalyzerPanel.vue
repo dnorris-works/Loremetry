@@ -910,7 +910,7 @@ function summaryFileMarker(file: string): string {
   flex-direction: column;
   height: 100%;
   padding: var(--content-pad, 20px);
-  overflow: hidden;
+  overflow-y: auto;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;

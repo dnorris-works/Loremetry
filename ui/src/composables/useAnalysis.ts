@@ -111,13 +111,7 @@ async function refreshState(folder: string): Promise<void> {
   }
 }
 
-function getSettings() {
-  const s = useSettings();
-  return {
-    provider: s.provider.value,
-    model: s.model.value,
-  };
-}
+
 
 async function finishQueuedJob(jobId: string): Promise<void> {
   currentJobId = jobId;
@@ -143,8 +137,6 @@ async function runAnalyze(
   formats: { publishEbook: boolean; publishPrint: boolean } = { publishEbook: true, publishPrint: true },
 ): Promise<void> {
   if (!folder) { appendLog('✗ No story selected.'); return; }
-  const s = useSettings();
-  const { provider, model } = getSettings();
 
   clearLog();
   isWorking.value = true;
@@ -154,15 +146,13 @@ async function runAnalyze(
   try {
     const queued = await invoke<JobEnqueueResult>('analyze_story', {
       request: {
-        folder, model, provider,
+        folder,
         force_resummarize: forceResummarize,
         platform,
         run_time: runTime,
         selected,
         publish_ebook: formats.publishEbook,
         publish_print: formats.publishPrint,
-        genre_model: s.modelFor('genre'),
-        summaries_model: s.modelFor('summaries'),
       },
     });
     await finishQueuedJob(queued.job_id);
@@ -190,8 +180,6 @@ async function runCraftAnalysis(
 ): Promise<void> {
   if (!folder) { appendLog('✗ No story selected.'); return; }
 
-  const s = useSettings();
-  const { provider } = getSettings();
   clearLog();
   isWorking.value = true;
   beginSummaryTracking();
@@ -241,13 +229,6 @@ async function runCraftAnalysis(
       request: {
         folder,
         selected: serverSelected,
-        provider,
-        model: s.modelFor('default'),
-        model_summaries: s.modelFor('summaries'),
-        model_continuity: s.modelFor('continuity'),
-        model_sdt: s.modelFor('showDontTell'),
-        model_ai_isms: s.modelFor('aiIsms'),
-        model_prose: s.modelFor('prose'),
         continuity_scope: continuityScope.mode,
         series_id: resolvedSeriesId,
       },
@@ -265,14 +246,13 @@ async function runCraftAnalysis(
 
 async function runMarketIntel(folder: string): Promise<void> {
   if (!folder) { appendLog('✗ No story selected.'); return; }
-  const { provider, model } = getSettings();
 
   clearLog();
   isWorking.value = true;
 
   try {
     const queued = await invoke<JobEnqueueResult>('run_market_intel', {
-      request: { folder, provider, model },
+      request: { folder },
     });
     await finishQueuedJob(queued.job_id);
   } catch (e) {
@@ -304,9 +284,6 @@ async function runSummaries(folder: string): Promise<void> {
     const report = await invoke<string>('refresh_chapter_summaries', {
       request: {
         folder,
-        provider: s.provider.value,
-        api_key: '',
-        model: s.modelFor('summaries') || s.model.value,
       },
     });
     appendLog(report || '✓ Chapter summaries refreshed.');

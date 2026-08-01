@@ -78,3 +78,54 @@ pub async fn set_theme_preference(pool: &PgPool, id: Uuid, theme: &str) -> Resul
         .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+pub async fn get_model_assignments(pool: &PgPool, user_id: Uuid) -> serde_json::Value {
+    sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT model_assignments FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(serde_json::json!({}))
+}
+
+pub async fn set_model_assignments(
+    pool: &PgPool,
+    user_id: Uuid,
+    assignments: &serde_json::Value,
+) -> Result<(), String> {
+    sqlx::query("UPDATE users SET model_assignments = $2 WHERE id = $1")
+        .bind(user_id)
+        .bind(assignments)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Resolve the model for a given function slot, falling back to user default, then server default.
+pub fn resolve_model_for_slot(
+    assignments: &serde_json::Value,
+    slot: &str,
+    server_default: &str,
+) -> String {
+    let slot_model = assignments
+        .get(slot)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if !slot_model.is_empty() {
+        return slot_model.to_string();
+    }
+    let user_default = assignments
+        .get("default")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if !user_default.is_empty() {
+        return user_default.to_string();
+    }
+    server_default.to_string()
+}

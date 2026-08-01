@@ -191,6 +191,18 @@ async function ensureModelsLoaded(): Promise<void> {
   if (modelsLoaded) return;
   modelsLoaded = true;
   await fetchModels();
+
+  // Load user's saved model assignments from server
+  try {
+    const saved = await invoke<Record<string, string>>('get_model_assignments');
+    if (saved && typeof saved === 'object' && Object.keys(saved).length > 0) {
+      modelAssignments.value = { ...modelAssignments.value, ...saved };
+      localStorage.setItem('modelAssignments', JSON.stringify(modelAssignments.value));
+    }
+  } catch {
+    // Use localStorage fallback (already loaded in loadAssignments)
+  }
+
   updateSavedSnapshot();
 }
 
@@ -201,6 +213,16 @@ async function saveSettings(): Promise<void> {
   localStorage.setItem('model', modelAssignments.value.default);
   localStorage.setItem('proseModel', modelAssignments.value.prose);
   void saveThemeToServer(theme.value);
+
+  // Persist model assignments to server DB
+  try {
+    await invoke('save_model_assignments', {
+      assignments: modelAssignments.value,
+    });
+  } catch (e) {
+    console.error('Failed to save model assignments:', e);
+  }
+
   updateSavedSnapshot();
 }
 

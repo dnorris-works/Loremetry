@@ -50,6 +50,7 @@ pub async fn invoke_handler(
     if !skip_credential_inject {
         inject_platform_credentials(&state, &mut args).await;
     }
+    inject_user_model_preferences(state, auth.user.db_user_id, &mut args).await;
     match dispatch(state, &ctx, &body.cmd, args, &auth.user.plan_label).await {
         Ok(v) => ok_json(v),
         Err(e) => json_error(e),
@@ -262,6 +263,23 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, arg
         "get_archived_reports" => {
             let folder = take_story_id(&args)?;
             to_val(loremetry_core::story_settings::get_archived_reports(app, folder).await?)
+        }
+
+        // ── Model assignments ─────────────────────────────────────────────────
+        "save_model_assignments" => {
+            let assignments = args.get("assignments").cloned().unwrap_or(json!({}));
+            loremetry_core::users::set_model_assignments(
+                &db.pool,
+                app.user_id(),
+                &assignments,
+            )
+            .await?;
+            Ok(json!({"success": true}))
+        }
+        "get_model_assignments" => {
+            let assignments =
+                loremetry_core::users::get_model_assignments(&db.pool, app.user_id()).await;
+            Ok(assignments)
         }
 
         // ── Settings / external APIs ─────────────────────────────────────────
@@ -675,6 +693,71 @@ fn camel_to_snake(s: &str) -> String {
     out
 }
 
+/// Inject user's per-function model preferences from the DB.
+/// Fills `model` and per-function model slots when the request leaves them empty.
+async fn inject_user_model_preferences(state: &AppState, user_id: uuid::Uuid, args: &mut Value) {
+    let assignments =
+        loremetry_core::users::get_model_assignments(&state.ctx.db.pool, user_id).await;
+
+    // If the user has no saved assignments, nothing to inject.
+    if assignments.as_object().map_or(true, |m| m.is_empty()) {
+        return;
+    }
+
+    let server_default = state.default_model.read().await.clone();
+
+    inject_resolved_models(args, &assignments, &server_default);
+    if let Some(req) = args.get_mut("request") {
+        inject_resolved_models(req, &assignments, &server_default);
+    }
+}
+
+fn inject_resolved_models(obj: &mut Value, assignments: &Value, server_default: &str) {
+    let Some(map) = obj.as_object_mut() else {
+        return;
+    };
+
+    // Fill main model if empty
+    let model_val = map
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if model_val.is_empty() && map.contains_key("model") {
+        let resolved =
+            loremetry_core::users::resolve_model_for_slot(assignments, "default", server_default);
+        map.insert("model".into(), Value::String(resolved));
+    }
+
+    // Fill per-function model slots if present but empty
+    let slot_fields: &[(&str, &str)] = &[
+        ("summaries_model", "summaries"),
+        ("model_summaries", "summaries"),
+        ("genre_model", "genre"),
+        ("model_continuity", "continuity"),
+        ("model_sdt", "showDontTell"),
+        ("model_ai_isms", "aiIsms"),
+        ("model_prose", "prose"),
+    ];
+
+    for (field, slot) in slot_fields {
+        if map.contains_key(*field) {
+            let val = map
+                .get(*field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if val.is_empty() {
+                let resolved =
+                    loremetry_core::users::resolve_model_for_slot(assignments, slot, server_default);
+                map.insert(field.to_string(), Value::String(resolved));
+            }
+        }
+    }
+}
+
 /// Inject platform credentials from server storage; ignore any client-supplied secrets.
 pub async fn inject_platform_credentials(state: &AppState, args: &mut Value) {
     strip_client_secrets(args);
@@ -699,14 +782,18 @@ async fn inject_default_model(state: &AppState, obj: &mut Value) {
     let Some(map) = obj.as_object_mut() else {
         return;
     };
-    let needs_llm = map.contains_key("model")
+    // Inject model for any request that looks like it needs an LLM call
+    // or is story-scoped (analysis commands always need a model)
+    let needs_model = map.contains_key("model")
         || map.contains_key("provider")
         || map.contains_key("selected")
         || map.contains_key("force_resummarize")
         || map.contains_key("message")
-        || map.contains_key("chapter_text");
+        || map.contains_key("chapter_text")
+        || map.contains_key("folder")
+        || map.contains_key("story_id");
 
-    if needs_llm {
+    if needs_model {
         let model_val = map
             .get("model")
             .and_then(|v| v.as_str())
@@ -765,6 +852,9 @@ async fn fill_keys_from_secrets(
         || map.contains_key("chapter_text");
 
     if needs_llm || story_scoped {
+        if !map.contains_key("provider") {
+            map.insert("provider".into(), Value::String(default_provider.to_string()));
+        }
         map.insert(
             "api_key".into(),
             Value::String(secrets.resolve_api_key(&provider).await),
