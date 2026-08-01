@@ -1,5 +1,6 @@
 /** Drop-in replacement for Tauri invoke + event listen. */
 
+import { ref } from 'vue';
 import type { DocumentMeta, ManuscriptKind } from './types';
 import {
   countWords,
@@ -8,6 +9,9 @@ import {
   putCachedChapter,
   removeCachedChapter,
 } from './lib/manuscriptCache';
+
+/** Reactive flag set when the backend returns a 503 maintenance response. */
+export const maintenanceMode = ref(false);
 
 const BYPASS_STORAGE_KEY = 'loremetry_admin_bypass';
 
@@ -105,6 +109,17 @@ export async function invoke<T = unknown>(cmd: string, args?: Record<string, unk
     body: JSON.stringify({ cmd, args: args ?? {} }),
   });
   const data = await res.json();
+  if (res.status === 503) {
+    try {
+      if (data && data.error === 'maintenance') {
+        maintenanceMode.value = true;
+        throw new Error('Platform is being configured. Please try again later.');
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('being configured')) throw e;
+      // If parsing/check fails, fall through to normal error handling
+    }
+  }
   if (!res.ok) {
     maybeNotifyAuthRequired(res.status, data?.error);
     throw new Error(data?.error || res.statusText || 'Request failed');
@@ -663,6 +678,17 @@ export async function adminFetch<T = unknown>(
     );
   }
   const data = await res.json().catch(() => ({}));
+  if (res.status === 503) {
+    try {
+      if (data && (data as { error?: string }).error === 'maintenance') {
+        maintenanceMode.value = true;
+        throw new Error('Platform is being configured. Please try again later.');
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('being configured')) throw e;
+      // If parsing/check fails, fall through to normal error handling
+    }
+  }
   if (!res.ok) {
     maybeNotifyAuthRequired(res.status, (data as { error?: string }).error);
     throw new Error((data as { error?: string }).error || res.statusText || 'Admin request failed');

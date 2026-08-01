@@ -57,6 +57,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/usage/summary", get(admin::admin_usage_summary))
         .route("/usage/events", get(admin::admin_usage_events));
 
+    // User-facing routes subject to the maintenance guard.
     let protected = Router::new()
         .route("/me", get(auth::auth_me))
         .route("/me/preferences", patch(auth::update_preferences))
@@ -112,19 +113,22 @@ pub fn build_router(state: AppState) -> Router {
         .route("/models", get(list_models))
         .route("/settings/test-canopy", post(test_canopy))
         .route("/settings/test-dataforseo", post(test_dataforseo))
-        // Health
-        .route("/health/services", get(health::service_health))
-        .nest("/admin", admin)
         // Chat / costs / suggests
         .route("/chat", post(chat))
         .route("/costs/estimate", post(estimate_costs))
         .route("/suggest/sdt", post(suggest_sdt))
         .route("/suggest/ai-isms", post(suggest_ai_isms))
-        .route("/suggest/continuity", post(suggest_continuity));
+        .route("/suggest/continuity", post(suggest_continuity))
+        // Apply maintenance guard — non-admin users get 503 when platform is unconfigured.
+        .layer(middleware::from_fn_with_state(state.clone(), crate::maintenance::maintenance_guard));
 
     let api = Router::new()
         .route("/auth/config", get(auth::auth_config))
         .route("/auth/session", get(auth::auth_session))
+        // Health endpoint exempt from maintenance guard (needed for status bar).
+        .route("/health/services", get(health::service_health))
+        // Admin routes exempt from maintenance guard (admin must always access).
+        .nest("/admin", admin)
         .merge(protected)
         .with_state(state.clone());
 

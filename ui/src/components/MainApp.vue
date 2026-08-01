@@ -35,11 +35,15 @@ import HelpPanel from './HelpPanel.vue';
 import StatusFooter from './StatusFooter.vue';
 import { useAuth } from '../composables/useAuth';
 import { useReportTypes } from '../composables/useReportTypes';
+import { useServiceHealth } from '../composables/useServiceHealth';
+import { maintenanceMode } from '../api';
+import MaintenanceScreen from './MaintenanceScreen.vue';
 
 const auth = useAuth();
 provide('isAdmin', auth.isAdmin);
 
 const { loadReportTypes } = useReportTypes();
+const { checkHealth } = useServiceHealth();
 
 const storiesCtx = useStories();
 const analysisCtx = useAnalysis();
@@ -277,6 +281,7 @@ watch(() => analysisCtx.isWorking.value, (working, wasWorking) => {
 
 onMounted(() => {
   void loadReportTypes({ force: true });
+  void checkHealth();
   void storiesCtx.loadStories().then(() => {
     const folder = storiesCtx.activeFolder.value;
     if (folder) {
@@ -291,6 +296,7 @@ onMounted(() => {
 
 <template>
   <div id="app-root" :class="{ 'sidebar-drawer-open': sidebarOpen }" :style="appRootStyle">
+    <MaintenanceScreen v-if="maintenanceMode" />
     <div
       v-if="sidebarOpen"
       class="sidebar-backdrop"

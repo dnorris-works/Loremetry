@@ -1,12 +1,10 @@
-//! Platform credentials (encrypted in DB) and runtime accessors.
+//! Platform credentials loaded from environment variables at startup.
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use sqlx::PgPool;
 use uuid::Uuid;
-
-use crate::secrets::{decrypt_field, encrypt_field, resolve_encryption_key};
 
 #[derive(Clone, Debug, Default)]
 pub struct PlatformCredentials {
@@ -25,61 +23,45 @@ pub struct PlatformCredentials {
 #[derive(Clone)]
 pub struct PlatformSecrets {
     inner: Arc<RwLock<PlatformCredentials>>,
-    pool: PgPool,
-    key: Option<[u8; 32]>,
 }
 
 impl PlatformSecrets {
-    pub async fn load(pool: PgPool) -> Result<Self, String> {
-        let key = resolve_encryption_key()?;
-        let creds = load_from_db(&pool, key.as_ref()).await?;
-        Ok(Self {
-            inner: Arc::new(RwLock::new(creds)),
-            pool,
-            key,
-        })
-    }
+    /// Load all credentials from environment variables. Synchronous — no DB needed.
+    pub fn load_from_env() -> Self {
+        let anthropic_api_key = env_or_empty("anthropic_api_key");
+        let tokenmix_api_key = env_or_empty("tokenmix_api_key");
+        let canopy_api_key = env_or_empty("canopy_api_key");
+        let dataforseo_login = env_or_empty("dataforseo_login");
+        let dataforseo_password = env_or_empty("dataforseo_password");
+        let default_provider = env_or_default("default_provider", "tokenmix");
+        let clerk_publishable_key = env_or_empty("clerk_publishable_key");
+        let clerk_jwt_issuer = env_or_empty("clerk_jwt_issuer");
+        let admin_bypass_token = env_or_empty("admin_bypass_token");
+        let bootstrap_admin_email =
+            normalize_bootstrap_email(&env_or_empty("bootstrap_admin_email"));
 
-    pub async fn reload(&self) -> Result<(), String> {
-        let mut creds = load_from_db(&self.pool, self.key.as_ref()).await?;
-        *self.inner.write().await = creds;
-        Ok(())
+        let creds = PlatformCredentials {
+            anthropic_api_key,
+            tokenmix_api_key,
+            canopy_api_key,
+            dataforseo_login,
+            dataforseo_password,
+            default_provider,
+            clerk_publishable_key,
+            clerk_jwt_issuer,
+            bootstrap_admin_email,
+            admin_bypass_token,
+        };
+
+        log_configured_services(&creds);
+
+        Self {
+            inner: Arc::new(RwLock::new(creds)),
+        }
     }
 
     pub async fn get(&self) -> PlatformCredentials {
         self.inner.read().await.clone()
-    }
-
-    pub async fn update(&self, patch: PlatformCredentialsPatch) -> Result<(), String> {
-        let mut creds = self.inner.read().await.clone();
-        apply_patch_field(&mut creds.anthropic_api_key, patch.anthropic_api_key);
-        apply_patch_field(&mut creds.tokenmix_api_key, patch.tokenmix_api_key);
-        apply_patch_field(&mut creds.canopy_api_key, patch.canopy_api_key);
-        apply_patch_field(&mut creds.dataforseo_login, patch.dataforseo_login);
-        apply_patch_field(&mut creds.dataforseo_password, patch.dataforseo_password);
-        apply_patch_field(&mut creds.clerk_publishable_key, patch.clerk_publishable_key);
-        apply_patch_field(&mut creds.clerk_jwt_issuer, patch.clerk_jwt_issuer);
-        apply_patch_field(&mut creds.bootstrap_admin_email, patch.bootstrap_admin_email);
-        apply_patch_field(&mut creds.admin_bypass_token, patch.admin_bypass_token);
-        creds.bootstrap_admin_email = normalize_bootstrap_email(&creds.bootstrap_admin_email);
-        if let Some(v) = patch.default_provider {
-            if !v.is_empty() {
-                creds.default_provider = v;
-            }
-        }
-        save_to_db(
-            &self.pool,
-        self.key
-            .as_ref()
-            .ok_or(
-                "Cannot save credentials: set a valid SECRETS_ENCRYPTION_KEY in the server environment (paste the output of `openssl rand -base64 32`, not the command text), redeploy, then save again.",
-            )?,
-            &creds,
-        )
-        .await?;
-        sync_local_admin_email(&self.pool, &creds.bootstrap_admin_email).await?;
-        *self.inner.write().await = creds;
-        Ok(())
     }
 
     pub async fn resolve_api_key(&self, provider: &str) -> String {
@@ -105,7 +87,7 @@ impl PlatformSecrets {
     pub async fn default_provider(&self) -> String {
         let c = self.inner.read().await;
         if c.default_provider.trim().is_empty() {
-            "claude".into()
+            "tokenmix".into()
         } else {
             c.default_provider.clone()
         }
@@ -198,39 +180,7 @@ pub struct PlatformSecretsAdminGet {
     pub admin_bypass_token: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
-pub struct PlatformCredentialsPatch {
-    #[serde(default)]
-    pub anthropic_api_key: Option<String>,
-    #[serde(default)]
-    pub tokenmix_api_key: Option<String>,
-    #[serde(default)]
-    pub canopy_api_key: Option<String>,
-    #[serde(default)]
-    pub dataforseo_login: Option<String>,
-    #[serde(default)]
-    pub dataforseo_password: Option<String>,
-    #[serde(default)]
-    pub default_provider: Option<String>,
-    #[serde(default)]
-    pub clerk_publishable_key: Option<String>,
-    #[serde(default)]
-    pub clerk_jwt_issuer: Option<String>,
-    #[serde(default)]
-    pub bootstrap_admin_email: Option<String>,
-    #[serde(default)]
-    pub admin_bypass_token: Option<String>,
-}
-
-fn apply_patch_field(current: &mut String, patch: Option<String>) {
-    if let Some(v) = patch {
-        if !v.is_empty() {
-            *current = v;
-        }
-    }
-}
-
-/// Email for the first local admin (`users` row) when Clerk is off; stored in `platform_secrets`.
+/// Email for the first local admin (`users` row) when Clerk is off.
 pub fn normalize_bootstrap_email(raw: &str) -> String {
     let t = raw.trim();
     if t.is_empty() {
@@ -240,127 +190,9 @@ pub fn normalize_bootstrap_email(raw: &str) -> String {
     }
 }
 
-pub async fn bootstrap_admin_email_from_db(pool: &PgPool) -> Result<String, String> {
-    let row: Option<String> =
-        sqlx::query_scalar("SELECT bootstrap_admin_email FROM platform_secrets WHERE id = 1")
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    Ok(normalize_bootstrap_email(row.as_deref().unwrap_or("")))
-}
-
-async fn sync_local_admin_email(pool: &PgPool, email: &str) -> Result<(), String> {
-    sqlx::query(
-        "UPDATE users SET email = $1
-         WHERE clerk_id IS NULL OR clerk_id = ''",
-    )
-    .bind(email)
-    .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-async fn load_from_db(
-    pool: &PgPool,
-    key: Option<&[u8; 32]>,
-) -> Result<PlatformCredentials, String> {
-    let row: Option<(
-        Vec<u8>,
-        Vec<u8>,
-        Vec<u8>,
-        Vec<u8>,
-        Vec<u8>,
-        String,
-        String,
-        String,
-        String,
-        String,
-    )> = sqlx::query_as(
-        "SELECT anthropic_api_key, tokenmix_api_key, canopy_api_key, dataforseo_login, dataforseo_password, default_provider, clerk_publishable_key, clerk_jwt_issuer, bootstrap_admin_email, admin_bypass_token FROM platform_secrets WHERE id = 1",
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    let Some((a, t, c, l, p, dp, clerk_pk, clerk_iss, bootstrap_email, bypass)) = row else {
-        return Ok(PlatformCredentials::default());
-    };
-
-    Ok(PlatformCredentials {
-        anthropic_api_key: decrypt_optional(&a, key)?,
-        tokenmix_api_key: decrypt_optional(&t, key)?,
-        canopy_api_key: decrypt_optional(&c, key)?,
-        dataforseo_login: decrypt_optional(&l, key)?,
-        dataforseo_password: decrypt_optional(&p, key)?,
-        default_provider: if dp.is_empty() {
-            "claude".into()
-        } else {
-            dp
-        },
-        clerk_publishable_key: clerk_pk,
-        clerk_jwt_issuer: clerk_iss,
-        bootstrap_admin_email: normalize_bootstrap_email(&bootstrap_email),
-        admin_bypass_token: bypass,
-    })
-}
-
-fn decrypt_optional(blob: &[u8], key: Option<&[u8; 32]>) -> Result<String, String> {
-    if blob.is_empty() {
-        return Ok(String::new());
-    }
-    let Some(k) = key else {
-        return Err(
-            "SECRETS_ENCRYPTION_KEY is not set but encrypted platform credentials exist in the database (set the key or reset lore.platform_secrets)".into(),
-        );
-    };
-    decrypt_field(blob, k)
-}
-
-async fn save_to_db(
-    pool: &PgPool,
-    key: &[u8; 32],
-    creds: &PlatformCredentials,
-) -> Result<(), String> {
-    let dp = if creds.default_provider.is_empty() {
-        "claude"
-    } else {
-        creds.default_provider.as_str()
-    };
-    let bootstrap_email = normalize_bootstrap_email(&creds.bootstrap_admin_email);
-    sqlx::query(
-        "INSERT INTO platform_secrets (
-            id, anthropic_api_key, tokenmix_api_key, canopy_api_key,
-            dataforseo_login, dataforseo_password, default_provider,
-            clerk_publishable_key, clerk_jwt_issuer, bootstrap_admin_email, admin_bypass_token
-         ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         ON CONFLICT (id) DO UPDATE SET
-            anthropic_api_key = EXCLUDED.anthropic_api_key,
-            tokenmix_api_key = EXCLUDED.tokenmix_api_key,
-            canopy_api_key = EXCLUDED.canopy_api_key,
-            dataforseo_login = EXCLUDED.dataforseo_login,
-            dataforseo_password = EXCLUDED.dataforseo_password,
-            default_provider = EXCLUDED.default_provider,
-            clerk_publishable_key = EXCLUDED.clerk_publishable_key,
-            clerk_jwt_issuer = EXCLUDED.clerk_jwt_issuer,
-            bootstrap_admin_email = EXCLUDED.bootstrap_admin_email,
-            admin_bypass_token = EXCLUDED.admin_bypass_token,
-            updated_at = now()",
-    )
-    .bind(encrypt_field(&creds.anthropic_api_key, key))
-    .bind(encrypt_field(&creds.tokenmix_api_key, key))
-    .bind(encrypt_field(&creds.canopy_api_key, key))
-    .bind(encrypt_field(&creds.dataforseo_login, key))
-    .bind(encrypt_field(&creds.dataforseo_password, key))
-    .bind(dp)
-    .bind(creds.clerk_publishable_key.trim())
-    .bind(creds.clerk_jwt_issuer.trim().trim_end_matches('/'))
-    .bind(&bootstrap_email)
-    .bind(creds.admin_bypass_token.trim())
-    .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-    Ok(())
+/// Read a bootstrap admin email from the `users` table (since platform_secrets table is dropped).
+pub async fn bootstrap_admin_email_from_env() -> String {
+    normalize_bootstrap_email(&env_or_empty("bootstrap_admin_email"))
 }
 
 /// Operator user row (no Clerk) for break-glass sessions and usage attribution.
@@ -376,7 +208,7 @@ pub async fn ensure_bootstrap_user(pool: &PgPool) -> Result<Uuid, String> {
         return Ok(id);
     }
 
-    let email = bootstrap_admin_email_from_db(pool).await?;
+    let email = normalize_bootstrap_email(&env_or_empty("bootstrap_admin_email"));
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO users (email, role, plan_label, monthly_fee_cents)
          VALUES ($1, 'subscriber', 'operator', 0)
@@ -401,67 +233,36 @@ async fn backfill_story_owners(pool: &PgPool, user_id: Uuid) -> Result<(), Strin
     Ok(())
 }
 
-fn generate_operator_bypass_token() -> String {
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    use rand::RngCore;
-    let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    STANDARD.encode(bytes)
+// ─── Helper functions ────────────────────────────────────────────────────────
+
+fn env_or_empty(name: &str) -> String {
+    std::env::var(name).unwrap_or_default().trim().to_string()
 }
 
-/// Clear stored operator bypass (next `ensure_operator_bypass_token` will mint a new one).
-pub async fn clear_operator_bypass_token(pool: &PgPool) -> Result<(), String> {
-    sqlx::query(
-        "UPDATE platform_secrets SET admin_bypass_token = '', updated_at = now() WHERE id = 1",
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// True when a non-empty bypass token is stored.
-pub async fn operator_bypass_is_set(pool: &PgPool) -> Result<bool, String> {
-    let current: Option<String> =
-        sqlx::query_scalar("SELECT admin_bypass_token FROM platform_secrets WHERE id = 1")
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    Ok(current.as_deref().unwrap_or("").trim().len() > 0)
-}
-
-/// If no operator bypass is configured, generate one and persist (plaintext). Returns the new token.
-pub async fn ensure_operator_bypass_token(pool: &PgPool) -> Result<Option<String>, String> {
-    let current: Option<String> =
-        sqlx::query_scalar("SELECT admin_bypass_token FROM platform_secrets WHERE id = 1")
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    if current.as_deref().unwrap_or("").trim().len() > 0 {
-        return Ok(None);
+fn env_or_default(name: &str, default: &str) -> String {
+    let val = std::env::var(name).unwrap_or_default().trim().to_string();
+    if val.is_empty() {
+        default.to_string()
+    } else {
+        val
     }
+}
 
-    let token = generate_operator_bypass_token();
-    let result = sqlx::query(
-        "UPDATE platform_secrets SET admin_bypass_token = $1, updated_at = now() WHERE id = 1",
-    )
-    .bind(&token)
-    .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    if result.rows_affected() == 0 {
-        sqlx::query(
-            "INSERT INTO platform_secrets (id, admin_bypass_token) VALUES (1, $1)
-             ON CONFLICT (id) DO UPDATE SET
-                admin_bypass_token = EXCLUDED.admin_bypass_token,
-                updated_at = now()",
-        )
-        .bind(&token)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+fn log_configured_services(creds: &PlatformCredentials) {
+    let services = [
+        ("TokenMix", !creds.tokenmix_api_key.is_empty()),
+        ("Anthropic", !creds.anthropic_api_key.is_empty()),
+        ("Canopy", !creds.canopy_api_key.is_empty()),
+        (
+            "DataForSEO",
+            !creds.dataforseo_login.is_empty() && !creds.dataforseo_password.is_empty(),
+        ),
+    ];
+    for (name, configured) in &services {
+        if *configured {
+            log::info!("Service {name}: configured");
+        } else {
+            log::warn!("Service {name}: NOT configured (env var empty or unset)");
+        }
     }
-
-    Ok(Some(token))
 }

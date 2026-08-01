@@ -3,6 +3,7 @@ mod admin;
 mod error;
 mod health;
 mod invoke;
+mod maintenance;
 mod routes;
 mod sse;
 mod state;
@@ -69,76 +70,8 @@ async fn main() {
         }
     };
 
-    if std::env::var("LOREMETRY_RESET_OPERATOR_BYPASS")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-    {
-        tracing::warn!(
-            "LOREMETRY_RESET_OPERATOR_BYPASS is set — clearing operator bypass; a new token will be generated"
-        );
-        if let Err(e) =
-            loremetry_core::platform_secrets::clear_operator_bypass_token(&database.pool).await
-        {
-            tracing::error!("Could not clear operator bypass token: {e}");
-        }
-    }
-
-    match loremetry_core::platform_secrets::ensure_operator_bypass_token(&database.pool).await {
-        Ok(Some(token)) => {
-            tracing::warn!(
-                "Operator bypass token was empty — generated a new one (copy from logs now)"
-            );
-            tracing::warn!("OPERATOR BYPASS TOKEN: {token}");
-            eprintln!();
-            eprintln!("══════════════════════════════════════════════════════════════");
-            eprintln!("  OPERATOR BYPASS TOKEN (first-time — copy now)");
-            eprintln!();
-            eprintln!("  {token}");
-            eprintln!();
-            eprintln!("  In the app: Sign-in screen → Operator access → paste token.");
-            eprintln!("  Later: rotate in Admin → Platform credentials.");
-            eprintln!("══════════════════════════════════════════════════════════════");
-            eprintln!();
-        }
-        Ok(None) => {
-            if loremetry_core::platform_secrets::operator_bypass_is_set(&database.pool)
-                .await
-                .unwrap_or(false)
-            {
-                tracing::warn!(
-                    "Operator bypass token is already set in the database (not shown again). \
-                     Lost it? Set env LOREMETRY_RESET_OPERATOR_BYPASS=true and redeploy once, \
-                     or SQL: UPDATE lore.platform_secrets SET admin_bypass_token = '' WHERE id = 1; then restart."
-                );
-            }
-        }
-        Err(e) => {
-            tracing::error!("Could not ensure operator bypass token: {e}");
-        }
-    }
-
-    tracing::info!("Boot: loading platform secrets…");
-    let secrets = match loremetry_core::platform_secrets::PlatformSecrets::load(
-        database.pool.clone(),
-    )
-    .await
-    {
-        Ok(s) => Arc::new(s),
-        Err(e) => {
-            tracing::error!("Platform secrets init failed: {e}");
-            eprintln!("Platform secrets init failed: {e}");
-            if e.contains("SECRETS_ENCRYPTION_KEY") {
-                eprintln!(
-                    "Hint: SECRETS_ENCRYPTION_KEY must be the base64 output of `openssl rand -base64 32`, not the command. Generate once, set it in the server environment, and keep the same value across deploys and host moves."
-                );
-            } else if e.contains("decrypt failed") {
-                eprintln!(
-                    "Hint: SECRETS_ENCRYPTION_KEY may have changed since credentials were saved. Restore the original key or reset lore.platform_secrets ciphertext in the database."
-                );
-            }
-            std::process::exit(1);
-        }
-    };
+    tracing::info!("Boot: loading platform secrets from environment variables…");
+    let secrets = Arc::new(loremetry_core::platform_secrets::PlatformSecrets::load_from_env());
 
     let ctx = AppCtx::new(database);
     let state = AppState {

@@ -6,48 +6,34 @@ import type { StaleCleanupResult, WinningCatCatalogStatus, WinningCatImportResul
 
 const showPanel = inject(showPanelKey)!;
 
-const platformStatus = ref<{
-  anthropic: boolean;
-  tokenmix: boolean;
-  canopy: boolean;
-  dataforseo: boolean;
-  default_provider: string;
-  clerk_enabled?: boolean;
-} | null>(null);
-const platformSaveMsg = ref('');
-const platformCanopyStatus = ref('');
-const platformDfsStatus = ref('');
-const credAnthropic = ref('');
-const credTokenmix = ref('');
-const credCanopy = ref('');
-const credDfsLogin = ref('');
-const credDfsPassword = ref('');
-const credClerkPublishable = ref('');
-const credClerkIssuer = ref('');
-const credBootstrapEmail = ref('');
-const credBypassToken = ref('');
-const credDefaultProvider = ref('tokenmix');
-const showCredentialValues = ref(true);
-
 type PlatformSecretsView = {
-  anthropic: boolean;
-  tokenmix: boolean;
-  canopy: boolean;
-  dataforseo: boolean;
+  anthropic_configured: boolean;
+  tokenmix_configured: boolean;
+  canopy_configured: boolean;
+  dataforseo_configured: boolean;
   default_provider: string;
-  anthropic_api_key: string;
-  tokenmix_api_key: string;
-  canopy_api_key: string;
-  dataforseo_login: string;
-  dataforseo_password: string;
-  clerk_publishable_key: string;
-  clerk_jwt_issuer: string;
-  clerk_enabled: boolean;
-  bootstrap_admin_email: string;
-  admin_bypass_token: string;
+  clerk_configured: boolean;
+  admin_bypass_configured: boolean;
+  bootstrap_email_configured: boolean;
+  env_managed_message: string;
 };
 
-const credFieldType = computed(() => (showCredentialValues.value ? 'text' : 'password'));
+const platformStatus = ref<PlatformSecretsView | null>(null);
+const platformCanopyStatus = ref('');
+const platformDfsStatus = ref('');
+
+const serviceStatuses = computed(() => {
+  if (!platformStatus.value) return [];
+  return [
+    { key: 'tokenmix', label: 'TokenMix AI', configured: platformStatus.value.tokenmix_configured },
+    { key: 'anthropic', label: 'Anthropic', configured: platformStatus.value.anthropic_configured },
+    { key: 'canopy', label: 'Canopy', configured: platformStatus.value.canopy_configured },
+    { key: 'dataforseo', label: 'DataForSEO', configured: platformStatus.value.dataforseo_configured },
+    { key: 'clerk', label: 'Clerk Auth', configured: platformStatus.value.clerk_configured },
+    { key: 'bypass', label: 'Admin Bypass', configured: platformStatus.value.admin_bypass_configured },
+    { key: 'email', label: 'Bootstrap Email', configured: platformStatus.value.bootstrap_email_configured },
+  ];
+});
 
 type UsageSummaryRow = {
   user_id: string;
@@ -136,124 +122,34 @@ function usageRangeFromMonth(ym: string): { from: string; to: string } {
   return { from: from.toISOString(), to: to.toISOString() };
 }
 
-function applyPlatformSecrets(data: PlatformSecretsView): void {
-  platformStatus.value = data;
-  credAnthropic.value = data.anthropic_api_key ?? '';
-  credTokenmix.value = data.tokenmix_api_key ?? '';
-  credCanopy.value = data.canopy_api_key ?? '';
-  credDfsLogin.value = data.dataforseo_login ?? '';
-  credDfsPassword.value = data.dataforseo_password ?? '';
-  if (data.default_provider) {
-    credDefaultProvider.value = data.default_provider;
-  }
-  credClerkPublishable.value = data.clerk_publishable_key ?? '';
-  credClerkIssuer.value = data.clerk_jwt_issuer ?? '';
-  credBootstrapEmail.value = data.bootstrap_admin_email ?? 'admin@local';
-  credBypassToken.value = data.admin_bypass_token ?? '';
-}
-
 async function loadPlatformSecrets(): Promise<void> {
   try {
     const data = await invoke<PlatformSecretsView>('get_platform_credentials');
-    applyPlatformSecrets(data);
+    platformStatus.value = data;
   } catch {
     try {
       const data = await adminFetch<PlatformSecretsView>('/platform-secrets');
-      applyPlatformSecrets(data);
+      platformStatus.value = data;
     } catch {
       platformStatus.value = null;
     }
   }
 }
 
-async function savePlatformSecrets(): Promise<void> {
-  const dfsLogin = credDfsLogin.value.trim();
-  const dfsPassword = credDfsPassword.value.trim();
-  if (dfsLogin && !dfsPassword) {
-    platformSaveMsg.value = '✗ Enter DataForSEO password (login and password are both required).';
-    setTimeout(() => { platformSaveMsg.value = ''; }, 5000);
-    return;
-  }
-  if (dfsPassword && !dfsLogin) {
-    platformSaveMsg.value = '✗ Enter DataForSEO login (login and password are both required).';
-    setTimeout(() => { platformSaveMsg.value = ''; }, 5000);
-    return;
-  }
-  platformSaveMsg.value = 'Saving…';
-  const body: Record<string, string> = {
-    default_provider: credDefaultProvider.value,
-  };
-  if (credAnthropic.value.trim()) body.anthropic_api_key = credAnthropic.value.trim();
-  if (credTokenmix.value.trim()) body.tokenmix_api_key = credTokenmix.value.trim();
-  if (credCanopy.value.trim()) body.canopy_api_key = credCanopy.value.trim();
-  if (dfsLogin) body.dataforseo_login = dfsLogin;
-  if (dfsPassword) body.dataforseo_password = dfsPassword;
-  const clerkPk = credClerkPublishable.value.trim();
-  const clerkIss = credClerkIssuer.value.trim();
-  if (clerkPk) body.clerk_publishable_key = clerkPk;
-  if (clerkIss) body.clerk_jwt_issuer = clerkIss;
-  const bootstrapEmail = credBootstrapEmail.value.trim();
-  if (bootstrapEmail) body.bootstrap_admin_email = bootstrapEmail;
-  const bypass = credBypassToken.value.trim();
-  if (bypass) body.admin_bypass_token = bypass;
-  try {
-    const result = await invoke<{
-      success: boolean;
-      error?: string;
-      credentials?: PlatformSecretsView;
-    }>('update_platform_credentials', body);
-    if (result.success) {
-      platformSaveMsg.value = '✓ Saved to database';
-      if (result.credentials) {
-        applyPlatformSecrets(result.credentials);
-      } else {
-        await loadPlatformSecrets();
-      }
-      if (dfsLogin && dfsPassword) {
-        platformDfsStatus.value = 'Testing…';
-        try {
-          const testResult = await invoke<{ success: boolean; error: string }>(
-            'test_dataforseo_connection',
-            { dataforseo_login: dfsLogin, dataforseo_password: dfsPassword },
-          );
-          platformDfsStatus.value = testResult.success ? '✓ Connected' : '✗ ' + (testResult.error || 'Connection failed');
-        } catch (e) {
-          platformDfsStatus.value = '✗ ' + String(e);
-        }
-      }
-    } else {
-      platformSaveMsg.value = '✗ ' + (result.error || 'Save failed');
-    }
-  } catch (e) {
-    platformSaveMsg.value = '✗ ' + String(e);
-  }
-  const hideMs = platformSaveMsg.value.includes('SECRETS_ENCRYPTION_KEY') ? 15000 : 8000;
-  setTimeout(() => { platformSaveMsg.value = ''; }, hideMs);
-}
-
-async function onTestPlatformCanopy(): Promise<void> {
+async function onTestCanopy(): Promise<void> {
   platformCanopyStatus.value = 'Testing…';
-  const key = credCanopy.value.trim();
   try {
-    const result = await invoke<{ success: boolean; error: string }>('test_canopy_connection', {
-      ...(key ? { canopy_api_key: key } : {}),
-    });
+    const result = await invoke<{ success: boolean; error: string }>('test_canopy_connection', {});
     platformCanopyStatus.value = result.success ? '✓ Connected' : '✗ ' + (result.error || 'Connection failed');
   } catch (e) {
     platformCanopyStatus.value = '✗ ' + String(e);
   }
 }
 
-async function onTestPlatformDataforseo(): Promise<void> {
+async function onTestDfs(): Promise<void> {
   platformDfsStatus.value = 'Testing…';
-  const login = credDfsLogin.value.trim();
-  const password = credDfsPassword.value.trim();
   try {
-    const result = await invoke<{ success: boolean; error: string }>('test_dataforseo_connection', {
-      ...(login && password
-        ? { dataforseo_login: login, dataforseo_password: password }
-        : {}),
-    });
+    const result = await invoke<{ success: boolean; error: string }>('test_dataforseo_connection', {});
     platformDfsStatus.value = result.success ? '✓ Connected' : '✗ ' + (result.error || 'Connection failed');
   } catch (e) {
     platformDfsStatus.value = '✗ ' + String(e);
@@ -303,10 +199,6 @@ function formatUsd(n: number): string {
 
 function formatFeeCents(cents: number): string {
   return '$' + (cents / 100).toFixed(2);
-}
-
-function configuredLabel(ok: boolean): string {
-  return ok ? '✓ configured' : '— not set';
 }
 
 async function loadDbTables(): Promise<void> {
@@ -433,7 +325,7 @@ async function onRemoveStale(): Promise<void> {
     </div>
 
     <p class="panel-desc">
-      Operator tools — platform API credentials (encrypted on server), usage reporting, catalog import, and SQL console.
+      Operator tools — platform service status, usage reporting, catalog import, and SQL console.
     </p>
 
     <!-- SQL console -->
@@ -497,60 +389,32 @@ async function onRemoveStale(): Promise<void> {
 
     <h3 class="section-title">Platform credentials</h3>
     <div class="settings-form">
-      <p class="panel-desc">Enter values below, then <strong>Save platform credentials</strong> (stored encrypted in Postgres). The server must have <code>SECRETS_ENCRYPTION_KEY</code> set to the <strong>output</strong> of <code>openssl rand -base64 32</code> (one line like <code>K7gNU3sdo+OL0wNhqoVWhr3g6sZxWo3+/bOVc4OGtjo=</code>) — not the command itself. Use the same key on every deploy and when you move hosts if you keep the same database.</p>
-      <div v-if="platformStatus" class="platform-status">
-        <span>Anthropic: {{ configuredLabel(platformStatus.anthropic) }}</span>
-        <span>TokenMix: {{ configuredLabel(platformStatus.tokenmix) }}</span>
-        <span>Canopy: {{ configuredLabel(platformStatus.canopy) }}</span>
-        <span>DataForSEO: {{ configuredLabel(platformStatus.dataforseo) }}</span>
-        <span v-if="platformStatus.clerk_enabled !== undefined">Clerk: {{ configuredLabel(platformStatus.clerk_enabled) }}</span>
+      <p class="env-managed-notice">Credentials managed via Miget environment variables.</p>
+
+      <div v-if="platformStatus" class="service-status-grid">
+        <div class="service-row" v-for="svc in serviceStatuses" :key="svc.key">
+          <span class="service-name">{{ svc.label }}</span>
+          <span :class="svc.configured ? 'status-ok' : 'status-missing'">
+            {{ svc.configured ? '✓ Configured' : '— Not configured' }}
+          </span>
+        </div>
+        <div class="service-row">
+          <span class="service-name">Default provider</span>
+          <span class="status-ok">{{ platformStatus.default_provider }}</span>
+        </div>
       </div>
-      <label class="reveal-creds-toggle">
-        <input v-model="showCredentialValues" type="checkbox" />
-        Show credential values
-      </label>
-      <label class="field-label">Anthropic API key</label>
-      <input v-model="credAnthropic" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" />
-      <label class="field-label">TokenMix API key</label>
-      <input v-model="credTokenmix" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" />
-      <label class="field-label">Canopy API key</label>
-      <input v-model="credCanopy" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" />
-      <button type="button" class="btn btn-sm" @click="onTestPlatformCanopy">Test Canopy</button>
-      <div class="status-msg">{{ platformCanopyStatus }}</div>
-      <label class="field-label">DataForSEO login</label>
-      <input v-model="credDfsLogin" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" />
-      <label class="field-label">DataForSEO password</label>
-      <input v-model="credDfsPassword" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" />
-      <button type="button" class="btn btn-sm" @click="onTestPlatformDataforseo">Test DataForSEO</button>
-      <div class="status-msg">{{ platformDfsStatus }}</div>
-      <div class="settings-section-divider"></div>
-      <h4 class="subsection-title">Clerk (sign-in)</h4>
-      <p class="panel-desc">Stored in the database like other platform settings — not deploy env vars. Issuer is Clerk → API keys → Frontend API URL (no trailing slash). After saving, reload the app so the sign-in UI picks up the publishable key.</p>
-      <label class="field-label">Clerk publishable key</label>
-      <input v-model="credClerkPublishable" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" placeholder="pk_live_… or pk_test_…" />
-      <label class="field-label">Clerk JWT issuer (Frontend API URL)</label>
-      <input v-model="credClerkIssuer" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" placeholder="https://your-app.clerk.accounts.dev" />
-      <h4 class="subsection-title">Operator bypass</h4>
-      <p class="panel-desc">Long random secret for full API access without Clerk (header <code>X-Loremetry-Admin-Bypass</code> or <strong>Operator access</strong> on the sign-in screen). On first deploy the server auto-generates a token and prints it in <strong>container logs</strong> if this field is empty. Unlocks Admin and all invoke routes.</p>
-      <label class="field-label">Operator bypass token</label>
-      <input v-model="credBypassToken" :type="credFieldType" autocomplete="off" spellcheck="false" class="cred-input" placeholder="Generate a long random string" />
-      <h4 class="subsection-title">Open mode (no Clerk)</h4>
-      <p class="panel-desc">When Clerk is not configured, the API treats you as this bootstrap admin (created on first boot if no admin exists). Changing the email updates the local admin user row for usage attribution and <code>/api/me</code>.</p>
-      <label class="field-label">Bootstrap admin email</label>
-      <input v-model="credBootstrapEmail" type="email" autocomplete="off" spellcheck="false" class="cred-input" placeholder="admin@local" />
-      <label class="field-label">Default LLM provider</label>
-      <div class="provider-options">
-        <label class="provider-option">
-          <input v-model="credDefaultProvider" type="radio" value="claude" />
-          Claude
-        </label>
-        <label class="provider-option">
-          <input v-model="credDefaultProvider" type="radio" value="tokenmix" />
-          TokenMix
-        </label>
+
+      <div class="test-connections" v-if="platformStatus">
+        <button type="button" class="btn btn-sm" @click="onTestCanopy" :disabled="!platformStatus.canopy_configured">
+          Test Canopy
+        </button>
+        <span v-if="platformCanopyStatus" class="status-msg">{{ platformCanopyStatus }}</span>
+
+        <button type="button" class="btn btn-sm" @click="onTestDfs" :disabled="!platformStatus.dataforseo_configured">
+          Test DataForSEO
+        </button>
+        <span v-if="platformDfsStatus" class="status-msg">{{ platformDfsStatus }}</span>
       </div>
-      <button type="button" class="btn" @click="savePlatformSecrets">Save platform credentials</button>
-      <div class="settings-saved">{{ platformSaveMsg }}</div>
     </div>
 
     <div class="settings-section-divider"></div>
@@ -629,30 +493,55 @@ async function onRemoveStale(): Promise<void> {
 </template>
 
 <style scoped>
-.reveal-creds-toggle {
+.env-managed-notice {
+  font-size: 13px;
+  color: var(--text-muted);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.service-status-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.service-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-muted);
-  margin-bottom: 8px;
-  cursor: pointer;
-  user-select: none;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--surface2);
 }
 
-.cred-input {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+.service-name {
   font-size: 13px;
-  letter-spacing: 0.02em;
+  font-weight: 500;
+  color: var(--text);
 }
 
-.platform-status {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+.status-ok {
+  font-size: 12px;
+  color: var(--success);
+  font-weight: 500;
+}
+
+.status-missing {
   font-size: 12px;
   color: var(--text-muted);
-  margin-bottom: 12px;
+}
+
+.test-connections {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
 
 .usage-table {
@@ -870,27 +759,6 @@ async function onRemoveStale(): Promise<void> {
   background: var(--surface2);
 }
 
-.provider-options {
-  display: flex;
-  gap: 16px;
-}
-
-.provider-option {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text);
-  text-transform: none;
-  letter-spacing: 0;
-  cursor: pointer;
-}
-
-.provider-option input[type="radio"] {
-  width: auto;
-  accent-color: var(--accent);
-}
-
 .model-row {
   display: flex;
   gap: 8px;
@@ -967,15 +835,10 @@ async function onRemoveStale(): Promise<void> {
   color: var(--danger, #c44);
 }
 
-.status-msg,
-.settings-saved {
+.status-msg {
   font-size: 12px;
   color: var(--text-muted);
   min-height: 16px;
-}
-
-.settings-saved {
-  color: var(--success);
 }
 
 .model-sort-row {

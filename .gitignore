@@ -2,9 +2,7 @@
 /target/
 /data/
 src-tauri/
-*.db
 ui/node_modules/
-ui/dist/
 .DS_Store
 .env
 .env.*

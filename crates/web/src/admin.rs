@@ -5,7 +5,6 @@ use std::time::Instant;
 use axum::extract::{Multipart, Query};
 use axum::response::IntoResponse;
 use axum::Json;
-use loremetry_core::platform_secrets::PlatformCredentialsPatch;
 use loremetry_core::usage::{usage_events, usage_summary};
 use loremetry_core::{canopy, dataforseo, winningcat};
 use serde::Deserialize;
@@ -14,7 +13,6 @@ use sqlx::{Column, Row, ValueRef};
 
 use crate::auth::AdminAuthenticated;
 use crate::error::{json_error, ok_json};
-use crate::state::AppState;
 
 /// GET /api/admin/status
 pub async fn admin_status() -> impl IntoResponse {
@@ -177,24 +175,51 @@ pub async fn admin_sql(auth: AdminAuthenticated, Json(body): Json<SqlBody>) -> i
 }
 
 /// GET /api/admin/platform-secrets
+/// Returns read-only configured status for all services. No actual credential values exposed.
 pub async fn get_platform_secrets(auth: AdminAuthenticated) -> impl IntoResponse {
-    let view = auth.state.secrets.admin_get().await;
-    ok_json(serde_json::to_value(view).unwrap_or(json!(null)))
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    struct PlatformSecretsAdminGetV2 {
+        anthropic_configured: bool,
+        tokenmix_configured: bool,
+        canopy_configured: bool,
+        dataforseo_configured: bool,
+        default_provider: String,
+        clerk_configured: bool,
+        admin_bypass_configured: bool,
+        bootstrap_email_configured: bool,
+        env_managed_message: &'static str,
+    }
+
+    let creds = auth.state.secrets.get().await;
+    let status = auth.state.secrets.configured_status().await;
+
+    let response = PlatformSecretsAdminGetV2 {
+        anthropic_configured: status.anthropic,
+        tokenmix_configured: status.tokenmix,
+        canopy_configured: status.canopy,
+        dataforseo_configured: status.dataforseo,
+        default_provider: status.default_provider,
+        clerk_configured: !creds.clerk_jwt_issuer.trim().is_empty(),
+        admin_bypass_configured: !creds.admin_bypass_token.trim().is_empty(),
+        bootstrap_email_configured: creds.bootstrap_admin_email.trim() != "admin@local"
+            && !creds.bootstrap_admin_email.trim().is_empty(),
+        env_managed_message: "Credentials managed via Miget environment variables.",
+    };
+
+    ok_json(serde_json::to_value(response).unwrap_or(json!(null)))
 }
 
 /// PUT /api/admin/platform-secrets
+/// Credentials are now managed via environment variables — update is no longer supported.
 pub async fn put_platform_secrets(
-    auth: AdminAuthenticated,
-    Json(patch): Json<PlatformCredentialsPatch>,
+    _auth: AdminAuthenticated,
 ) -> impl IntoResponse {
-    match auth.state.secrets.update(patch).await {
-        Ok(()) => {
-            auth.state.jwt.reset_cache().await;
-            let status = auth.state.secrets.configured_status().await;
-            ok_json(json!({ "success": true, "configured": status }))
-        }
-        Err(e) => ok_json(json!({ "success": false, "error": e })),
-    }
+    ok_json(json!({
+        "success": false,
+        "error": "Credentials are now managed via environment variables. Redeploy with updated env vars to change credentials."
+    }))
 }
 
 /// POST /api/admin/platform-secrets/test-canopy

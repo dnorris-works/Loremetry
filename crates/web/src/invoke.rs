@@ -1,6 +1,5 @@
 //! Generic Tauri-compatible invoke bridge: `POST /api/invoke` with `{ cmd, args }`.
 
-use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::Json;
 use crate::auth::Authenticated;
@@ -17,7 +16,6 @@ use loremetry_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
 use loremetry_core::cancel_operation;
 use loremetry_core::jobs;
 use loremetry_core::campaigns;
-use loremetry_core::platform_secrets::PlatformCredentialsPatch;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -58,7 +56,7 @@ pub async fn invoke_handler(
     }
 }
 
-async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut args: Value, plan_label: &str) -> Result<Value, String> {
+async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, args: Value, plan_label: &str) -> Result<Value, String> {
     let app = app.clone();
     let db = app.db.clone();
 
@@ -292,11 +290,7 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
         }
         "get_platform_credentials" => to_val(state.secrets.admin_get().await),
         "update_platform_credentials" => {
-            let patch: PlatformCredentialsPatch = take_request(&args)?;
-            state.secrets.update(patch).await?;
-            state.jwt.reset_cache().await;
-            let credentials = state.secrets.admin_get().await;
-            Ok(json!({ "success": true, "credentials": credentials }))
+            Err("Credentials are now managed via environment variables. Redeploy with updated env vars to change credentials.".into())
         }
         "import_winningcat_csv" | "remove_stale_kdp_categories" => {
             Err("WinningCat import is admin-only. Use /api/admin/winningcat or the Admin panel.".into())
