@@ -169,6 +169,18 @@ export interface Finding {
   occurrences?: { story_name: string; file: string; chapter_title: string; value: string; snippet: string }[];
 }
 
+export interface WinningCatCatalogStatus {
+  success: boolean;
+  has_data: boolean;
+  ready: boolean;
+  kindle_count: number;
+  books_count: number;
+  total_count: number;
+  last_import_at: string;
+  message: string;
+  error: string;
+}
+
 export interface WinningCatImportResult {
   success: boolean;
   imported: number;

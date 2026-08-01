@@ -38,6 +38,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/status", get(admin::admin_status))
         .route("/tables", get(admin::admin_tables))
         .route("/sql", post(admin::admin_sql))
+        .route("/winningcat/status", get(admin::winningcat_status))
         .route("/winningcat/import", post(admin::winningcat_import_json))
         .route("/winningcat/upload", post(admin::winningcat_import_upload))
         .route("/winningcat/remove-stale", post(admin::winningcat_remove_stale))

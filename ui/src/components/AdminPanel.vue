@@ -2,7 +2,7 @@
 import { computed, inject, onMounted, ref } from 'vue';
 import { adminFetch, adminUploadFile, invoke } from '../api';
 import { showPanelKey } from '../injectionKeys';
-import type { StaleCleanupResult, WinningCatImportResult } from '../types';
+import type { StaleCleanupResult, WinningCatCatalogStatus, WinningCatImportResult } from '../types';
 
 const showPanel = inject(showPanelKey)!;
 
@@ -67,7 +67,46 @@ const winningcatStatus = ref('');
 const staleStatus = ref('');
 const showStaleRow = ref(false);
 const importDisabled = ref(false);
+const catalogChecking = ref(false);
+const catalogStatus = ref<WinningCatCatalogStatus | null>(null);
 let lastImportedAt = '';
+
+function catalogStatusTitle(): string {
+  const s = catalogStatus.value;
+  if (!s || !s.success) return 'Check failed';
+  if (s.ready) return 'Catalog ready';
+  if (s.has_data) return 'Partial catalog';
+  return 'Not imported';
+}
+
+function catalogStatusClass(): string {
+  const s = catalogStatus.value;
+  if (!s || !s.success) return 'catalog-status-error';
+  if (s.ready) return 'catalog-status-ready';
+  if (s.has_data) return 'catalog-status-partial';
+  return 'catalog-status-empty';
+}
+
+async function refreshCatalogStatus(): Promise<void> {
+  catalogChecking.value = true;
+  try {
+    catalogStatus.value = await adminFetch<WinningCatCatalogStatus>('/winningcat/status');
+  } catch (e) {
+    catalogStatus.value = {
+      success: false,
+      has_data: false,
+      ready: false,
+      kindle_count: 0,
+      books_count: 0,
+      total_count: 0,
+      last_import_at: '',
+      message: '',
+      error: String(e),
+    };
+  } finally {
+    catalogChecking.value = false;
+  }
+}
 
 type DbTable = { schema: string; name: string; qualified: string };
 const dbTables = ref<DbTable[]>([]);
@@ -83,6 +122,7 @@ onMounted(() => {
   loadDbTables();
   loadPlatformSecrets();
   loadUsageSummary();
+  refreshCatalogStatus();
 });
 
 function monthInputValue(d = new Date()): string {
@@ -351,6 +391,7 @@ async function onWinningCatFile(ev: Event): Promise<void> {
         const word = result.stale_count === 1 ? 'y was' : 'ies were';
         staleStatus.value = `${result.stale_count} categor${word} in the catalog from a previous import but missing from this one.`;
       }
+      await refreshCatalogStatus();
     } else {
       winningcatStatus.value = result.error || 'Import failed.';
     }
@@ -374,6 +415,7 @@ async function onRemoveStale(): Promise<void> {
       const word = result.removed === 1 ? 'y' : 'ies';
       staleStatus.value = `✓ Removed ${result.removed} stale categor${word}.`;
       showStaleRow.value = false;
+      await refreshCatalogStatus();
     } else {
       staleStatus.value = result.error || 'Cleanup failed.';
     }
@@ -557,7 +599,22 @@ async function onRemoveStale(): Promise<void> {
     <div class="settings-section-divider"></div>
     <h3 class="section-title">WinningCat catalog</h3>
         <div class="settings-form">
-          <p class="panel-desc">Import browse-node CSV into the server database.</p>
+          <p class="panel-desc">Import browse-node CSV into the server database (Kindle Store and Books departments).</p>
+          <div class="catalog-status-block">
+            <button type="button" class="btn btn-sm" :disabled="catalogChecking" @click="refreshCatalogStatus">
+              {{ catalogChecking ? 'Checking…' : 'Check catalog' }}
+            </button>
+            <div
+              v-if="catalogStatus"
+              class="catalog-status"
+              :class="catalogStatusClass()"
+            >
+              <div class="catalog-status-title">{{ catalogStatusTitle() }}</div>
+              <div class="catalog-status-body">
+                {{ catalogStatus.success ? catalogStatus.message : (catalogStatus.error || 'Could not read catalog status from the database.') }}
+              </div>
+            </div>
+          </div>
           <label class="btn file-btn" :class="{ disabled: importDisabled }">
             Import CSV
             <input type="file" accept=".csv,text/csv" :disabled="importDisabled" hidden @change="onWinningCatFile" />
@@ -852,6 +909,62 @@ async function onRemoveStale(): Promise<void> {
   text-transform: none;
   letter-spacing: 0;
   margin-top: 2px;
+}
+
+.catalog-status-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.catalog-status {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.catalog-status-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.catalog-status-body {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.catalog-status-ready {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+}
+
+.catalog-status-ready .catalog-status-title {
+  color: var(--success);
+}
+
+.catalog-status-partial {
+  border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+
+.catalog-status-partial .catalog-status-title {
+  color: var(--warning);
+}
+
+.catalog-status-empty .catalog-status-title {
+  color: var(--text-muted);
+}
+
+.catalog-status-error {
+  border-color: var(--danger, #c44);
+  background: color-mix(in srgb, var(--danger, #c44) 8%, transparent);
+}
+
+.catalog-status-error .catalog-status-title {
+  color: var(--danger, #c44);
 }
 
 .status-msg,

@@ -1156,6 +1156,53 @@ pub async fn kdp_category_count(pool: &PgPool, store: &str) -> i64 {
         .unwrap_or(0)
 }
 
+/// Summary of WinningCat-sourced rows in `kdp_categories`.
+pub struct WinningCatCatalogStatus {
+    pub has_data:       bool,
+    pub ready:          bool,
+    pub kindle_count:   i64,
+    pub books_count:    i64,
+    pub total_count:    i64,
+    pub last_import_at: Option<String>,
+}
+
+const WINNINGCAT_READY_MIN_PER_STORE: i64 = 50;
+
+pub async fn winningcat_catalog_status(pool: &PgPool) -> WinningCatCatalogStatus {
+    let kindle_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kdp_categories WHERE source = 'winningcat' AND store = 'Kindle'",
+    )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+    let books_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kdp_categories WHERE source = 'winningcat' AND store = 'Books'",
+    )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+    let last_import_at: Option<String> = sqlx::query_scalar(
+        "SELECT MAX(last_seen_at) FROM kdp_categories WHERE source = 'winningcat'",
+    )
+        .fetch_one(pool)
+        .await
+        .ok()
+        .flatten()
+        .filter(|s: &String| !s.is_empty());
+    let total_count = kindle_count + books_count;
+    let has_data = total_count > 0;
+    let ready =
+        kindle_count >= WINNINGCAT_READY_MIN_PER_STORE && books_count >= WINNINGCAT_READY_MIN_PER_STORE;
+    WinningCatCatalogStatus {
+        has_data,
+        ready,
+        kindle_count,
+        books_count,
+        total_count,
+        last_import_at,
+    }
+}
+
 /// Keyword search over the imported category catalog — case-insensitive
 /// substring match per term, deduplicated, capped at `limit`. This is the
 /// direct replacement for Category Finder's live top-level scraping: once

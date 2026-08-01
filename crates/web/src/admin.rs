@@ -26,6 +26,14 @@ pub struct WinningCatJsonBody {
     csv_text: String,
 }
 
+/// GET /api/admin/winningcat/status — WinningCat rows in kdp_categories.
+pub async fn winningcat_status(auth: AdminAuthenticated) -> impl IntoResponse {
+    ok_json(
+        serde_json::to_value(winningcat::get_winningcat_catalog_status(auth.ctx()).await)
+            .unwrap_or(json!(null)),
+    )
+}
+
 /// POST /api/admin/winningcat/import — JSON `{ csv_text }`.
 pub async fn winningcat_import_json(
     auth: AdminAuthenticated,
