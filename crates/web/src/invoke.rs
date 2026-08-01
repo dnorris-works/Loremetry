@@ -15,6 +15,7 @@ use loremetry_core::documents::{self, UpsertDocumentRequest};
 use loremetry_core::series::{self, CreateSeriesRequest, UpdateSeriesRequest};
 use loremetry_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
 use loremetry_core::cancel_operation;
+use loremetry_core::jobs;
 use loremetry_core::platform_secrets::PlatformCredentialsPatch;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -122,11 +123,29 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
         }
         "analyze_story" => {
             let request: AnalyzeStoryRequest = take_request(&args)?;
-            to_val(pipeline::analyze_story(app, request).await)
+            to_val(
+                jobs::enqueue(
+                    &db.pool,
+                    jobs::JOB_ANALYZE_STORY,
+                    &request.story_id,
+                    app.user_id(),
+                    serde_json::to_value(&request).unwrap_or(json!({})),
+                )
+                .await?,
+            )
         }
         "run_craft_pipeline" => {
             let request: pipeline::CraftPipelineRequest = take_request(&args)?;
-            to_val(pipeline::run_craft_pipeline(app, request).await)
+            to_val(
+                jobs::enqueue(
+                    &db.pool,
+                    jobs::JOB_CRAFT_PIPELINE,
+                    &request.story_id,
+                    app.user_id(),
+                    serde_json::to_value(&request).unwrap_or(json!({})),
+                )
+                .await?,
+            )
         }
         "save_zeigarnik_report" => {
             let request: zeigarnik::SaveZeigarnikClientRequest = take_request(&args)?;
@@ -138,7 +157,16 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
         }
         "run_market_intel" => {
             let request: MarketIntelRequest = take_request(&args)?;
-            to_val(canopy::run_market_intel(app, request).await)
+            to_val(
+                jobs::enqueue(
+                    &db.pool,
+                    jobs::JOB_MARKET_INTEL,
+                    &request.story_id,
+                    app.user_id(),
+                    serde_json::to_value(&request).unwrap_or(json!({})),
+                )
+                .await?,
+            )
         }
         "run_everything" => {
             let request: FolderRequest = take_request(&args)?;
@@ -149,7 +177,13 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
             to_val(pipeline::run_full_analysis(app, request).await)
         }
         "cancel_operation" => {
-            cancel_operation();
+            if let Some(job_id) = optional_string(&args, &["job_id", "jobId"]) {
+                if let Ok(id) = uuid::Uuid::parse_str(&job_id) {
+                    let _ = jobs::request_cancel(&db.pool, id, app.user_id()).await;
+                }
+            } else {
+                cancel_operation();
+            }
             Ok(json!(null))
         }
         "save_activity_log_cmd" => {

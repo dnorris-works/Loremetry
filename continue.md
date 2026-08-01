@@ -203,9 +203,11 @@ The web app has real backend work (KDP/Wide pipeline, auth, Postgres) but **desk
 services:
   postgres
   api       # Axum HTTP: auth, stories, assets, reports, job enqueue
-  worker    # zip ingest, docx→md, analysis pipelines
+  worker    # lore.jobs poller: analyze, craft, market intel
   web       # nginx or static serve: Vue production build
 ```
+
+Single Docker image runs **api + worker** via `scripts/start.sh` (`LOREMETRY_DISABLE_WORKER=1` to skip worker).
 
 ### Key environment variables
 
@@ -232,7 +234,7 @@ Provider API keys, Clerk issuer/publishable key, bootstrap admin → **Postgres*
 | Asset list / edit / delete UI | **Done** | documents API + Story sources panel |
 | Zip download + manifest | **Done** | `GET /api/stories/{id}/export.zip` |
 | Report types metadata | **Partial** | `lore.report_types` seeded; craft groups copied |
-| Analysis E2E | **Partial** | KDP/Wide + craft/publish subset in core; synchronous in API |
+| Analysis E2E | **Partial** | KDP/Wide + craft/publish subset in core; **worker queue** |
 | Analyzer UI parity | **Mostly done** | Platform tabs, craft groups, saved panel; no help/spend footer |
 | Craft reports | **Done** | `craft_audits.rs`, `craft-report-groups.json`, pipeline loops |
 | Publish reports | **Done** | All 8 types + `batch_prompt.rs` |
@@ -253,7 +255,7 @@ Full parity is **not** a v1 blocker. When porting, follow this order:
 3. **Publish tab** — ~~finish `publish_audits.rs` (4 remaining) + renderer schemas + `batch_prompt`~~ **done**
 4. **Settings (user)** — ~~AI model slots, Canopy/DataForSEO tests, story data / summary refresh, archived reports~~ **done**
 5. **Content ops** — ~~`story_assets` migration, DOCX ingest, hash-merge upload, zip round-trip~~ **done**
-6. **Worker split** — long jobs off the API process
+6. **Worker split** — ~~long jobs off the API process~~ **done** (`lore.jobs`, `loremetry-worker`, job SSE)
 7. **Marketing mode** — optional later unless product asks
 
 **Parallel track:** web-native content model (`story_assets`, DOCX, zip, worker) can proceed alongside UI/report parity.

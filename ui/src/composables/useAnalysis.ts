@@ -1,6 +1,14 @@
-import { ref, watch } from 'vue';
-import { invoke, connectAnalysisLogStream, disconnectAnalysisLogStream, saveZeigarnikReport, saveReadabilityReport } from '../api';
-import type { AnalysisState, GenreResult, LogLine } from '../types';
+import { ref } from 'vue';
+import {
+  invoke,
+  connectJobLogStream,
+  disconnectJobLogStream,
+  cancelJob,
+  waitForJob,
+  saveZeigarnikReport,
+  saveReadabilityReport,
+} from '../api';
+import type { AnalysisState, JobEnqueueResult, LogLine } from '../types';
 import { listCachedChapters } from '../lib/manuscriptCache';
 import { cachedChapterToInput as zeigarnikChapterInput, runZeigarnikAnalysis } from '../lib/zeigarnik';
 import { cachedChapterToInput as readabilityChapterInput, runReadabilityAnalysis } from '../lib/readability';
@@ -10,6 +18,7 @@ import { useSettings } from './useSettings';
 const analysisState = ref<AnalysisState | null>(null);
 const isWorking = ref(false);
 const logLines = ref<LogLine[]>([]);
+let currentJobId = '';
 
 function classifyLogLine(msg: string): LogLine {
   const trimmed = msg.trimStart();
@@ -68,6 +77,22 @@ function getSettings() {
   };
 }
 
+async function finishQueuedJob(jobId: string): Promise<void> {
+  currentJobId = jobId;
+  connectJobLogStream(jobId, appendLog);
+  try {
+    const job = await waitForJob(jobId);
+    if (job.status === 'completed' && job.result && !job.result.success) {
+      appendLog('✗ ' + job.result.error);
+    } else if (job.status === 'failed' || job.status === 'cancelled') {
+      appendLog('✗ ' + (job.error || 'Job failed'));
+    }
+  } finally {
+    disconnectJobLogStream();
+    currentJobId = '';
+  }
+}
+
 async function runAnalyze(folder: string, forceResummarize: boolean, platform: string): Promise<void> {
   if (!folder) { appendLog('✗ No story selected.'); return; }
   const { provider, model } = getSettings();
@@ -77,7 +102,7 @@ async function runAnalyze(folder: string, forceResummarize: boolean, platform: s
   const runTime = new Date().toISOString();
 
   try {
-    const result = await invoke<GenreResult>('analyze_story', {
+    const queued = await invoke<JobEnqueueResult>('analyze_story', {
       request: {
         folder, model, provider,
         force_resummarize: forceResummarize,
@@ -85,9 +110,7 @@ async function runAnalyze(folder: string, forceResummarize: boolean, platform: s
         run_time: runTime,
       },
     });
-    if (!result.success) {
-      appendLog('✗ ' + result.error);
-    }
+    await finishQueuedJob(queued.job_id);
   } catch (e) {
     appendLog('✗ ' + String(e));
   } finally {
@@ -156,7 +179,7 @@ async function runCraftAnalysis(
       return;
     }
 
-    const result = await invoke<GenreResult>('run_craft_pipeline', {
+    const queued = await invoke<JobEnqueueResult>('run_craft_pipeline', {
       request: {
         folder,
         selected: serverSelected,
@@ -171,9 +194,7 @@ async function runCraftAnalysis(
         series_id: resolvedSeriesId,
       },
     });
-    if (!result.success) {
-      appendLog('✗ ' + result.error);
-    }
+    await finishQueuedJob(queued.job_id);
   } catch (e) {
     appendLog('✗ ' + String(e));
   } finally {
@@ -190,12 +211,10 @@ async function runMarketIntel(folder: string): Promise<void> {
   isWorking.value = true;
 
   try {
-    const result = await invoke<GenreResult>('run_market_intel', {
+    const queued = await invoke<JobEnqueueResult>('run_market_intel', {
       request: { folder, provider, model },
     });
-    if (!result.success) {
-      appendLog('✗ ' + result.error);
-    }
+    await finishQueuedJob(queued.job_id);
   } catch (e) {
     appendLog('✗ ' + String(e));
   } finally {
@@ -206,7 +225,15 @@ async function runMarketIntel(folder: string): Promise<void> {
 
 async function cancelOperation(): Promise<void> {
   appendLog('Stopping after current step...');
-  await invoke('cancel_operation');
+  if (currentJobId) {
+    try {
+      await cancelJob(currentJobId);
+    } catch (e) {
+      appendLog('✗ ' + String(e));
+    }
+  } else {
+    await invoke('cancel_operation');
+  }
 }
 
 async function saveLog(folder: string, timestamp: string): Promise<void> {
@@ -222,14 +249,6 @@ async function saveLog(folder: string, timestamp: string): Promise<void> {
     console.error('Failed to save activity log:', e);
   }
 }
-
-watch(isWorking, (working) => {
-  if (working) {
-    connectAnalysisLogStream(appendLog);
-  } else {
-    disconnectAnalysisLogStream();
-  }
-});
 
 export function useAnalysis() {
   return {

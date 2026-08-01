@@ -246,6 +246,63 @@ export function disconnectAnalysisLogStream(): void {
   analysisLogUnsubs = null;
 }
 
+let jobEventSource: EventSource | null = null;
+
+/** SSE log stream for a specific background job (worker process). */
+export function connectJobLogStream(jobId: string, onLine: (message: string) => void): void {
+  disconnectJobLogStream();
+  const es = new EventSource(`/api/events?job_id=${encodeURIComponent(jobId)}`);
+  jobEventSource = es;
+  const handler = (e: Event) => onLine(String((e as MessageEvent).data ?? ''));
+  es.addEventListener('genre:log', handler);
+  es.addEventListener('cdp:log', handler);
+}
+
+export function disconnectJobLogStream(): void {
+  jobEventSource?.close();
+  jobEventSource = null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function getJob(jobId: string): Promise<import('./types').JobRecord> {
+  assertAppSession();
+  const headers = await buildAuthHeaders();
+  const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    maybeNotifyAuthRequired(res.status, (data as { error?: string }).error);
+    throw new Error((data as { error?: string }).error || res.statusText || 'Job request failed');
+  }
+  return data as import('./types').JobRecord;
+}
+
+export async function cancelJob(jobId: string): Promise<void> {
+  assertAppSession();
+  const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: 'POST',
+    headers,
+    body: '{}',
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { error?: string }).error || 'Cancel failed');
+  }
+}
+
+export async function waitForJob(jobId: string): Promise<import('./types').JobRecord> {
+  for (;;) {
+    const job = await getJob(jobId);
+    if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+      return job;
+    }
+    await sleep(800);
+  }
+}
+
 export interface UploadResult {
   uploaded: number;
   updated: number;

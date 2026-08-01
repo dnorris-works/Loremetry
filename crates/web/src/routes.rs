@@ -16,6 +16,7 @@ use loremetry_core::documents::{self, UpsertDocumentRequest};
 use loremetry_core::series::{self, CreateSeriesRequest, UpdateSeriesRequest};
 use loremetry_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
 use loremetry_core::cancel_operation;
+use loremetry_core::jobs;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tower_http::cors::CorsLayer;
@@ -93,6 +94,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/analysis/craft", post(craft_pipeline))
         .route("/analysis/market_intel", post(market_intel))
         .route("/analysis/cancel", post(analysis_cancel))
+        .route("/jobs/{id}", get(get_job))
+        .route("/jobs/{id}/cancel", post(cancel_job))
         .route("/activity_log", post(activity_log))
         // Reports
         .route("/reports/sidebar", post(sidebar_reports))
@@ -359,49 +362,113 @@ async fn analysis_state(
 }
 
 async fn analyze_story(
+    auth: Authenticated,
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
 ) -> impl IntoResponse {
     invoke::inject_platform_credentials(&state, &mut body).await;
     match serde_json::from_value::<loremetry_core::analysis::AnalyzeStoryRequest>(body) {
-        Ok(req) => ok_json(
-            serde_json::to_value(pipeline::analyze_story(state.ctx, req).await).unwrap_or(json!(null)),
-        ),
+        Ok(req) => match jobs::enqueue(
+            &state.ctx.db.pool,
+            jobs::JOB_ANALYZE_STORY,
+            &req.story_id,
+            auth.user.db_user_id,
+            serde_json::to_value(&req).unwrap_or(json!({})),
+        )
+        .await
+        {
+            Ok(r) => ok_json(serde_json::to_value(r).unwrap_or(json!(null))),
+            Err(e) => json_error(e),
+        },
         Err(e) => json_error(format!("Invalid request: {e}")),
     }
 }
 
 async fn craft_pipeline(
+    auth: Authenticated,
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
 ) -> impl IntoResponse {
     invoke::inject_platform_credentials(&state, &mut body).await;
     match serde_json::from_value::<pipeline::CraftPipelineRequest>(body) {
-        Ok(req) => ok_json(
-            serde_json::to_value(pipeline::run_craft_pipeline(state.ctx, req).await)
-                .unwrap_or(json!(null)),
-        ),
+        Ok(req) => match jobs::enqueue(
+            &state.ctx.db.pool,
+            jobs::JOB_CRAFT_PIPELINE,
+            &req.story_id,
+            auth.user.db_user_id,
+            serde_json::to_value(&req).unwrap_or(json!({})),
+        )
+        .await
+        {
+            Ok(r) => ok_json(serde_json::to_value(r).unwrap_or(json!(null))),
+            Err(e) => json_error(e),
+        },
         Err(e) => json_error(format!("Invalid request: {e}")),
     }
 }
 
 async fn market_intel(
+    auth: Authenticated,
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
 ) -> impl IntoResponse {
     invoke::inject_platform_credentials(&state, &mut body).await;
     match serde_json::from_value::<MarketIntelRequest>(body) {
-        Ok(req) => ok_json(
-            serde_json::to_value(canopy::run_market_intel(state.ctx, req).await)
-                .unwrap_or(json!(null)),
-        ),
+        Ok(req) => match jobs::enqueue(
+            &state.ctx.db.pool,
+            jobs::JOB_MARKET_INTEL,
+            &req.story_id,
+            auth.user.db_user_id,
+            serde_json::to_value(&req).unwrap_or(json!({})),
+        )
+        .await
+        {
+            Ok(r) => ok_json(serde_json::to_value(r).unwrap_or(json!(null))),
+            Err(e) => json_error(e),
+        },
         Err(e) => json_error(format!("Invalid request: {e}")),
     }
 }
 
-async fn analysis_cancel() -> impl IntoResponse {
+#[derive(Deserialize)]
+struct CancelBody {
+    job_id: Option<uuid::Uuid>,
+}
+
+async fn analysis_cancel(
+    auth: Authenticated,
+    State(state): State<AppState>,
+    body: Option<Json<CancelBody>>,
+) -> impl IntoResponse {
     cancel_operation();
+    if let Some(Json(CancelBody { job_id: Some(id) })) = body {
+        if let Err(e) = jobs::request_cancel(&state.ctx.db.pool, id, auth.user.db_user_id).await {
+            return json_error(e);
+        }
+    }
     ok_json(json!({ "success": true }))
+}
+
+async fn get_job(
+    auth: Authenticated,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> impl IntoResponse {
+    match jobs::get_job(&state.ctx.db.pool, id, auth.user.db_user_id).await {
+        Ok(job) => ok_json(serde_json::to_value(job).unwrap_or(json!(null))),
+        Err(e) => json_error(e),
+    }
+}
+
+async fn cancel_job(
+    auth: Authenticated,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> impl IntoResponse {
+    match jobs::request_cancel(&state.ctx.db.pool, id, auth.user.db_user_id).await {
+        Ok(()) => ok_json(json!({ "success": true })),
+        Err(e) => json_error(e),
+    }
 }
 
 #[derive(Deserialize)]

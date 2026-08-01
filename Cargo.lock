@@ -1256,6 +1256,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "loremetry-worker"
+version = "0.1.0"
+dependencies = [
+ "loremetry-core",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1258,7 +1258,7 @@ fn empty_deep_stats() -> DeepCategoryStats {
 
 use crate::analysis::GenreResult;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 pub struct MarketIntelRequest {
     #[serde(alias = "folder")]
     pub story_id:         String,

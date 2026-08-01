@@ -886,7 +886,7 @@ pub(crate) fn render_kdp_paste_section(
 
 /// Request for the craft analysis pipeline.
 /// The frontend sends which reports to run; this command handles ordering and execution.
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct CraftPipelineRequest {
     #[serde(alias = "folder")]
     pub story_id:           String,

@@ -169,6 +169,24 @@ export interface Finding {
   occurrences?: { story_name: string; file: string; chapter_title: string; value: string; snippet: string }[];
 }
 
+export interface JobEnqueueResult {
+  job_id: string;
+  status: string;
+}
+
+export interface JobRecord {
+  id: string;
+  job_type: string;
+  story_id: string;
+  status: string;
+  result?: GenreResult;
+  error?: string;
+  cancel_requested: boolean;
+  created_at: string;
+  started_at?: string;
+  finished_at?: string;
+}
+
 export interface WinningCatCatalogStatus {
   success: boolean;
   has_data: boolean;

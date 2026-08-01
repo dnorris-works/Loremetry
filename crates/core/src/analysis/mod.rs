@@ -49,7 +49,7 @@ pub struct FolderRequest {
     pub canopy_api_key: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 pub struct AnalyzeStoryRequest {
     #[serde(alias = "folder")]
     pub story_id:            String,
