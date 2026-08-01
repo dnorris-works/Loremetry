@@ -146,8 +146,12 @@ async function fetchModels(): Promise<{ success: boolean; error: string }> {
     if (result.success && result.models.length > 0) {
       models.value = result.models;
       localStorage.setItem('cachedModels', JSON.stringify(result.models));
-      // If user hasn't overridden the default, use server's selection
-      if (!modelAssignments.value.default) {
+
+      // Always use server's default if user hasn't explicitly chosen a model
+      // that exists in the current model list
+      const currentDefault = modelAssignments.value.default;
+      const currentExistsInList = currentDefault && result.models.some(m => m.id === currentDefault);
+      if (!currentExistsInList && result.default_model) {
         modelAssignments.value = { ...modelAssignments.value, default: result.default_model };
         localStorage.setItem('modelAssignments', JSON.stringify(modelAssignments.value));
       }
@@ -162,7 +166,7 @@ async function fetchModels(): Promise<{ success: boolean; error: string }> {
 // Auto-load models from server when session is active
 let modelsLoaded = false;
 async function ensureModelsLoaded(): Promise<void> {
-  if (modelsLoaded || models.value.length > 0) return;
+  if (modelsLoaded) return;
   modelsLoaded = true;
   await fetchModels();
 }

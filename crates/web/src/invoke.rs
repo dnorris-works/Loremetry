@@ -274,7 +274,25 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, arg
             let provider = state.secrets.default_provider().await;
             let api_key = state.secrets.resolve_api_key(&provider).await;
             let result = commands::list_models(&db, provider, api_key).await?;
-            let default_model = state.default_model.read().await.clone();
+            let mut default_model = state.default_model.read().await.clone();
+
+            // If background task hasn't selected yet, pick cheapest now
+            if default_model.is_empty() && result.success {
+                let mut priced: Vec<_> = result.models.iter()
+                    .filter(|m| m.input_price.is_some())
+                    .collect();
+                priced.sort_by(|a, b| {
+                    a.input_price.unwrap().partial_cmp(&b.input_price.unwrap())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                if let Some(cheapest) = priced.first() {
+                    default_model = cheapest.id.clone();
+                    // Also store it for future requests
+                    let mut lock = state.default_model.write().await;
+                    *lock = default_model.clone();
+                }
+            }
+
             to_val(json!({
                 "success": result.success,
                 "models": result.models,
