@@ -16,6 +16,8 @@ use loremetry_core::{db, AppCtx, Config};
 use loremetry_core::config::{
     database_url_diagnostics, database_url_host, resolve_database_url_with_source,
 };
+use loremetry_core::commands;
+use tokio::sync::RwLock;
 use tracing_subscriber::EnvFilter;
 
 use crate::auth::JwtVerifier;
@@ -74,12 +76,53 @@ async fn main() {
     let secrets = Arc::new(loremetry_core::platform_secrets::PlatformSecrets::load_from_env());
 
     let ctx = AppCtx::new(database);
+    let default_model = Arc::new(RwLock::new(String::new()));
     let state = AppState {
         ctx,
         config: Arc::new(config),
         secrets,
         jwt: JwtVerifier::new(),
+        default_model: default_model.clone(),
     };
+
+    // Spawn background task to auto-select the cheapest model from the provider.
+    {
+        let secrets = state.secrets.clone();
+        let db_handle = state.ctx.db.clone();
+        let dm = default_model.clone();
+        tokio::spawn(async move {
+            let provider = secrets.default_provider().await;
+            let api_key = secrets.resolve_api_key(&provider).await;
+            if api_key.trim().is_empty() {
+                tracing::warn!("No API key for provider '{provider}' — skipping auto model selection");
+                return;
+            }
+            match commands::list_models(&db_handle, provider.clone(), api_key).await {
+                Ok(result) if result.success && !result.models.is_empty() => {
+                    // Sort by input_price ascending; models without pricing go to the end.
+                    let mut priced: Vec<_> = result.models.iter()
+                        .filter(|m| m.input_price.is_some())
+                        .collect();
+                    priced.sort_by(|a, b| {
+                        a.input_price.unwrap().partial_cmp(&b.input_price.unwrap()).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    if let Some(cheapest) = priced.first() {
+                        let mut lock = dm.write().await;
+                        *lock = cheapest.id.clone();
+                        tracing::info!("Auto-selected default model: {} (input_price: {:?})", cheapest.id, cheapest.input_price);
+                    } else {
+                        tracing::warn!("No models with pricing data found — no auto-selection");
+                    }
+                }
+                Ok(result) => {
+                    tracing::warn!("Model fetch returned no usable models: {}", result.error);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to fetch models for auto-selection: {e}");
+                }
+            }
+        });
+    }
 
     if state.secrets.get().await.clerk_jwt_issuer.trim().is_empty() {
         tracing::warn!(

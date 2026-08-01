@@ -656,6 +656,40 @@ pub async fn inject_platform_credentials(state: &AppState, args: &mut Value) {
     if let Some(req) = args.get_mut("request") {
         fill_keys_from_secrets(&state.secrets, &default_provider, req).await;
     }
+
+    // Inject server-auto-selected model if the request doesn't specify one.
+    inject_default_model(state, args).await;
+    if let Some(req) = args.get_mut("request") {
+        inject_default_model(state, req).await;
+    }
+}
+
+/// If the `model` field is empty/missing, inject the server's auto-selected default model.
+async fn inject_default_model(state: &AppState, obj: &mut Value) {
+    let Some(map) = obj.as_object_mut() else {
+        return;
+    };
+    let needs_llm = map.contains_key("model")
+        || map.contains_key("provider")
+        || map.contains_key("selected")
+        || map.contains_key("force_resummarize")
+        || map.contains_key("message")
+        || map.contains_key("chapter_text");
+
+    if needs_llm {
+        let model_val = map
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if model_val.is_empty() {
+            let default_model = state.default_model.read().await;
+            if !default_model.is_empty() {
+                map.insert("model".into(), Value::String(default_model.clone()));
+            }
+        }
+    }
 }
 
 fn strip_client_secrets(obj: &mut Value) {
