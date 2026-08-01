@@ -101,14 +101,25 @@ async function onUpload(
   replace = false,
 ): Promise<void> {
   const input = ev.target as HTMLInputElement;
-  const files = input.files;
+  // Copy immediately — clearing the input empties the live FileList.
+  const files = input.files ? Array.from(input.files) : [];
   input.value = '';
   const storyId = storiesCtx.activeFolder.value;
-  if (!files?.length || !storyId) return;
+
+  if (!storyId) {
+    error.value = 'Select a story before uploading.';
+    uploadMessage.value = '';
+    return;
+  }
+  if (files.length === 0) {
+    error.value = 'No files came from that folder selection. Try again, or use Add files.';
+    uploadMessage.value = '';
+    return;
+  }
 
   uploading.value = true;
   error.value = '';
-  uploadMessage.value = '';
+  uploadMessage.value = `Found ${files.length} file(s) — scanning for chapters…`;
   importErrors.value = [];
   importQueue.value = [];
   try {
@@ -120,18 +131,15 @@ async function onUpload(
         replace,
         onProgress: (event) => {
           const idx = importQueue.value.findIndex(r => r.path === event.path);
+          const row = {
+            path: event.path,
+            status: event.status,
+            detail: event.detail,
+          };
           if (idx >= 0) {
-            importQueue.value[idx] = {
-              path: event.path,
-              status: event.status,
-              detail: event.detail,
-            };
+            importQueue.value.splice(idx, 1, row);
           } else {
-            importQueue.value.push({
-              path: event.path,
-              status: event.status,
-              detail: event.detail,
-            });
+            importQueue.value.push(row);
           }
         },
       },
@@ -146,12 +154,15 @@ async function onUpload(
     if (skipped > 0) {
       parts.push(`${skipped} unchanged`);
     }
-    uploadMessage.value = parts.length ? `Import: ${parts.join(', ')}.` : 'No changes to upload.';
+    uploadMessage.value = parts.length
+      ? `Import: ${parts.join(', ')}.`
+      : (errors.length ? 'Import finished with errors.' : 'No chapter files to upload.');
     importErrors.value = errors;
     await refresh();
     bumpFileTree();
   } catch (e) {
     error.value = String(e);
+    uploadMessage.value = '';
   } finally {
     uploading.value = false;
   }
@@ -271,7 +282,6 @@ async function onDownloadZip(): Promise<void> {
               {{ uploading ? 'Uploading…' : 'Choose folder' }}
               <input
                 type="file"
-                accept=".md,.txt,.docx,.zip,text/markdown,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/zip"
                 webkitdirectory
                 multiple
                 hidden
@@ -296,6 +306,9 @@ async function onDownloadZip(): Promise<void> {
           Point at the folder where your chapter files live (<code>.md</code>, <code>.docx</code>, or a <code>.zip</code> export).
           Subfolders (e.g. <code>Act-1/</code>) are kept for order. Re-upload merges changed files only.
         </p>
+
+        <p v-if="uploadMessage" class="upload-message">{{ uploadMessage }}</p>
+        <p v-if="error" class="form-error">{{ error }}</p>
 
         <div v-if="importQueue.length" class="import-progress">
           <div class="import-progress-head">
@@ -441,11 +454,9 @@ async function onDownloadZip(): Promise<void> {
       </section>
     </div>
 
-    <div v-if="uploadMessage" class="upload-message">{{ uploadMessage }}</div>
     <ul v-if="importErrors.length" class="import-errors">
       <li v-for="(msg, i) in importErrors" :key="i">{{ msg }}</li>
     </ul>
-    <div v-if="error" class="form-error">{{ error }}</div>
 
     <footer class="sources-footer">
       <template v-if="isWizard">

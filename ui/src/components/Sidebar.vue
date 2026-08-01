@@ -102,17 +102,27 @@ function onUploadClick(): void {
 
 async function onUploadFiles(ev: Event): Promise<void> {
   const input = ev.target as HTMLInputElement;
-  const files = input.files;
+  // Copy immediately — clearing the input empties the live FileList.
+  const files = input.files ? Array.from(input.files) : [];
   input.value = '';
   const storyId = storiesCtx.activeFolder.value;
-  if (!files?.length || !storyId) return;
+  if (!storyId) {
+    alert('Select a story before uploading.');
+    return;
+  }
+  if (files.length === 0) {
+    alert('No files came from that folder selection. Try Story sources → Choose folder.');
+    return;
+  }
   uploading.value = true;
   try {
-    const { uploaded, skipped } = await uploadDocuments(storyId, files, 'chapter');
+    const { uploaded, skipped, errors } = await uploadDocuments(storyId, files, 'chapter');
     bumpFileTree();
-    if (uploaded > 0 || skipped > 0) {
-      openSources(false);
+    if (errors.length && uploaded === 0 && skipped === 0) {
+      alert('Upload failed: ' + errors.join('; '));
+      return;
     }
+    openSources(false);
   } catch (e) {
     alert('Upload failed: ' + String(e));
   } finally {
@@ -289,7 +299,6 @@ function formatTimestamp(ts: string): string {
     <input
       ref="uploadInput"
       type="file"
-      accept=".md,.txt,text/markdown,text/plain"
       webkitdirectory
       multiple
       hidden
