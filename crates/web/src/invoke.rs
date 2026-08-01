@@ -270,6 +270,18 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, arg
             let api_key = state.secrets.resolve_api_key(&provider).await;
             to_val(commands::list_models(&db, provider, api_key).await?)
         }
+        "get_server_models" => {
+            let provider = state.secrets.default_provider().await;
+            let api_key = state.secrets.resolve_api_key(&provider).await;
+            let result = commands::list_models(&db, provider, api_key).await?;
+            let default_model = state.default_model.read().await.clone();
+            to_val(json!({
+                "success": result.success,
+                "models": result.models,
+                "default_model": default_model,
+                "error": result.error,
+            }))
+        }
         "test_canopy_connection" => {
             let key = match optional_string(&args, &["canopy_api_key", "canopyApiKey"])
                 .filter(|s| !s.trim().is_empty())

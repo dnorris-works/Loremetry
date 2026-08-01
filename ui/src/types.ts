@@ -51,6 +51,13 @@ export interface ModelsResult {
   error: string;
 }
 
+export interface ServerModelsResult {
+  success: boolean;
+  models: ModelInfo[];
+  default_model: string;
+  error: string;
+}
+
 export interface AiSpendTotals {
   month_usd: number;
   ytd_usd: number;

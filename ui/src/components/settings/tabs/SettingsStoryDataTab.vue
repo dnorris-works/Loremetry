@@ -42,10 +42,6 @@ async function loadState(): Promise<void> {
 async function onRefreshSummaries(): Promise<void> {
   const folder = activeFolder.value;
   if (!folder) return;
-  if (!settingsCtx.modelAssignments.value.default) {
-    actionMsg.value = 'Set a default model in AI Models first.';
-    return;
-  }
   refreshing.value = true;
   actionMsg.value = '';
   try {

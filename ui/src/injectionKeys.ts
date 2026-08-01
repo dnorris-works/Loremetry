@@ -97,6 +97,7 @@ export interface SettingsContext {
   models: Ref<ModelInfo[]>;
   folderStructure: Ref<FolderStructure>;
   fetchModels: () => Promise<{ success: boolean; error: string }>;
+  ensureModelsLoaded: () => Promise<void>;
   saveSettings: () => Promise<void>;
   testCanopy: () => Promise<{ success: boolean; error: string }>;
   testDataforseo: () => Promise<{ success: boolean; error: string }>;

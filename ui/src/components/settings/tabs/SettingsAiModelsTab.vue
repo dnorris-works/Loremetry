@@ -8,12 +8,12 @@ import { useReportTypes } from '../../../composables/useReportTypes';
 const settingsCtx = inject(settingsKey)!;
 const { reportTypes, loadReportTypes } = useReportTypes();
 
-const modelFetchStatus = ref('');
 type ModelSort = 'price' | 'provider';
 const modelSort = ref<ModelSort>('price');
 
 onMounted(() => {
   void loadReportTypes();
+  void settingsCtx.ensureModelsLoaded();
 });
 
 const sortedModels = computed(() => {
@@ -68,14 +68,6 @@ function modelLabel(m: ModelInfo): string {
   return label;
 }
 
-async function onFetchModels(): Promise<void> {
-  modelFetchStatus.value = 'Fetching models...';
-  const result = await settingsCtx.fetchModels();
-  modelFetchStatus.value = result.success
-    ? `${settingsCtx.models.value.length} models loaded.`
-    : result.error;
-}
-
 const ASSIGNMENTS: { key: keyof ModelAssignments; label: string; hint: string }[] = [
   { key: 'summaries', label: 'Chapter Summaries', hint: 'Per-chapter genre signal extraction.' },
   { key: 'genre', label: 'Genre Analysis', hint: 'Classification and comps.' },
@@ -90,34 +82,16 @@ const ASSIGNMENTS: { key: keyof ModelAssignments; label: string; hint: string }[
 <template>
   <div class="settings-form">
     <p class="panel-desc">
-      All AI features use <strong>TokenMix</strong> via platform credentials configured by your operator.
-      Model choices are stored in this browser.
+      The server auto-selects the cheapest model. You can override per function below.
     </p>
 
-    <label class="field-label">Provider (this browser)</label>
-    <div class="provider-options">
-      <label class="provider-option">
-        <input type="radio" v-model="settingsCtx.provider.value" value="claude" />
-        Claude
-      </label>
-      <label class="provider-option">
-        <input type="radio" v-model="settingsCtx.provider.value" value="tokenmix" />
-        TokenMix
-      </label>
-    </div>
-
-    <label class="field-label">
-      Default model
-      <span class="model-hint">Fetch models first, then assign each function below.</span>
-    </label>
+    <label class="field-label">Default model</label>
     <div class="model-row">
       <select v-model="settingsCtx.modelAssignments.value.default">
-        <option v-if="sortedModels.length === 0" value="" disabled>No models loaded</option>
+        <option v-if="sortedModels.length === 0" value="" disabled>Loading models…</option>
         <option v-for="m in sortedModels" :key="m.id" :value="m.id">{{ modelLabel(m) }}</option>
       </select>
-      <button type="button" class="btn btn-sm" @click="onFetchModels">Fetch models</button>
     </div>
-    <div class="status-msg">{{ modelFetchStatus }}</div>
 
     <div v-if="sortedModels.length > 0" class="model-sort-row">
       <span class="model-sort-label">Sort:</span>
@@ -144,13 +118,9 @@ const ASSIGNMENTS: { key: keyof ModelAssignments; label: string; hint: string }[
 <style scoped>
 .panel-desc { font-size: 13px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px; }
 .field-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; display: block; margin-bottom: 6px; }
-.provider-options { display: flex; gap: 16px; margin-bottom: 12px; }
-.provider-option { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; }
-.provider-option input { accent-color: var(--accent); }
-.model-row { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.model-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
 .model-row select { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 13px; padding: 8px 10px; }
 .model-hint { display: block; font-size: 11px; color: var(--text-muted); font-weight: 400; text-transform: none; letter-spacing: 0; margin-top: 2px; }
-.status-msg { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; min-height: 16px; }
 .model-sort-row { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
 .model-sort-label { font-size: 12px; color: var(--text-muted); }
 .model-sort-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 4px 8px; }

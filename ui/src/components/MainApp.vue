@@ -282,6 +282,7 @@ watch(() => analysisCtx.isWorking.value, (working, wasWorking) => {
 onMounted(() => {
   void loadReportTypes({ force: true });
   void checkHealth();
+  void settingsCtx.ensureModelsLoaded();
   void storiesCtx.loadStories().then(() => {
     const folder = storiesCtx.activeFolder.value;
     if (folder) {

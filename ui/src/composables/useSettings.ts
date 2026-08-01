@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue';
 import { invoke, buildAuthHeaders, getOperatorBypassToken } from '../api';
-import type { ModelInfo, ModelsResult } from '../types';
+import type { ModelInfo, ServerModelsResult } from '../types';
 
 // ── AI function model assignments ─────────────────────────────────────────────
 // Each AI function can have its own model. Empty means "use the default model."
@@ -142,18 +142,29 @@ const proseModel = computed(() => modelAssignments.value.prose || modelAssignmen
 
 async function fetchModels(): Promise<{ success: boolean; error: string }> {
   try {
-    const result = await invoke<ModelsResult>('list_models', {
-      provider: provider.value,
-    });
+    const result = await invoke<ServerModelsResult>('get_server_models');
     if (result.success && result.models.length > 0) {
       models.value = result.models;
       localStorage.setItem('cachedModels', JSON.stringify(result.models));
+      // If user hasn't overridden the default, use server's selection
+      if (!modelAssignments.value.default) {
+        modelAssignments.value = { ...modelAssignments.value, default: result.default_model };
+        localStorage.setItem('modelAssignments', JSON.stringify(modelAssignments.value));
+      }
       return { success: true, error: '' };
     }
-    return { success: false, error: result.error || 'No models returned. Configure platform API keys in Admin.' };
+    return { success: false, error: result.error || 'No models returned.' };
   } catch (e) {
     return { success: false, error: 'Error: ' + String(e) };
   }
+}
+
+// Auto-load models from server when session is active
+let modelsLoaded = false;
+async function ensureModelsLoaded(): Promise<void> {
+  if (modelsLoaded || models.value.length > 0) return;
+  modelsLoaded = true;
+  await fetchModels();
 }
 
 async function saveSettings(): Promise<void> {
@@ -233,6 +244,7 @@ export function useSettings() {
     models,
     folderStructure,
     fetchModels,
+    ensureModelsLoaded,
     saveSettings,
     testCanopy,
     testDataforseo,
