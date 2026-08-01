@@ -724,7 +724,7 @@ function summaryFileMarker(file: string): string {
       <button
         type="button"
         class="btn btn-secondary btn-small"
-        :disabled="analysisCtx.isWorking.value || !storiesCtx.activeFolder.value"
+        :disabled="analysisCtx.isWorking.value || !storiesCtx.activeFolder.value || setupIssues.length > 0"
         @click="onRefreshSummaries"
       >Refresh Summaries</button>
     </div>
