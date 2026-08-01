@@ -15,8 +15,8 @@ const openSources = inject<(wizard?: boolean) => void>('openSources')!;
 const openManuscriptEditor = inject(openManuscriptEditorKey)!;
 const seriesCtx = inject(seriesKey)!;
 
-const appMode = inject<Ref<'analyzer' | 'writing'>>('appMode')!;
-const setAppMode = inject<(mode: 'analyzer' | 'writing') => void>('setAppMode')!;
+const appMode = inject<Ref<'analyzer' | 'writing' | 'marketing'>>('appMode')!;
+const setAppMode = inject<(mode: 'analyzer' | 'writing' | 'marketing') => void>('setAppMode')!;
 const openInWritingMode = inject<(filePath: string, title: string) => void>('openInWritingMode')!;
 const openNewDocumentForm = inject<(location?: string) => void>('openNewDocumentForm')!;
 const fileTreeTick = inject<Ref<number>>('fileTreeTick')!;
@@ -216,6 +216,7 @@ function formatTimestamp(ts: string): string {
     <div class="nav-section mode-tabs">
       <button class="mode-tab" :class="{ active: appMode === 'analyzer' }" @click="setAppMode('analyzer')">Analyzer</button>
       <button class="mode-tab" :class="{ active: appMode === 'writing' }" @click="setAppMode('writing'); sidebarMode = 'files'">Writing</button>
+      <button class="mode-tab" :class="{ active: appMode === 'marketing' }" @click="setAppMode('marketing')">Marketing</button>
     </div>
 
     <div class="stories-section">

@@ -16,6 +16,7 @@ use loremetry_core::series::{self, CreateSeriesRequest, UpdateSeriesRequest};
 use loremetry_core::stories::{self, InitStoryRequest, UpdateStoryRequest};
 use loremetry_core::cancel_operation;
 use loremetry_core::jobs;
+use loremetry_core::campaigns;
 use loremetry_core::platform_secrets::PlatformCredentialsPatch;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -318,6 +319,113 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
         "get_genre_taxonomy" => to_val(loremetry_core::genre_taxonomy::get_genre_taxonomy(&db).await?),
         "list_genres_cmd" => to_val(db::list_genres_cmd(&db).await?),
 
+        // ── Marketing / campaigns ────────────────────────────────────────────
+        "list_campaigns" => {
+            let story_id = take_story_id(&args)?;
+            to_val(campaigns::list_campaigns(app, story_id).await)
+        }
+        "create_campaign" => {
+            let request: campaigns::CreateCampaignRequest = take_request(&args)?;
+            to_val(campaigns::create_campaign(app, request).await)
+        }
+        "update_campaign" => {
+            let request: campaigns::UpdateCampaignRequest = take_request(&args)?;
+            to_val(campaigns::update_campaign(app, request).await)
+        }
+        "delete_campaign" => {
+            let id = take_i64(&args, &["id"])?;
+            to_val(campaigns::delete_campaign(app, id).await)
+        }
+        "get_campaign_detail" => {
+            let id = take_i64(&args, &["id"])?;
+            to_val(campaigns::get_campaign_detail(app, id).await)
+        }
+        "list_creatives" => {
+            let id = take_i64(&args, &["campaign_id", "campaignId"])?;
+            to_val(campaigns::list_creatives(app, id).await)
+        }
+        "create_creative" => {
+            let request: campaigns::CreativeInput = take_request(&args)?;
+            to_val(campaigns::create_creative(app, request).await)
+        }
+        "update_creative" => {
+            let request: campaigns::UpdateCreativeRequest = take_request(&args)?;
+            to_val(campaigns::update_creative(app, request).await)
+        }
+        "delete_creative" => {
+            let id = take_i64(&args, &["id"])?;
+            to_val(campaigns::delete_creative(app, id).await)
+        }
+        "list_performance_snapshots" => {
+            let id = take_i64(&args, &["campaign_id", "campaignId"])?;
+            to_val(campaigns::list_performance_snapshots(app, id).await)
+        }
+        "add_performance_snapshot" => {
+            let request: campaigns::SnapshotInput = take_request(&args)?;
+            to_val(campaigns::add_performance_snapshot(app, request).await)
+        }
+        "delete_performance_snapshot" => {
+            let id = take_i64(&args, &["id"])?;
+            to_val(campaigns::delete_performance_snapshot(app, id).await)
+        }
+        "list_spend_entries" => {
+            let id = take_i64(&args, &["campaign_id", "campaignId"])?;
+            to_val(campaigns::list_spend_entries(app, id).await)
+        }
+        "add_spend_entry" => {
+            let request: campaigns::SpendInput = take_request(&args)?;
+            to_val(campaigns::add_spend_entry(app, request).await)
+        }
+        "delete_spend_entry" => {
+            let id = take_i64(&args, &["id"])?;
+            to_val(campaigns::delete_spend_entry(app, id).await)
+        }
+        "list_landing_pages" => {
+            let story_id = take_story_id(&args)?;
+            to_val(campaigns::list_landing_pages(app, story_id).await)
+        }
+        "create_landing_page" => {
+            let request: campaigns::LandingPageInput = take_request(&args)?;
+            to_val(campaigns::create_landing_page(app, request).await)
+        }
+        "update_landing_page" => {
+            let request: campaigns::UpdateLandingPageRequest = take_request(&args)?;
+            to_val(campaigns::update_landing_page(app, request).await)
+        }
+        "delete_landing_page" => {
+            let id = take_i64(&args, &["id"])?;
+            to_val(campaigns::delete_landing_page(app, id).await)
+        }
+        "list_audience_notes" => {
+            let id = take_i64(&args, &["campaign_id", "campaignId"])?;
+            to_val(campaigns::list_audience_notes(app, id).await)
+        }
+        "add_audience_note" => {
+            let request: campaigns::AudienceNoteInput = take_request(&args)?;
+            to_val(campaigns::add_audience_note(app, request).await)
+        }
+        "update_audience_note" => {
+            let request: campaigns::UpdateAudienceNoteRequest = take_request(&args)?;
+            to_val(campaigns::update_audience_note(app, request).await)
+        }
+        "delete_audience_note" => {
+            let id = take_i64(&args, &["id"])?;
+            to_val(campaigns::delete_audience_note(app, id).await)
+        }
+        "list_platform_accounts" => to_val(campaigns::list_platform_accounts(app).await),
+        "create_platform_account" => {
+            let request: campaigns::PlatformAccountInput = take_request(&args)?;
+            to_val(campaigns::create_platform_account(app, request).await)
+        }
+        "update_platform_account" => {
+            let request: campaigns::UpdatePlatformAccountRequest = take_request(&args)?;
+            to_val(campaigns::update_platform_account(app, request).await)
+        }
+        "delete_platform_account" => {
+            let id = take_i64(&args, &["id"])?;
+            to_val(campaigns::delete_platform_account(app, id).await)
+        }
+
         other => Err(format!("Unknown command: {other}")),
     }
 }
@@ -456,9 +564,9 @@ fn take_i64(args: &Value, keys: &[&str]) -> Result<i64, String> {
 }
 
 fn take_story_id(args: &Value) -> Result<String, String> {
-    take_string(args, &["story_id", "folder", "id"]).or_else(|_| {
+    take_string(args, &["story_id", "folder", "story_folder", "storyFolder", "id"]).or_else(|_| {
         if let Some(req) = args.get("request") {
-            take_string(req, &["story_id", "folder", "id"])
+            take_string(req, &["story_id", "folder", "story_folder", "storyFolder", "id"])
         } else {
             Err("Missing story_id/folder".into())
         }

@@ -6,6 +6,7 @@ pub mod craft_report_groups;
 pub mod app_ctx;
 pub mod cancel;
 pub mod canopy;
+pub mod campaigns;
 pub mod commands;
 pub mod competition_analyzer;
 pub mod config;

@@ -148,14 +148,14 @@ The web app has real backend work (KDP/Wide pipeline, auth, Postgres) but **desk
 
 | Area | Desktop | Web (`ui/`) |
 |------|---------|-------------|
-| App modes | Analyzer, Writing, **Marketing** | Analyzer, Writing — no Marketing |
+| App modes | Analyzer, Writing, **Marketing** | Analyzer, Writing, **Marketing** |
 | Shell | `App.vue` grid + resizable sidebar + status footer (AI spend) | `MainApp.vue` — simpler; no spend footer |
 | Analyzer tabs | **KDP/Wide \| Craft \| Publish \| Saved** | **Done** — `AnalyzerPlatformTabs.vue` |
 | Saved reports | `SavedReportsPanel.vue` | **Done** — `SavedReportsPanel.vue` |
 | Settings | **9-tab** `SettingsPanel.vue` | `AdminPanel.vue` (operator: secrets, SQL) only |
 | Help | `HelpPanel.vue` + `src/help/reports.md` | Missing |
 | Craft UI grouping | `useCraftReportGroups.ts` + `craft-report-groups.json` | **Done** — grouped `AnalyzerPanel.vue` |
-| Marketing | Campaigns, creatives, platform accounts | Missing entirely |
+| Marketing | Campaigns, creatives, platform accounts | **Done** — Marketing mode + `campaigns.rs` |
 | Manuscript editor | `ManuscriptViewer.vue` + suggest-fix | `ManuscriptViewer.vue` exists — verify parity |
 | Cost badges | `reportCostPricing.ts` | `lib/estimateCosts.ts` — partial |
 | Freshness badges | `check_analysis_state` UX | **Partial** — exists badges on cards; no full freshness API |
@@ -239,7 +239,7 @@ Provider API keys, Clerk issuer/publishable key, bootstrap admin → **Postgres*
 | Craft reports | **Done** | `craft_audits.rs`, `craft-report-groups.json`, pipeline loops |
 | Publish reports | **Done** | All 8 types + `batch_prompt.rs` |
 | User settings UI | **Done** | SettingsPanel — General, AI, Canopy, DataForSEO, Story Data, Archived |
-| Marketing mode | **Missing** | Desktop-only |
+| Marketing mode | **Done** | Campaigns, creatives, platform accounts, landing pages |
 | Full desktop catalog parity | **Not v1 goal** | Phased port below |
 
 Do **not** re-scaffold from zero — extend what exists.
@@ -256,7 +256,7 @@ Full parity is **not** a v1 blocker. When porting, follow this order:
 4. **Settings (user)** — ~~AI model slots, Canopy/DataForSEO tests, story data / summary refresh, archived reports~~ **done**
 5. **Content ops** — ~~`story_assets` migration, DOCX ingest, hash-merge upload, zip round-trip~~ **done**
 6. **Worker split** — ~~long jobs off the API process~~ **done** (`lore.jobs`, `loremetry-worker`, job SSE)
-7. **Marketing mode** — optional later unless product asks
+7. **Marketing mode** — ~~optional later~~ **done** (`011_ad_marketing`, campaigns API, Marketing UI)
 
 **Parallel track:** web-native content model (`story_assets`, DOCX, zip, worker) can proceed alongside UI/report parity.
 

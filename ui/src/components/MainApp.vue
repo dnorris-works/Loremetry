@@ -6,9 +6,10 @@ import { usePlatform } from '../composables/usePlatform';
 import { useSettings } from '../composables/useSettings';
 import { useReports } from '../composables/useReports';
 import { useSeries } from '../composables/useSeries';
+import { useCampaigns } from '../composables/useCampaigns';
 import {
   storiesKey, analysisKey, platformKey, settingsKey,
-  reportsKey, seriesKey, showPanelKey, openManuscriptEditorKey,
+  reportsKey, seriesKey, campaignsKey, showPanelKey, openManuscriptEditorKey,
 } from '../injectionKeys';
 import type { Story, Finding, Series } from '../types';
 
@@ -25,6 +26,10 @@ import SeriesForm from './SeriesForm.vue';
 import NewDocumentForm from './NewDocumentForm.vue';
 import ManuscriptViewer from './ManuscriptViewer.vue';
 import WritingPanel from './WritingPanel.vue';
+import CampaignsPanel from './marketing/CampaignsPanel.vue';
+import CampaignForm from './marketing/CampaignForm.vue';
+import CampaignDetailPanel from './marketing/CampaignDetailPanel.vue';
+import PlatformAccountsPanel from './marketing/PlatformAccountsPanel.vue';
 import { useAuth } from '../composables/useAuth';
 import { useReportTypes } from '../composables/useReportTypes';
 
@@ -39,6 +44,7 @@ const platformCtx = usePlatform();
 const settingsCtx = useSettings();
 const reportsCtx = useReports();
 const seriesCtx = useSeries();
+const campaignsCtx = useCampaigns();
 
 provide(storiesKey, storiesCtx);
 provide(analysisKey, analysisCtx);
@@ -46,14 +52,22 @@ provide(platformKey, platformCtx);
 provide(settingsKey, settingsCtx);
 provide(reportsKey, reportsCtx);
 provide(seriesKey, seriesCtx);
+provide(campaignsKey, campaignsCtx);
 
-type AppMode = 'analyzer' | 'writing';
+type AppMode = 'analyzer' | 'writing' | 'marketing';
 const appMode = ref<AppMode>('analyzer');
 
 provide('appMode', appMode);
-provide('setAppMode', (mode: AppMode) => { appMode.value = mode; });
+provide('setAppMode', (mode: AppMode) => {
+  appMode.value = mode;
+  if (mode === 'marketing') {
+    activePanel.value = 'campaigns';
+  } else if (['campaigns', 'campaign-detail', 'campaign-form', 'platform-accounts'].includes(activePanel.value)) {
+    activePanel.value = 'analyzer';
+  }
+});
 
-type Panel = 'analyzer' | 'reports' | 'admin' | 'settings' | 'story-form' | 'series' | 'manuscript' | 'new-document' | 'sources';
+type Panel = 'analyzer' | 'reports' | 'admin' | 'settings' | 'story-form' | 'series' | 'manuscript' | 'new-document' | 'sources' | 'campaigns' | 'campaign-detail' | 'campaign-form' | 'platform-accounts';
 const activePanel = ref<Panel>('analyzer');
 const sidebarOpen = ref(false);
 const sourcesWizard = ref(false);
@@ -176,6 +190,35 @@ function onStoryCreated(): void {
 }
 
 const editingSeries = ref<Series | null>(null);
+const editingCampaignId = ref<number | null>(null);
+
+function openCampaignDetail(id: number): void {
+  editingCampaignId.value = id;
+  showPanel('campaign-detail');
+}
+
+function openCampaignForm(id: number | null): void {
+  editingCampaignId.value = id;
+  showPanel('campaign-form');
+}
+
+function onCampaignSaved(id: number): void {
+  editingCampaignId.value = id;
+  showPanel('campaign-detail');
+}
+
+function onCampaignFormCancel(): void {
+  if (editingCampaignId.value) {
+    showPanel('campaign-detail');
+  } else {
+    showPanel('campaigns');
+  }
+}
+
+function onCampaignDetailBack(): void {
+  editingCampaignId.value = null;
+  showPanel('campaigns');
+}
 
 function openSeriesForm(series: Series | null): void {
   editingSeries.value = series;
@@ -186,9 +229,13 @@ watch(() => storiesCtx.activeStoryId.value, (id) => {
   if (id && storiesCtx.activeFolder.value) {
     analysisCtx.refreshState(storiesCtx.activeFolder.value);
     reportsCtx.loadSidebarReports(storiesCtx.activeFolder.value, platformCtx.platform.value);
+    void campaignsCtx.loadCampaigns(storiesCtx.activeFolder.value);
+    void campaignsCtx.loadLandingPages(storiesCtx.activeFolder.value);
   } else {
     analysisCtx.refreshState('');
     reportsCtx.loadSidebarReports('', platformCtx.platform.value);
+    campaignsCtx.campaigns.value = [];
+    campaignsCtx.landingPages.value = [];
   }
 });
 
@@ -215,6 +262,7 @@ onMounted(() => {
     }
   });
   void seriesCtx.loadSeries();
+  void campaignsCtx.loadPlatformAccounts();
 });
 </script>
 
@@ -247,6 +295,31 @@ onMounted(() => {
         :chapter-title="writingChapterTitle"
         :story-folder="storiesCtx.activeFolder.value"
       />
+
+      <template v-else-if="appMode === 'marketing'">
+        <CampaignsPanel
+          v-if="activePanel === 'campaigns'"
+          @open-campaign="openCampaignDetail"
+          @new-campaign="openCampaignForm(null)"
+          @platform-accounts="showPanel('platform-accounts')"
+        />
+        <CampaignDetailPanel
+          v-else-if="activePanel === 'campaign-detail' && editingCampaignId"
+          :campaign-id="editingCampaignId"
+          @back="onCampaignDetailBack"
+          @edit="openCampaignForm(editingCampaignId)"
+        />
+        <CampaignForm
+          v-else-if="activePanel === 'campaign-form'"
+          :campaign-id="editingCampaignId"
+          @saved="onCampaignSaved"
+          @cancel="onCampaignFormCancel"
+        />
+        <PlatformAccountsPanel
+          v-else-if="activePanel === 'platform-accounts'"
+          @back="showPanel('campaigns')"
+        />
+      </template>
 
       <template v-else-if="appMode === 'analyzer'">
         <SavedReportsPanel
