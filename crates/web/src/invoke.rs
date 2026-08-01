@@ -52,13 +52,13 @@ pub async fn invoke_handler(
     if !skip_credential_inject {
         inject_platform_credentials(&state, &mut args).await;
     }
-    match dispatch(state, &ctx, &body.cmd, args).await {
+    match dispatch(state, &ctx, &body.cmd, args, &auth.user.plan_label).await {
         Ok(v) => ok_json(v),
         Err(e) => json_error(e),
     }
 }
 
-async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut args: Value) -> Result<Value, String> {
+async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut args: Value, plan_label: &str) -> Result<Value, String> {
     let app = app.clone();
     let db = app.db.clone();
 
@@ -123,6 +123,10 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
             to_val(pipeline::check_analysis_state(app, story_id).await)
         }
         "analyze_story" => {
+            // Billing gate: full analysis — worker-level filtering will apply based on tier.
+            // Resolve tier for logging/future use but allow enqueue to proceed.
+            let _tier = loremetry_billing::resolve_tier_from_plan_label(plan_label)
+                .unwrap_or(loremetry_billing::Tier::Free);
             let request: AnalyzeStoryRequest = take_request(&args)?;
             to_val(
                 jobs::enqueue(
@@ -137,6 +141,15 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
         }
         "run_craft_pipeline" => {
             let request: pipeline::CraftPipelineRequest = take_request(&args)?;
+            // Billing gate: check each selected report against the entitlement gate.
+            let tier = loremetry_billing::resolve_tier_from_plan_label(plan_label)
+                .unwrap_or(loremetry_billing::Tier::Free);
+            for report_id in &request.selected {
+                let decision = loremetry_billing::can_run_report(tier, report_id);
+                if !decision.allowed {
+                    return Err(decision.reason.to_string());
+                }
+            }
             to_val(
                 jobs::enqueue(
                     &db.pool,

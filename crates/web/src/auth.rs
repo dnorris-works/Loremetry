@@ -46,6 +46,7 @@ pub struct AuthUser {
     pub email: String,
     pub role: String,
     pub theme_preference: String,
+    pub plan_label: String,
     /// Operator break-glass (admin UI + platform secrets); not stored on Clerk users.
     pub break_glass: bool,
 }
@@ -70,6 +71,9 @@ impl AuthUser {
             theme_preference: users::theme_preference_by_id(&state.ctx.db.pool, id)
                 .await
                 .unwrap_or_else(|| "light".to_string()),
+            plan_label: users::plan_label_by_id(&state.ctx.db.pool, id)
+                .await
+                .unwrap_or_default(),
             break_glass: true,
         }
     }
@@ -234,12 +238,16 @@ pub async fn resolve_auth_user(state: &AppState, headers: &HeaderMap) -> Result<
     let theme_preference = users::theme_preference_by_id(&state.ctx.db.pool, db_user_id)
         .await
         .unwrap_or_else(|| "light".to_string());
+    let plan_label = users::plan_label_by_id(&state.ctx.db.pool, db_user_id)
+        .await
+        .unwrap_or_default();
     Ok(AuthUser {
         clerk_id: claims.sub,
         db_user_id,
         email,
         role,
         theme_preference,
+        plan_label,
         break_glass: false,
     })
 }

@@ -1,4 +1,0 @@
-[toolchain]
-# Pinned for reproducible CI/container builds (registry may not offer `rust:stable`).
-channel = "1.86.0"
-components = ["rust-analyzer"]

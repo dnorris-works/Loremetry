@@ -57,6 +57,15 @@ pub async fn theme_preference_by_id(pool: &PgPool, id: Uuid) -> Option<String> {
         .flatten()
 }
 
+pub async fn plan_label_by_id(pool: &PgPool, id: Uuid) -> Option<String> {
+    sqlx::query_scalar("SELECT plan_label FROM users WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+}
+
 pub async fn set_theme_preference(pool: &PgPool, id: Uuid, theme: &str) -> Result<(), String> {
     if theme != "light" && theme != "dark" {
         return Err("theme must be light or dark".into());

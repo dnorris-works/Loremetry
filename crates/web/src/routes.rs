@@ -25,7 +25,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::admin;
 use crate::auth::{self, Authenticated};
-use crate::error::{json_error, ok_json, result_to_response};
+use crate::error::{json_error, json_error_status, ok_json, result_to_response};
 use crate::invoke;
 use crate::sse;
 use crate::state::AppState;
@@ -368,18 +368,38 @@ async fn analyze_story(
 ) -> impl IntoResponse {
     invoke::inject_platform_credentials(&state, &mut body).await;
     match serde_json::from_value::<loremetry_core::analysis::AnalyzeStoryRequest>(body) {
-        Ok(req) => match jobs::enqueue(
-            &state.ctx.db.pool,
-            jobs::JOB_ANALYZE_STORY,
-            &req.story_id,
-            auth.user.db_user_id,
-            serde_json::to_value(&req).unwrap_or(json!({})),
-        )
-        .await
-        {
-            Ok(r) => ok_json(serde_json::to_value(r).unwrap_or(json!(null))),
-            Err(e) => json_error(e),
-        },
+        Ok(mut req) => {
+            // Billing gate: resolve tier and filter the report set for free-tier users.
+            let tier = loremetry_billing::resolve_tier_from_plan_label(&auth.user.plan_label)
+                .unwrap_or(loremetry_billing::Tier::Free);
+
+            match tier {
+                loremetry_billing::Tier::Free => {
+                    // Free tier: restrict to only the entitled reports.
+                    let allowed: Vec<String> = loremetry_billing::FREE_TIER_REPORTS
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect();
+                    req.selected = allowed;
+                }
+                loremetry_billing::Tier::Pro => {
+                    // Pro tier: proceed with whatever was requested (all standard reports).
+                }
+            }
+
+            match jobs::enqueue(
+                &state.ctx.db.pool,
+                jobs::JOB_ANALYZE_STORY,
+                &req.story_id,
+                auth.user.db_user_id,
+                serde_json::to_value(&req).unwrap_or(json!({})),
+            )
+            .await
+            {
+                Ok(r) => ok_json(serde_json::to_value(r).unwrap_or(json!(null))),
+                Err(e) => json_error(e),
+            }
+        }
         Err(e) => json_error(format!("Invalid request: {e}")),
     }
 }
@@ -391,18 +411,31 @@ async fn craft_pipeline(
 ) -> impl IntoResponse {
     invoke::inject_platform_credentials(&state, &mut body).await;
     match serde_json::from_value::<pipeline::CraftPipelineRequest>(body) {
-        Ok(req) => match jobs::enqueue(
-            &state.ctx.db.pool,
-            jobs::JOB_CRAFT_PIPELINE,
-            &req.story_id,
-            auth.user.db_user_id,
-            serde_json::to_value(&req).unwrap_or(json!({})),
-        )
-        .await
-        {
-            Ok(r) => ok_json(serde_json::to_value(r).unwrap_or(json!(null))),
-            Err(e) => json_error(e),
-        },
+        Ok(req) => {
+            // Billing gate: check each selected report against entitlements.
+            let tier = loremetry_billing::resolve_tier_from_plan_label(&auth.user.plan_label)
+                .unwrap_or(loremetry_billing::Tier::Free);
+
+            for report_id in &req.selected {
+                let decision = loremetry_billing::can_run_report(tier, report_id);
+                if !decision.allowed {
+                    return json_error_status(StatusCode::FORBIDDEN, decision.reason);
+                }
+            }
+
+            match jobs::enqueue(
+                &state.ctx.db.pool,
+                jobs::JOB_CRAFT_PIPELINE,
+                &req.story_id,
+                auth.user.db_user_id,
+                serde_json::to_value(&req).unwrap_or(json!({})),
+            )
+            .await
+            {
+                Ok(r) => ok_json(serde_json::to_value(r).unwrap_or(json!(null))),
+                Err(e) => json_error(e),
+            }
+        }
         Err(e) => json_error(format!("Invalid request: {e}")),
     }
 }
