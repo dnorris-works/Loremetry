@@ -2,7 +2,8 @@
 
 use std::collections::HashMap;
 
-use super::chapters::{chapter_source_hash, extract_title, build_combined_context};
+use crate::manuscript_fingerprint::chapter_source_hash;
+use super::chapters::{extract_title, build_combined_context};
 use super::craft_audits::build_opening_excerpt;
 use super::{emit, err, extract_json_object, GenreResult};
 use crate::app_ctx::AppCtx;

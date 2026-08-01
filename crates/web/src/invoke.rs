@@ -240,6 +240,9 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, mut
             let request: FolderRequest = take_request(&args)?;
             to_val(loremetry_core::story_settings::refresh_chapter_summaries(app, request).await?)
         }
+        "get_ai_spend_totals" => {
+            to_val(commands::get_ai_spend_totals(&app).await?)
+        }
         "clear_chapter_summaries" => {
             let folder = take_story_id(&args)?;
             loremetry_core::story_settings::clear_chapter_summaries(app, folder).await?;

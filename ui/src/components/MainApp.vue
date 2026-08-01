@@ -30,6 +30,8 @@ import CampaignsPanel from './marketing/CampaignsPanel.vue';
 import CampaignForm from './marketing/CampaignForm.vue';
 import CampaignDetailPanel from './marketing/CampaignDetailPanel.vue';
 import PlatformAccountsPanel from './marketing/PlatformAccountsPanel.vue';
+import HelpPanel from './HelpPanel.vue';
+import StatusFooter from './StatusFooter.vue';
 import { useAuth } from '../composables/useAuth';
 import { useReportTypes } from '../composables/useReportTypes';
 
@@ -67,7 +69,7 @@ provide('setAppMode', (mode: AppMode) => {
   }
 });
 
-type Panel = 'analyzer' | 'reports' | 'admin' | 'settings' | 'story-form' | 'series' | 'manuscript' | 'new-document' | 'sources' | 'campaigns' | 'campaign-detail' | 'campaign-form' | 'platform-accounts';
+type Panel = 'analyzer' | 'reports' | 'admin' | 'settings' | 'help' | 'story-form' | 'series' | 'manuscript' | 'new-document' | 'sources' | 'campaigns' | 'campaign-detail' | 'campaign-form' | 'platform-accounts';
 const activePanel = ref<Panel>('analyzer');
 const sidebarOpen = ref(false);
 const sourcesWizard = ref(false);
@@ -86,6 +88,11 @@ provide('toggleSidebar', toggleSidebar);
 provide('closeSidebar', closeSidebar);
 
 function showPanel(name: Panel): void {
+  if ((name === 'settings' || name === 'help') && activePanel.value === name) {
+    activePanel.value = 'analyzer';
+    sidebarOpen.value = false;
+    return;
+  }
   activePanel.value = name;
   sidebarOpen.value = false;
 }
@@ -329,6 +336,7 @@ onMounted(() => {
         <ReportsViewer v-if="activePanel === 'reports'" />
         <AdminPanel v-if="activePanel === 'admin'" />
         <SettingsPanel v-if="activePanel === 'settings'" />
+        <HelpPanel v-if="activePanel === 'help'" />
         <StoryForm
           v-if="activePanel === 'story-form'"
           :story="editingStory"
@@ -344,17 +352,19 @@ onMounted(() => {
         />
       </template>
     </main>
+    <StatusFooter />
   </div>
 </template>
 
 <style scoped>
 #app-root {
   display: grid;
-  grid-template-rows: var(--titlebar-h, 28px) 1fr;
+  grid-template-rows: var(--titlebar-h, 28px) 1fr auto;
   grid-template-columns: var(--sidebar-w, 220px) minmax(0, 1fr);
   grid-template-areas:
     "titlebar titlebar"
-    "sidebar main";
+    "sidebar main"
+    "footer footer";
   height: 100vh;
   overflow: hidden;
 }

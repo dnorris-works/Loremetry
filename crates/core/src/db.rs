@@ -1431,26 +1431,42 @@ pub async fn chapter_summary_exists(pool: &PgPool, story_id: &str, file: &str) -
 }
 
 pub async fn save_chapter_summary(
-    pool: &PgPool, story_id: &str, file: &str, title: &str, signals: &str, word_count: i64,
+    pool: &PgPool, story_id: &str, file: &str, title: &str, signals: &str, source_hash: &str, word_count: i64,
 ) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
-        "INSERT INTO chapter_summaries (story_id, file, title, signals, word_count, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        "INSERT INTO chapter_summaries (story_id, file, title, signals, source_hash, word_count, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT(story_id, file) DO UPDATE SET
             title = excluded.title, signals = excluded.signals,
+            source_hash = excluded.source_hash,
             word_count = excluded.word_count, updated_at = excluded.updated_at",
     )
     .bind(story_id)
     .bind(file)
     .bind(title)
     .bind(signals)
+    .bind(source_hash)
     .bind(word_count)
     .bind(&now)
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+pub async fn load_chapter_summary_hashes(
+    pool: &PgPool,
+    story_id: &str,
+) -> std::collections::HashMap<String, String> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT file, source_hash FROM chapter_summaries WHERE story_id = $1",
+    )
+    .bind(story_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+    rows.into_iter().collect()
 }
 
 pub async fn load_chapter_summaries(pool: &PgPool, story_id: &str) -> Vec<ChapterSummaryRow> {
@@ -1768,16 +1784,71 @@ pub async fn save_document(pool: &PgPool, story_id: &str, doc_type: &str, conten
     save_document_at(pool, story_id, doc_type, content, &now).await
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Freshness {
+    Missing,
+    Fresh,
+    Stale,
+}
+
+impl Freshness {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Freshness::Missing => "missing",
+            Freshness::Fresh => "fresh",
+            Freshness::Stale => "stale",
+        }
+    }
+}
+
+pub async fn report_freshness_status(
+    pool: &PgPool,
+    story_id: &str,
+    doc_type: &str,
+    current_fp: &str,
+) -> Freshness {
+    let saved_fp: Option<String> = sqlx::query_scalar(
+        "SELECT manuscript_fingerprint_at_save FROM story_documents
+         WHERE story_id = $1 AND doc_type = $2 AND status = 'current'",
+    )
+    .bind(story_id)
+    .bind(doc_type)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .filter(|s: &String| !s.is_empty());
+
+    match saved_fp {
+        None => Freshness::Missing,
+        Some(ref fp) if fp == current_fp => Freshness::Fresh,
+        _ => Freshness::Stale,
+    }
+}
+
+pub async fn list_existing_doc_types(pool: &PgPool, story_id: &str) -> Vec<String> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT doc_type FROM story_documents
+         WHERE story_id = $1 AND status = 'current'",
+    )
+    .bind(story_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default()
+}
+
 pub async fn save_document_at(pool: &PgPool, story_id: &str, doc_type: &str, content: &str, timestamp: &str) -> Result<(), String> {
     archive_documents_for_type(pool, story_id, doc_type, "superseded").await?;
+    let fp = crate::manuscript_fingerprint::compute_manuscript_fingerprint_for_story(pool, story_id).await;
     sqlx::query(
-        "INSERT INTO story_documents (story_id, doc_type, content, generated_at, status)
-         VALUES ($1, $2, $3, $4, 'current')",
+        "INSERT INTO story_documents (story_id, doc_type, content, generated_at, status, manuscript_fingerprint_at_save)
+         VALUES ($1, $2, $3, $4, 'current', $5)",
     )
     .bind(story_id)
     .bind(doc_type)
     .bind(content)
     .bind(timestamp)
+    .bind(&fp)
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;

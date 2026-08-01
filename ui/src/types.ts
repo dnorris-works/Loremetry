@@ -44,11 +44,27 @@ export interface ModelsResult {
   error: string;
 }
 
+export interface AiSpendTotals {
+  month_usd: number;
+  ytd_usd: number;
+}
+
+export interface ReportFreshness {
+  doc_type: string;
+  status: 'fresh' | 'stale' | 'missing';
+}
+
 export interface AnalysisState {
   has_folder: boolean;
   summary_count: number;
+  summary_chapter_count: number;
+  summary_missing_count: number;
+  summary_stale_count: number;
+  summary_missing_files: string[];
+  summary_stale_files: string[];
   has_genre_data: boolean;
   has_full_report: boolean;
+  has_wide_analysis: boolean;
   has_keywords: boolean;
   has_search_terms: boolean;
   has_competition: boolean;
@@ -58,11 +74,15 @@ export interface AnalysisState {
   has_bisac: boolean;
   has_discovery_keywords: boolean;
   has_keyword_search_results: boolean;
+  has_google_keyword_search: boolean;
   has_zeigarnik: boolean;
   has_readability: boolean;
   has_continuity_check: boolean;
   has_show_dont_tell: boolean;
   has_ai_isms: boolean;
+  existing_docs: string[];
+  report_freshness: ReportFreshness[];
+  manuscript_fingerprint: string;
 }
 
 export interface SeriesRow {

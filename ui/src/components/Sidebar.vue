@@ -380,6 +380,9 @@ function formatTimestamp(ts: string): string {
     </div>
 
     <div class="nav-section settings-section">
+      <button class="nav-item nav-item-muted" @click="showPanel('help')">
+        Help
+      </button>
       <button class="nav-item nav-item-muted" @click="showPanel('settings')">
         Settings
       </button>

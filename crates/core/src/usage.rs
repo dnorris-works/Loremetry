@@ -231,3 +231,53 @@ pub async fn usage_events(
         )
         .collect())
 }
+
+#[derive(Debug, Serialize)]
+pub struct AiSpendTotals {
+    pub month_usd: f64,
+    pub ytd_usd: f64,
+}
+
+pub async fn ai_spend_totals(pool: &PgPool, user_id: Uuid) -> Result<AiSpendTotals, String> {
+    use chrono::Datelike;
+
+    let now = chrono::Utc::now();
+    let month_start = now
+        .date_naive()
+        .with_day(1)
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .map(|dt| dt.and_utc())
+        .unwrap_or(now);
+    let year_start = now
+        .date_naive()
+        .with_month(1)
+        .and_then(|d| d.with_day(1))
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .map(|dt| dt.and_utc())
+        .unwrap_or(now);
+
+    let month_usd: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(cost_usd), 0) FROM ai_usage_events
+         WHERE user_id = $1 AND occurred_at >= $2",
+    )
+    .bind(user_id)
+    .bind(month_start)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let ytd_usd: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(cost_usd), 0) FROM ai_usage_events
+         WHERE user_id = $1 AND occurred_at >= $2",
+    )
+    .bind(user_id)
+    .bind(year_start)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(AiSpendTotals {
+        month_usd: (month_usd * 100.0).round() / 100.0,
+        ytd_usd: (ytd_usd * 100.0).round() / 100.0,
+    })
+}

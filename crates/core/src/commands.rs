@@ -847,3 +847,7 @@ pub async fn chat_with_context(
         .await;
     Ok(ChatResponse { success: true, reply, error: String::new() })
 }
+
+pub async fn get_ai_spend_totals(app: &AppCtx) -> Result<crate::usage::AiSpendTotals, String> {
+    crate::usage::ai_spend_totals(&app.db.pool, app.user_id()).await
+}

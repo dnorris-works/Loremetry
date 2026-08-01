@@ -10,11 +10,16 @@ import { useReportTypes } from '../composables/useReportTypes';
 import { useCraftReportGroups } from '../composables/useCraftReportGroups';
 import { getChapterWordStats } from '../lib/manuscriptCache';
 import { estimateReportCosts } from '../lib/estimateCosts';
+import { buildRunQueue } from '../reportDependencies';
+import { isAiConfigured, resolveModelPrices } from '../lib/reportCostPricing';
 import type { ReportTypeDef, Series } from '../types';
 import { useAuth } from '../composables/useAuth';
 import { reportAccessBadge, reportAccessLabel, isSubscriberRole } from '../lib/reportAccess';
 
-type VisibleReport = ReportTypeDef & { exists: boolean };
+type VisibleReport = ReportTypeDef & {
+  exists: boolean;
+  freshness: 'fresh' | 'stale' | 'missing';
+};
 
 type ReportSection = {
   id: string;
@@ -78,10 +83,21 @@ const continuitySeriesId = ref<number | null>(null);
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 
+const freshnessMap = computed(() => {
+  const s = analysisCtx.analysisState.value;
+  const map: Record<string, 'fresh' | 'stale' | 'missing'> = {};
+  if (!s?.report_freshness) return map;
+  for (const r of s.report_freshness) {
+    map[r.doc_type] = r.status;
+  }
+  return map;
+});
+
 const existsMap = computed(() => {
   const state = analysisCtx.analysisState.value;
   if (!state) return {} as Record<string, boolean>;
-  return {
+  const docs = new Set(state.existing_docs || []);
+  const map: Record<string, boolean> = {
     chapter_summaries: state.summary_count > 0,
     genre_analysis: state.has_genre_data,
     genre_ranking: state.has_genre_ranking,
@@ -91,18 +107,36 @@ const existsMap = computed(() => {
     mi_search_terms: state.has_search_terms,
     discovery_keywords: state.has_discovery_keywords,
     analysis: state.has_full_report,
+    wide_analysis: state.has_wide_analysis,
     keyword_search: state.has_keyword_search_results,
     competition_report: state.has_competition,
-    review_mining: false,
-    author_analysis: false,
-    activity_log: false,
+    review_mining: docs.has('review_mining'),
+    author_analysis: docs.has('author_analysis'),
+    activity_log: docs.has('activity_log'),
     zeigarnik_analysis: state.has_zeigarnik,
     readability_analysis: state.has_readability,
     continuity_check: state.has_continuity_check,
     show_dont_tell: state.has_show_dont_tell,
     ai_isms: state.has_ai_isms,
-  } as Record<string, boolean>;
+  };
+  for (const id of docs) {
+    if (!(id in map)) map[id] = true;
+  }
+  return map;
 });
+
+function getReportFreshness(reportId: string): 'fresh' | 'stale' | 'missing' {
+  if (reportId === 'chapter_summaries') {
+    const s = analysisCtx.analysisState.value;
+    if (!s || !storiesCtx.activeFolder.value) return 'missing';
+    if (s.summary_chapter_count === 0) return 'missing';
+    if (s.summary_missing_count > 0) return 'missing';
+    if (s.summary_stale_count > 0) return 'stale';
+    return 'fresh';
+  }
+  return freshnessMap.value[reportId]
+    ?? (existsMap.value[reportId] ? 'stale' : 'missing');
+}
 
 const visibleReports = computed((): VisibleReport[] => {
   const plat = platformCtx.platform.value;
@@ -111,7 +145,42 @@ const visibleReports = computed((): VisibleReport[] => {
     .map(r => ({
       ...r,
       exists: existsMap.value[r.id] ?? false,
+      freshness: getReportFreshness(r.id),
     }));
+});
+
+const summaryStatus = computed(() => {
+  const s = analysisCtx.analysisState.value;
+  if (!s || !storiesCtx.activeFolder.value) {
+    return { needsRefresh: false, text: 'Select a story to manage chapter summaries.' };
+  }
+  if (s.summary_chapter_count === 0) {
+    return { needsRefresh: false, text: 'No manuscript chapters found yet.' };
+  }
+  if (s.summary_missing_count > 0 || s.summary_stale_count > 0) {
+    const parts: string[] = [];
+    if (s.summary_missing_count > 0) parts.push(`${s.summary_missing_count} new/unscanned`);
+    if (s.summary_stale_count > 0) parts.push(`${s.summary_stale_count} changed since last scan`);
+    return {
+      needsRefresh: true,
+      text: `Chapter summaries need refresh: ${parts.join(', ')}.`,
+    };
+  }
+  return {
+    needsRefresh: false,
+    text: `Chapter summaries are up to date (${s.summary_count}/${s.summary_chapter_count}). Manage in Settings → Story Data.`,
+  };
+});
+
+const summaryIssueFiles = computed(() => {
+  const s = analysisCtx.analysisState.value;
+  if (!s) {
+    return { missing: [] as string[], stale: [] as string[] };
+  }
+  return {
+    missing: s.summary_missing_files || [],
+    stale: s.summary_stale_files || [],
+  };
 });
 
 function sectionAvailability(groupId: string): { disabled: boolean; reason: string } {
@@ -204,65 +273,142 @@ watch(() => storiesCtx.activeFolder.value, (folder) => {
 
 // ── Cost estimation ───────────────────────────────────────────────────────────
 
-const costEstimates = ref<Record<string, number>>({});
+const costEstimates = ref<Record<string, number | null>>({});
+const costEstimatesLoaded = ref(false);
+
+const aiConfigured = computed(() =>
+  isAiConfigured('', settings.model.value),
+);
+
+const reportsToRun = computed(() => {
+  const plat = platformCtx.platform.value;
+  const primaries = selected.value.filter(id => {
+    const def = reportTypes.value.find(r => r.id === id);
+    return def?.platforms.includes(plat);
+  });
+  return buildRunQueue(
+    primaries,
+    reportTypes.value,
+    depId => getReportFreshness(depId) !== 'fresh',
+  );
+});
+
+function isAiReport(reportId: string): boolean {
+  const rt = reportTypes.value.find(r => r.id === reportId);
+  if (!rt) return true;
+  return rt.cost_output_max > 0 || rt.cost_per_chapter || rt.cost_fixed_calls > 0;
+}
+
+const reportsMissingPricing = computed(() =>
+  reportsToRun.value.filter(id =>
+    isAiReport(id) && costEstimatesLoaded.value && costEstimates.value[id] == null,
+  ),
+);
 
 const totalEstimatedCost = computed(() => {
   let total = 0;
-  for (const id of selected.value) {
-    total += costEstimates.value[id] || 0;
+  for (const id of reportsToRun.value) {
+    const est = costEstimates.value[id];
+    if (est != null) total += est;
   }
   return total;
 });
 
 function formatCost(cost: number): string {
-  if (cost === 0) return 'Free';
+  if (cost === 0) return '$0.00';
   if (cost < 0.01) return '<$0.01';
   return `~$${cost.toFixed(2)}`;
 }
 
+function formatTotalCost(): string {
+  if (!aiConfigured.value) return '';
+  if (!costEstimatesLoaded.value) return '…';
+  const missing = reportsMissingPricing.value.length;
+  if (reportsToRun.value.length === 0) return '';
+  const aiReports = reportsToRun.value.filter(id => isAiReport(id));
+  if (missing === aiReports.length && aiReports.length > 0) {
+    return 'pricing unavailable';
+  }
+  const base = formatCost(totalEstimatedCost.value);
+  if (missing > 0) return `${base} (${missing} unpriced)`;
+  return base;
+}
+
+function reportRunCost(reportId: string, usesAi = true): string {
+  if (!usesAi) return 'Free';
+  if (!aiConfigured.value) return '—';
+  if (!costEstimatesLoaded.value) return '…';
+  const estimate = costEstimates.value[reportId];
+  if (estimate == null) return 'pricing unavailable';
+  return formatCost(estimate);
+}
+
 async function fetchCostEstimates(): Promise<void> {
   const folder = storiesCtx.activeFolder.value;
+  costEstimatesLoaded.value = false;
   if (!folder || visibleReports.value.length === 0 || settings.models.value.length === 0) {
     costEstimates.value = {};
+    costEstimatesLoaded.value = true;
     return;
   }
 
-  // Build model prices for each visible report
   const modelPrices = visibleReports.value.map(r => {
     const fnKey = reportToModelFn(r.id);
     const modelId = settings.modelFor(fnKey);
-    const modelInfo = settings.models.value.find(m => m.id === modelId);
+    const pricing = resolveModelPrices(modelId, settings.models.value);
     return {
       report_id: r.id,
-      input_price: modelInfo?.input_price ?? 0,
-      output_price: modelInfo?.output_price ?? 0,
+      input_price: pricing.available ? pricing.input_price : -1,
+      output_price: pricing.available ? pricing.output_price : -1,
     };
   });
 
   try {
     const stats = await getChapterWordStats(folder);
     if (stats.chapterCount > 0) {
-      const estimates = estimateReportCosts(visibleReports.value, modelPrices, stats);
-      const obj: Record<string, number> = {};
-      for (const est of estimates) {
-        obj[est.report_id] = est.estimated_cost;
+      const pricedOnly = modelPrices.filter(p => p.input_price >= 0);
+      const estimates = estimateReportCosts(visibleReports.value, pricedOnly, stats);
+      const obj: Record<string, number | null> = {};
+      for (const r of visibleReports.value) {
+        const pricing = resolveModelPrices(
+          settings.modelFor(reportToModelFn(r.id)),
+          settings.models.value,
+        );
+        if (!pricing.available) {
+          obj[r.id] = null;
+          continue;
+        }
+        const est = estimates.find(e => e.report_id === r.id);
+        obj[r.id] = est?.estimated_cost ?? 0;
       }
       costEstimates.value = obj;
+      costEstimatesLoaded.value = true;
       return;
     }
 
     const result = await invoke<{ success: boolean; estimates: { report_id: string; estimated_cost: number }[] }>('estimate_report_costs', {
-      request: { folder, model_prices: modelPrices },
+      request: { folder, model_prices: modelPrices.filter(p => p.input_price >= 0) },
     });
-    if (result.success) {
-      const obj: Record<string, number> = {};
-      for (const est of result.estimates) {
-        obj[est.report_id] = est.estimated_cost;
+    const obj: Record<string, number | null> = {};
+    for (const r of visibleReports.value) {
+      const pricing = resolveModelPrices(
+        settings.modelFor(reportToModelFn(r.id)),
+        settings.models.value,
+      );
+      if (!pricing.available) {
+        obj[r.id] = null;
+        continue;
       }
-      costEstimates.value = obj;
+      const est = result.success
+        ? result.estimates.find(e => e.report_id === r.id)
+        : undefined;
+      obj[r.id] = est?.estimated_cost ?? 0;
     }
+    costEstimates.value = obj;
   } catch (e) {
     console.error('estimate_report_costs:', e);
+  } finally {
+    costEstimatesLoaded.value = true;
   }
 }
 
@@ -318,6 +464,25 @@ function onMarketIntel(): void {
 function onStop(): void {
   analysisCtx.cancelOperation();
 }
+
+async function onRefreshSummaries(): Promise<void> {
+  const folder = storiesCtx.activeFolder.value;
+  if (!folder) return;
+  hasRun.value = true;
+  try {
+    await invoke('refresh_chapter_summaries', {
+      request: {
+        folder,
+        provider: settings.provider.value,
+        api_key: '',
+        model: settings.modelFor('summaries'),
+      },
+    });
+    await analysisCtx.refreshState(folder);
+  } catch (e) {
+    console.error('refresh_chapter_summaries:', e);
+  }
+}
 </script>
 
 <template>
@@ -342,8 +507,8 @@ function onStop(): void {
         @click="onGetReports"
       >Get Reports</button>
 
-      <span v-if="selected.length > 0 && totalEstimatedCost > 0" class="cost-total">
-        {{ formatCost(totalEstimatedCost) }}
+      <span v-if="reportsToRun.length > 0 && formatTotalCost()" class="cost-total">
+        {{ formatTotalCost() }}
       </span>
 
       <button
@@ -364,6 +529,34 @@ function onStop(): void {
         <input v-model="forceResummarize" type="checkbox" :disabled="reportsLocked" />
         Force re-summarize
       </label>
+    </div>
+
+    <div class="summary-status-row">
+      <span
+        class="summary-status-text"
+        :class="{ 'summary-status-warning': summaryStatus.needsRefresh }"
+      >{{ summaryStatus.text }}</span>
+      <button
+        type="button"
+        class="btn btn-secondary btn-small"
+        :disabled="analysisCtx.isWorking.value || !storiesCtx.activeFolder.value"
+        @click="onRefreshSummaries"
+      >Refresh Summaries</button>
+    </div>
+
+    <div v-if="summaryStatus.needsRefresh" class="summary-issues">
+      <div v-if="summaryIssueFiles.missing.length > 0">
+        <span class="summary-issues-label">Missing summaries:</span>
+        <ul class="summary-file-list">
+          <li v-for="f in summaryIssueFiles.missing" :key="`missing-${f}`">{{ f }}</li>
+        </ul>
+      </div>
+      <div v-if="summaryIssueFiles.stale.length > 0" class="summary-stale-block">
+        <span class="summary-issues-label">Changed since last scan:</span>
+        <ul class="summary-file-list">
+          <li v-for="f in summaryIssueFiles.stale" :key="`stale-${f}`">{{ f }}</li>
+        </ul>
+      </div>
     </div>
 
     <div
@@ -433,8 +626,15 @@ function onStop(): void {
             </div>
             <div class="report-card-desc">{{ report.description }}</div>
             <div class="report-card-meta">
-              <span v-if="report.exists" class="report-card-exists">✓ exists</span>
-              <span v-if="costEstimates[report.id] != null" class="report-card-cost">{{ formatCost(costEstimates[report.id]) }}</span>
+              <span
+                v-if="report.freshness === 'fresh'"
+                class="report-card-status report-card-status--fresh"
+              >has run</span>
+              <span
+                v-else-if="report.freshness === 'stale'"
+                class="report-card-status report-card-status--stale"
+              >stale — re-run to refresh</span>
+              <span class="report-card-cost">{{ reportRunCost(report.id, isAiReport(report.id)) }}</span>
             </div>
           </div>
         </div>
@@ -655,11 +855,17 @@ function onStop(): void {
   line-height: 1.4;
 }
 
-.report-card-exists {
+.report-card-status {
   font-size: 11px;
-  color: var(--accent);
   font-weight: 500;
-  margin-top: 2px;
+}
+
+.report-card-status--fresh {
+  color: var(--success, #3d9970);
+}
+
+.report-card-status--stale {
+  color: var(--warning, #d4a017);
 }
 
 .report-card-meta {
@@ -682,6 +888,49 @@ function onStop(): void {
   padding: 4px 10px;
   background: var(--surface2);
   border-radius: var(--radius);
+}
+
+.summary-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.summary-status-text {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.summary-status-warning {
+  color: var(--warning, #d4a017);
+}
+
+.btn-small {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.summary-issues {
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.summary-issues-label {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.summary-stale-block {
+  margin-top: 8px;
+}
+
+.summary-file-list {
+  margin: 0;
+  padding-left: 1.2em;
 }
 
 /* ── Actions ───────────────────────────────────────────────────────────────── */

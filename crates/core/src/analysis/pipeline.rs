@@ -26,11 +26,23 @@ fn has_dataforseo_creds(login: &str, password: &str) -> bool {
 // ── Types ────────────────────────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
+pub struct ReportFreshness {
+    pub doc_type: String,
+    pub status:   String,
+}
+
+#[derive(serde::Serialize)]
 pub struct AnalysisState {
     pub has_folder:                 bool,
     pub summary_count:              usize,
+    pub summary_chapter_count:      usize,
+    pub summary_missing_count:      usize,
+    pub summary_stale_count:        usize,
+    pub summary_missing_files:      Vec<String>,
+    pub summary_stale_files:        Vec<String>,
     pub has_genre_data:             bool,
     pub has_full_report:            bool,
+    pub has_wide_analysis:          bool,
     pub has_keywords:               bool,
     pub has_search_terms:           bool,
     pub has_competition:            bool,
@@ -40,39 +52,138 @@ pub struct AnalysisState {
     pub has_bisac:                  bool,
     pub has_discovery_keywords:     bool,
     pub has_keyword_search_results: bool,
+    pub has_google_keyword_search:  bool,
     pub has_zeigarnik:              bool,
     pub has_readability:            bool,
     pub has_continuity_check:       bool,
     pub has_show_dont_tell:         bool,
     pub has_ai_isms:                bool,
+    pub existing_docs:              Vec<String>,
+    pub report_freshness:           Vec<ReportFreshness>,
+    pub manuscript_fingerprint:     String,
 }
 
 // ── Analysis state check ──────────────────────────────────────────────────────
+
+async fn doc_is_fresh(pool: &sqlx::PgPool, story_id: &str, doc_type: &str, fp: &str) -> bool {
+    db::report_freshness_status(pool, story_id, doc_type, fp).await == db::Freshness::Fresh
+}
 
 pub async fn check_analysis_state(app: AppCtx, story_id: String) -> AnalysisState {
     let database = app.db.as_ref();
     let pool = &database.pool;
     let has_folder = crate::stories::story_exists(database, &story_id).await;
 
+    let chapters = documents::list_chapters_db(&app.db, &story_id)
+        .await
+        .unwrap_or_default();
+    let current_fp =
+        crate::manuscript_fingerprint::compute_manuscript_fingerprint(&chapters);
+    let summary_hashes = db::load_chapter_summary_hashes(pool, &story_id).await;
+
+    let mut summary_missing_count = 0usize;
+    let mut summary_stale_count = 0usize;
+    let mut summary_missing_files: Vec<String> = Vec::new();
+    let mut summary_stale_files: Vec<String> = Vec::new();
+
+    for chapter in &chapters {
+        let file = documents::chapter_display_name(chapter);
+        let cleaned = crate::manuscript_fingerprint::clean_for_ai(&chapter.content);
+        if cleaned.is_empty() {
+            continue;
+        }
+        let current_hash = crate::manuscript_fingerprint::chapter_source_hash(&cleaned);
+
+        match summary_hashes.get(&file) {
+            None => {
+                summary_missing_count += 1;
+                summary_missing_files.push(file);
+            }
+            Some(stored_hash) if stored_hash.is_empty() || stored_hash != &current_hash => {
+                summary_stale_count += 1;
+                summary_stale_files.push(file);
+            }
+            Some(_) => {}
+        }
+    }
+
+    let report_doc_types = [
+        "genre_analysis",
+        "genre_ranking",
+        "genres_and_categories",
+        "kdp_categories",
+        "kdp_keywords",
+        "bisac_classification",
+        "mi_search_terms",
+        "discovery_keywords",
+        "wide_analysis",
+        "analysis",
+        "full_report",
+        "keyword_search",
+        "competition_report",
+        "review_mining",
+        "author_analysis",
+        "zeigarnik_analysis",
+        "readability_analysis",
+        "continuity_check",
+        "show_dont_tell",
+        "ai_isms",
+    ];
+    let report_freshness: Vec<ReportFreshness> = {
+        let mut rows = Vec::new();
+        for dt in report_doc_types {
+            rows.push(ReportFreshness {
+                doc_type: dt.to_string(),
+                status: db::report_freshness_status(pool, &story_id, dt, &current_fp)
+                    .await
+                    .as_str()
+                    .to_string(),
+            });
+        }
+        rows
+    };
+
+    let existing_docs = db::list_existing_doc_types(pool, &story_id).await;
+
+    let genre_fresh = doc_is_fresh(pool, &story_id, "genres_and_categories", &current_fp).await;
+
     AnalysisState {
         has_folder,
         summary_count:              db::chapter_summary_count(pool, &story_id).await as usize,
-        has_genre_data:             db::load_genre_data(pool, &story_id).await.is_some(),
-        has_full_report:            db::get_document(pool, &story_id, "full_report").await.is_some(),
-        has_keywords:               db::load_kdp_keywords(pool, &story_id).await.is_some(),
-        has_search_terms:           !db::load_mi_search_terms(pool, &story_id).await.is_empty(),
-        has_competition:            db::get_document(pool, &story_id, "competition_report").await.is_some(),
-        has_categories:             db::has_category_results(pool, &story_id).await,
-        has_genre_ranking:          db::has_genre_rankings(pool, &story_id).await,
-        has_mapped_verified:        db::get_document(pool, &story_id, "mapped_categories").await.is_some(),
-        has_bisac:                  db::has_bisac_classifications(pool, &story_id).await,
-        has_discovery_keywords:     !db::load_discovery_keywords(pool, &story_id).await.is_empty(),
-        has_keyword_search_results: db::has_keyword_search_results(pool, &story_id).await,
-        has_zeigarnik:              db::has_zeigarnik_analysis(pool, &story_id).await,
-        has_readability:            db::get_document(pool, &story_id, "readability_analysis").await.is_some(),
-        has_continuity_check:       db::get_document(pool, &story_id, "continuity_check").await.is_some(),
-        has_show_dont_tell:         db::get_document(pool, &story_id, "show_dont_tell").await.is_some(),
-        has_ai_isms:                db::get_document(pool, &story_id, "ai_isms").await.is_some(),
+        summary_chapter_count:      chapters.len(),
+        summary_missing_count,
+        summary_stale_count,
+        summary_missing_files,
+        summary_stale_files,
+        has_genre_data:             db::load_genre_data(pool, &story_id).await.is_some() && genre_fresh,
+        has_full_report:            doc_is_fresh(pool, &story_id, "analysis", &current_fp).await,
+        has_wide_analysis:          doc_is_fresh(pool, &story_id, "wide_analysis", &current_fp).await,
+        has_keywords:               db::load_kdp_keywords(pool, &story_id).await.is_some()
+            && doc_is_fresh(pool, &story_id, "kdp_keywords", &current_fp).await,
+        has_search_terms:           !db::load_mi_search_terms(pool, &story_id).await.is_empty()
+            && doc_is_fresh(pool, &story_id, "mi_search_terms", &current_fp).await,
+        has_competition:            doc_is_fresh(pool, &story_id, "competition_report", &current_fp).await,
+        has_categories:             db::has_category_results(pool, &story_id).await
+            && doc_is_fresh(pool, &story_id, "genres_and_categories", &current_fp).await,
+        has_genre_ranking:          db::has_genre_rankings(pool, &story_id).await && genre_fresh,
+        has_mapped_verified:        doc_is_fresh(pool, &story_id, "mapped_categories", &current_fp).await,
+        has_bisac:                  db::has_bisac_classifications(pool, &story_id).await
+            && doc_is_fresh(pool, &story_id, "bisac_classification", &current_fp).await,
+        has_discovery_keywords:     !db::load_discovery_keywords(pool, &story_id).await.is_empty()
+            && doc_is_fresh(pool, &story_id, "discovery_keywords", &current_fp).await,
+        has_keyword_search_results: db::has_keyword_search_results(pool, &story_id).await
+            && doc_is_fresh(pool, &story_id, "keyword_search", &current_fp).await,
+        has_google_keyword_search:  false,
+        has_zeigarnik:              db::has_zeigarnik_analysis(pool, &story_id).await
+            && doc_is_fresh(pool, &story_id, "zeigarnik_analysis", &current_fp).await,
+        has_readability:            db::get_document(pool, &story_id, "readability_analysis").await.is_some()
+            && doc_is_fresh(pool, &story_id, "readability_analysis", &current_fp).await,
+        has_continuity_check:       doc_is_fresh(pool, &story_id, "continuity_check", &current_fp).await,
+        has_show_dont_tell:         doc_is_fresh(pool, &story_id, "show_dont_tell", &current_fp).await,
+        has_ai_isms:                doc_is_fresh(pool, &story_id, "ai_isms", &current_fp).await,
+        existing_docs,
+        report_freshness,
+        manuscript_fingerprint:     current_fp,
     }
 }
 

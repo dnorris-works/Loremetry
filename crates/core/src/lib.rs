@@ -28,6 +28,7 @@ pub mod users;
 pub mod usage;
 pub mod winningcat;
 pub mod jobs;
+pub mod manuscript_fingerprint;
 
 pub use app_ctx::{AppCtx, LogEvent};
 pub use cancel::{cancel_operation, is_cancelled, notify as cancel_notify, reset as reset_cancel};

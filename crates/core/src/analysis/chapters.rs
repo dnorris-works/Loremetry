@@ -103,12 +103,15 @@ pub(crate) async fn phase1_summaries(
                 } else {
                     extract_title(content).unwrap_or_else(|| fname.clone())
                 };
+                let cleaned = crate::manuscript_fingerprint::clean_for_ai(content);
+                let source_hash = crate::manuscript_fingerprint::chapter_source_hash(&cleaned);
                 let _ = db::save_chapter_summary(
                     &database.pool,
                     story_id,
                     &fname,
                     &title,
                     &signals,
+                    &source_hash,
                     word_count as i64,
                 )
                 .await;
@@ -198,12 +201,4 @@ pub(crate) fn build_combined_context(summaries: &[db::ChapterSummaryRow]) -> Str
         })
         .collect::<Vec<_>>()
         .join("\n\n---\n\n")
-}
-
-pub(crate) fn chapter_source_hash(cleaned_text: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    cleaned_text.trim().hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
 }
