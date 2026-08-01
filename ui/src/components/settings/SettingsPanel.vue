@@ -65,7 +65,7 @@ function onSave(): void {
     </div>
 
     <footer v-if="showSaveFooter" class="settings-footer">
-      <button type="button" class="btn" @click="onSave">Save Settings</button>
+      <button type="button" class="btn" :disabled="!settingsCtx.isDirty.value" @click="onSave">Save Settings</button>
       <span v-if="savedMsg" class="settings-saved">{{ savedMsg }}</span>
     </footer>
   </div>

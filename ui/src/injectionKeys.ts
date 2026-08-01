@@ -96,6 +96,7 @@ export interface SettingsContext {
   modelFor: (fn: keyof ModelAssignments) => string;
   models: Ref<ModelInfo[]>;
   folderStructure: Ref<FolderStructure>;
+  isDirty: ComputedRef<boolean>;
   fetchModels: () => Promise<{ success: boolean; error: string }>;
   ensureModelsLoaded: () => Promise<void>;
   saveSettings: () => Promise<void>;

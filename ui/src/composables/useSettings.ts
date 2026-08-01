@@ -124,6 +124,28 @@ const modelAssignments = ref<ModelAssignments>(loadAssignments());
 const models = ref<ModelInfo[]>(loadModelsFromStorage());
 const folderStructure = ref<FolderStructure>({ ...DEFAULT_FOLDER_STRUCTURE, acts: [...DEFAULT_FOLDER_STRUCTURE.acts], extra: [...DEFAULT_FOLDER_STRUCTURE.extra] });
 
+// ── Dirty-state tracking ──────────────────────────────────────────────────────
+
+const savedSnapshot = ref({
+  theme: theme.value,
+  provider: provider.value,
+  modelAssignments: JSON.stringify(modelAssignments.value),
+});
+
+function updateSavedSnapshot(): void {
+  savedSnapshot.value = {
+    theme: theme.value,
+    provider: provider.value,
+    modelAssignments: JSON.stringify(modelAssignments.value),
+  };
+}
+
+const isDirty = computed(() => {
+  return theme.value !== savedSnapshot.value.theme
+    || provider.value !== savedSnapshot.value.provider
+    || JSON.stringify(modelAssignments.value) !== savedSnapshot.value.modelAssignments;
+});
+
 function loadModelsFromStorage(): ModelInfo[] {
   const stored = localStorage.getItem('cachedModels');
   if (stored) {
@@ -169,6 +191,7 @@ async function ensureModelsLoaded(): Promise<void> {
   if (modelsLoaded) return;
   modelsLoaded = true;
   await fetchModels();
+  updateSavedSnapshot();
 }
 
 async function saveSettings(): Promise<void> {
@@ -178,6 +201,7 @@ async function saveSettings(): Promise<void> {
   localStorage.setItem('model', modelAssignments.value.default);
   localStorage.setItem('proseModel', modelAssignments.value.prose);
   void saveThemeToServer(theme.value);
+  updateSavedSnapshot();
 }
 
 async function testCanopy(): Promise<{ success: boolean; error: string }> {
@@ -247,6 +271,7 @@ export function useSettings() {
     modelFor,
     models,
     folderStructure,
+    isDirty,
     fetchModels,
     ensureModelsLoaded,
     saveSettings,
