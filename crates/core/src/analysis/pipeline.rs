@@ -9,7 +9,7 @@ use crate::db;
 use crate::documents;
 use crate::models::KeywordResult;
 
-use super::chapters::phase1_summaries;
+use super::chapters::{phase1_summaries, any_chapter_needs_summary};
 use super::genres::{RankedGenre, ai_rank_genres, phase2_analyze, render_full_report};
 use super::categories::{match_categories_by_store, rank_by_discoverability};
 use super::bisac::ai_pick_bisac;
@@ -122,7 +122,13 @@ pub async fn check_analysis_state(app: AppCtx, story_id: String) -> AnalysisStat
                 summary_stale_count += 1;
                 summary_stale_files.push(file);
             }
-            Some(_) => {}
+            Some(_) => {
+                // Hash matches — still stale if the stored row is not AI prose.
+                if !db::chapter_has_current_summary(pool, &story_id, &file, &current_hash).await {
+                    summary_stale_count += 1;
+                    summary_stale_files.push(file);
+                }
+            }
         }
     }
 
@@ -913,8 +919,9 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
         if chapters.is_empty() {
             return err("No chapter documents found. Upload manuscript chapters first.");
         }
-        let existing_count = db::chapter_summary_count(&database.pool, &request.story_id).await;
-        if existing_count == 0 || request.force_resummarize {
+        let needs_refresh = request.force_resummarize
+            || any_chapter_needs_summary(&database.pool, &request.story_id, &chapters).await;
+        if needs_refresh {
             emit(&app, "Step 1: Summarizing chapters (AI)...");
             let (done, skipped) = phase1_summaries(
                 &app, &database, &chapters, &request.story_id,
@@ -922,7 +929,7 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
             ).await;
             emit(&app, &format!("  ✓ {} summarized, {} skipped.", done, skipped));
         } else {
-            emit(&app, "Step 1: Chapter summaries present — skipping.");
+            emit(&app, "Step 1: Chapter summaries up to date — skipping.");
         }
         if wants_report(selected, "chapter_summaries", platform) {
             let summaries = db::load_chapter_summaries(&database.pool, &request.story_id).await;

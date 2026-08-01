@@ -8,6 +8,9 @@ use crate::db;
 use crate::documents::{self, Document};
 use crate::prompts;
 
+/// Match desktop Phase 1 truncation for genre-signal summaries.
+pub const CHAPTER_SUMMARY_WORD_LIMIT: usize = 1500;
+
 pub async fn generate_summaries(app: AppCtx, request: FolderRequest) -> GenreResult {
     if !crate::stories::story_exists(&app.db, &request.story_id).await {
         return err("Story not found.");
@@ -41,10 +44,35 @@ pub async fn generate_summaries(app: AppCtx, request: FolderRequest) -> GenreRes
 
     GenreResult {
         success: true,
-        report: format!("\u{2713} {} summarized, {} already done.", done, skipped),
+        report: format!("\u{2713} {} summarized, {} already up to date.", done, skipped),
         error: String::new(),
         run_ts: String::new(),
     }
+}
+
+fn emit_summary_progress(app: &AppCtx, filename: &str, status: &str) {
+    let payload = serde_json::json!({ "filename": filename, "status": status }).to_string();
+    app.emit("summary:chapter-progress", &payload);
+}
+
+/// Whether any chapter is missing or stale relative to its current source hash.
+pub async fn any_chapter_needs_summary(
+    pool: &sqlx::PgPool,
+    story_id: &str,
+    chapters: &[Document],
+) -> bool {
+    for chapter in chapters {
+        let fname = documents::chapter_display_name(chapter);
+        let cleaned = crate::manuscript_fingerprint::clean_for_ai(&chapter.content);
+        if cleaned.is_empty() {
+            continue;
+        }
+        let source_hash = crate::manuscript_fingerprint::chapter_source_hash(&cleaned);
+        if !db::chapter_has_current_summary(pool, story_id, &fname, &source_hash).await {
+            return true;
+        }
+    }
+    false
 }
 
 pub(crate) async fn phase1_summaries(
@@ -61,13 +89,43 @@ pub(crate) async fn phase1_summaries(
 
     for (i, chapter) in chapters.iter().enumerate() {
         let fname = documents::chapter_display_name(chapter);
-
-        let already_done = db::chapter_summary_exists(&database.pool, story_id, &fname).await;
-        if already_done {
+        let content = chapter.content.trim();
+        if content.is_empty() {
             emit(
                 app,
-                &format!("  [{}/{}] SKIP: {}", i + 1, chapters.len(), fname),
+                &format!("  [{}/{}] SKIP (empty): {}", i + 1, chapters.len(), fname),
             );
+            emit_summary_progress(app, &fname, "skipped");
+            continue;
+        }
+
+        let cleaned = crate::manuscript_fingerprint::clean_for_ai(content);
+        if cleaned.is_empty() {
+            emit(
+                app,
+                &format!(
+                    "  [{}/{}] SKIP (empty after cleanup): {}",
+                    i + 1,
+                    chapters.len(),
+                    fname
+                ),
+            );
+            emit_summary_progress(app, &fname, "skipped");
+            continue;
+        }
+
+        let source_hash = crate::manuscript_fingerprint::chapter_source_hash(&cleaned);
+        if db::chapter_has_current_summary(&database.pool, story_id, &fname, &source_hash).await {
+            emit(
+                app,
+                &format!(
+                    "  [{}/{}] SKIP (up to date): {}",
+                    i + 1,
+                    chapters.len(),
+                    fname
+                ),
+            );
+            emit_summary_progress(app, &fname, "skipped");
             skipped += 1;
             continue;
         }
@@ -76,16 +134,12 @@ pub(crate) async fn phase1_summaries(
             app,
             &format!("  [{}/{}] Summarizing: {}", i + 1, chapters.len(), fname),
         );
+        emit_summary_progress(app, &fname, "started");
 
-        let content = chapter.content.trim();
-        if content.is_empty() {
-            emit(app, "    \u{26a0} Empty \u{2014} skipping.");
-            continue;
-        }
-
-        let word_count = content.split_whitespace().count();
+        let word_count = cleaned.split_whitespace().count();
         emit(app, &format!("    {} words", word_count));
 
+        let chapter_text = truncate_words(&cleaned, CHAPTER_SUMMARY_WORD_LIMIT);
         match summarize_chapter(
             app,
             provider,
@@ -93,7 +147,7 @@ pub(crate) async fn phase1_summaries(
             model,
             story_id,
             &fname,
-            &truncate_words(content, 8000),
+            &chapter_text,
         )
         .await
         {
@@ -101,11 +155,11 @@ pub(crate) async fn phase1_summaries(
                 let title = if !chapter.title.is_empty() {
                     chapter.title.clone()
                 } else {
-                    extract_title(content).unwrap_or_else(|| fname.clone())
+                    extract_title(content)
+                        .or_else(|| extract_title(&cleaned))
+                        .unwrap_or_else(|| fname.clone())
                 };
-                let cleaned = crate::manuscript_fingerprint::clean_for_ai(content);
-                let source_hash = crate::manuscript_fingerprint::chapter_source_hash(&cleaned);
-                let _ = db::save_chapter_summary(
+                match db::save_chapter_summary(
                     &database.pool,
                     story_id,
                     &fname,
@@ -114,12 +168,15 @@ pub(crate) async fn phase1_summaries(
                     &source_hash,
                     word_count as i64,
                 )
-                .await;
-                emit(
-                    app,
-                    &format!("    \u{2713} Done ({} signal chars)", signals.len()),
-                );
-                done += 1;
+                .await
+                {
+                    Ok(()) => {
+                        emit(app, &format!("    \u{2713} {} — summary saved", fname));
+                        emit_summary_progress(app, &fname, "done");
+                        done += 1;
+                    }
+                    Err(e) => emit(app, &format!("    \u{26a0} Save error: {}", e)),
+                }
             }
             Err(e) => emit(app, &format!("    \u{26a0} AI error: {}", e)),
         }
@@ -132,7 +189,10 @@ pub(crate) async fn phase1_summaries(
 
     emit(
         app,
-        &format!("Phase 1 complete \u{2014} {} new, {} skipped.", done, skipped),
+        &format!(
+            "Phase 1 complete \u{2014} {} summarized, {} skipped.",
+            done, skipped
+        ),
     );
     (done, skipped)
 }

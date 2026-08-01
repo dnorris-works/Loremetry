@@ -31,6 +31,13 @@ export interface GenreResult {
   run_ts: string;
 }
 
+export type SummaryFileStatus = 'pending' | 'active' | 'done' | 'skipped';
+
+export interface SummaryChapterProgress {
+  filename: string;
+  status: 'started' | 'done' | 'skipped';
+}
+
 export interface ModelInfo {
   id: string;
   owned_by: string;

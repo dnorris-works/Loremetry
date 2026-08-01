@@ -3,12 +3,20 @@ import {
   invoke,
   connectJobLogStream,
   disconnectJobLogStream,
+  connectAnalysisLogStream,
+  disconnectAnalysisLogStream,
   cancelJob,
   waitForJob,
   saveZeigarnikReport,
   saveReadabilityReport,
 } from '../api';
-import type { AnalysisState, JobEnqueueResult, LogLine } from '../types';
+import type {
+  AnalysisState,
+  JobEnqueueResult,
+  LogLine,
+  SummaryChapterProgress,
+  SummaryFileStatus,
+} from '../types';
 import { listCachedChapters } from '../lib/manuscriptCache';
 import { cachedChapterToInput as zeigarnikChapterInput, runZeigarnikAnalysis } from '../lib/zeigarnik';
 import { cachedChapterToInput as readabilityChapterInput, runReadabilityAnalysis } from '../lib/readability';
@@ -19,7 +27,40 @@ import { refreshAiSpend } from './useAiSpend';
 const analysisState = ref<AnalysisState | null>(null);
 const isWorking = ref(false);
 const logLines = ref<LogLine[]>([]);
+const summaryFileProgress = ref<Record<string, SummaryFileStatus>>({});
 let currentJobId = '';
+
+function resetSummaryFileProgress(files: string[]): void {
+  const next: Record<string, SummaryFileStatus> = {};
+  for (const file of files) {
+    next[file] = 'pending';
+  }
+  summaryFileProgress.value = next;
+}
+
+function beginSummaryTracking(): void {
+  const s = analysisState.value;
+  if (!s) {
+    summaryFileProgress.value = {};
+    return;
+  }
+  resetSummaryFileProgress([
+    ...(s.summary_missing_files || []),
+    ...(s.summary_stale_files || []),
+  ]);
+}
+
+function applySummaryProgress(payload: SummaryChapterProgress): void {
+  const { filename, status } = payload;
+  if (!filename) return;
+  if (status === 'started') {
+    summaryFileProgress.value = { ...summaryFileProgress.value, [filename]: 'active' };
+    return;
+  }
+  if (status === 'done' || status === 'skipped') {
+    summaryFileProgress.value = { ...summaryFileProgress.value, [filename]: status };
+  }
+}
 
 function classifyLogLine(msg: string): LogLine {
   const trimmed = msg.trimStart();
@@ -80,7 +121,7 @@ function getSettings() {
 
 async function finishQueuedJob(jobId: string): Promise<void> {
   currentJobId = jobId;
-  connectJobLogStream(jobId, appendLog);
+  connectJobLogStream(jobId, appendLog, applySummaryProgress);
   try {
     const job = await waitForJob(jobId);
     if (job.status === 'completed' && job.result && !job.result.success) {
@@ -107,6 +148,7 @@ async function runAnalyze(
 
   clearLog();
   isWorking.value = true;
+  beginSummaryTracking();
   const runTime = new Date().toISOString();
 
   try {
@@ -129,6 +171,7 @@ async function runAnalyze(
   } finally {
     isWorking.value = false;
     void refreshAiSpend();
+    await refreshState(folder);
     saveLog(folder, runTime);
   }
 }
@@ -151,6 +194,7 @@ async function runCraftAnalysis(
   const { provider } = getSettings();
   clearLog();
   isWorking.value = true;
+  beginSummaryTracking();
 
   let serverSelected = [...selected];
   const resolvedSeriesId = continuityScope.mode === 'series'
@@ -214,6 +258,7 @@ async function runCraftAnalysis(
   } finally {
     isWorking.value = false;
     void refreshAiSpend();
+    await refreshState(folder);
     saveLog(folder, new Date().toISOString());
   }
 }
@@ -237,6 +282,49 @@ async function runMarketIntel(folder: string): Promise<void> {
     void refreshAiSpend();
     saveLog(folder, new Date().toISOString());
   }
+}
+
+async function runSummaries(folder: string): Promise<void> {
+  if (!folder) { appendLog('✗ No story selected.'); return; }
+  const s = useSettings();
+  const setupIssues = s.checkPublishAnalyzeSetup();
+  if (setupIssues.length > 0) {
+    appendLog('✗ Setup required before summarizing:\n' + setupIssues.map(i => `• ${i.message}`).join('\n'));
+    return;
+  }
+
+  clearLog();
+  isWorking.value = true;
+  beginSummaryTracking();
+  hasRunHint();
+  const runTime = new Date().toISOString();
+
+  connectAnalysisLogStream(appendLog, applySummaryProgress);
+  try {
+    const report = await invoke<string>('refresh_chapter_summaries', {
+      request: {
+        folder,
+        provider: s.provider.value,
+        api_key: '',
+        model: s.modelFor('summaries') || s.model.value,
+      },
+    });
+    appendLog(report || '✓ Chapter summaries refreshed.');
+  } catch (e) {
+    appendLog('✗ ' + String(e));
+  } finally {
+    disconnectAnalysisLogStream();
+    isWorking.value = false;
+    void refreshAiSpend();
+    await refreshState(folder);
+    saveLog(folder, runTime);
+  }
+}
+
+/** Soft signal so Analyzer can show LogStream during summary-only runs. */
+const summaryRunActive = ref(false);
+function hasRunHint(): void {
+  summaryRunActive.value = true;
 }
 
 async function cancelOperation(): Promise<void> {
@@ -271,10 +359,13 @@ export function useAnalysis() {
     analysisState,
     isWorking,
     logLines,
+    summaryFileProgress,
+    summaryRunActive,
     refreshState,
     runAnalyze,
     runCraftAnalysis,
     runMarketIntel,
+    runSummaries,
     cancelOperation,
     clearLog,
     appendLog,

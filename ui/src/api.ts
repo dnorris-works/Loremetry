@@ -225,15 +225,28 @@ export function listen(event: string, handler: SseHandler): Unlisten {
   };
 }
 
-/** Analysis log channels — connect only while a job is running (avoids idle SSE through proxies). */
+/** Analysis log channels — connect only while analysis is running (avoids idle SSE through proxies). */
 let analysisLogUnsubs: Unlisten[] | null = null;
 
-export function connectAnalysisLogStream(onLine: (message: string) => void): void {
+export function connectAnalysisLogStream(
+  onLine: (message: string) => void,
+  onSummaryProgress?: (payload: import('./types').SummaryChapterProgress) => void,
+): void {
   if (analysisLogUnsubs) return;
-  const handler = (e: { payload: string }) => onLine(e.payload);
+  const logHandler = (e: { payload: string }) => onLine(e.payload);
+  const progressHandler = (e: { payload: string }) => {
+    if (!onSummaryProgress) return;
+    try {
+      const data = JSON.parse(e.payload) as import('./types').SummaryChapterProgress;
+      if (data?.filename) onSummaryProgress(data);
+    } catch {
+      /* ignore malformed progress payloads */
+    }
+  };
   analysisLogUnsubs = [
-    listen('genre:log', handler),
-    listen('cdp:log', handler),
+    listen('genre:log', logHandler),
+    listen('cdp:log', logHandler),
+    listen('summary:chapter-progress', progressHandler),
   ];
 }
 
@@ -248,13 +261,27 @@ export function disconnectAnalysisLogStream(): void {
 let jobEventSource: EventSource | null = null;
 
 /** SSE log stream for a specific background job (worker process). */
-export function connectJobLogStream(jobId: string, onLine: (message: string) => void): void {
+export function connectJobLogStream(
+  jobId: string,
+  onLine: (message: string) => void,
+  onSummaryProgress?: (payload: import('./types').SummaryChapterProgress) => void,
+): void {
   disconnectJobLogStream();
   const es = new EventSource(`/api/events?job_id=${encodeURIComponent(jobId)}`);
   jobEventSource = es;
-  const handler = (e: Event) => onLine(String((e as MessageEvent).data ?? ''));
-  es.addEventListener('genre:log', handler);
-  es.addEventListener('cdp:log', handler);
+  const logHandler = (e: Event) => onLine(String((e as MessageEvent).data ?? ''));
+  const progressHandler = (e: Event) => {
+    if (!onSummaryProgress) return;
+    try {
+      const data = JSON.parse(String((e as MessageEvent).data ?? '')) as import('./types').SummaryChapterProgress;
+      if (data?.filename) onSummaryProgress(data);
+    } catch {
+      /* ignore */
+    }
+  };
+  es.addEventListener('genre:log', logHandler);
+  es.addEventListener('cdp:log', logHandler);
+  es.addEventListener('summary:chapter-progress', progressHandler);
 }
 
 export function disconnectJobLogStream(): void {

@@ -1471,6 +1471,32 @@ pub async fn chapter_summary_exists(pool: &PgPool, story_id: &str, file: &str) -
     .unwrap_or(false)
 }
 
+/// True when the chapter has a current AI prose summary for this content hash.
+pub async fn chapter_has_current_summary(
+    pool: &PgPool,
+    story_id: &str,
+    file: &str,
+    source_hash: &str,
+) -> bool {
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT source_hash, signals FROM chapter_summaries
+         WHERE story_id = $1 AND file = $2",
+    )
+    .bind(story_id)
+    .bind(file)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    match row {
+        Some((hash, signals)) => {
+            hash == source_hash && crate::analysis::chapters::is_prose_summary(&signals)
+        }
+        None => false,
+    }
+}
+
 pub async fn save_chapter_summary(
     pool: &PgPool, story_id: &str, file: &str, title: &str, signals: &str, source_hash: &str, word_count: i64,
 ) -> Result<(), String> {
@@ -1522,10 +1548,14 @@ pub async fn load_chapter_summaries(pool: &PgPool, story_id: &str) -> Vec<Chapte
     .map(|rows| {
         rows.into_iter()
             .filter_map(|r| {
+                let signals: String = r.try_get(2).ok()?;
+                if !crate::analysis::chapters::is_prose_summary(&signals) {
+                    return None;
+                }
                 Some(ChapterSummaryRow {
                     file: r.try_get(0).ok()?,
                     title: r.try_get(1).ok()?,
-                    signals: r.try_get(2).ok()?,
+                    signals,
                     word_count: r.try_get(3).ok()?,
                 })
             })

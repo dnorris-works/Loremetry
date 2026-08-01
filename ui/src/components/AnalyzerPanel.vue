@@ -428,21 +428,7 @@ async function maybeRefreshSummariesBeforeRun(folder: string): Promise<boolean> 
 
   if (!confirm(msg)) return false;
 
-  try {
-    await invoke('refresh_chapter_summaries', {
-      request: {
-        folder,
-        provider: settings.provider.value,
-        api_key: '',
-        model: settings.modelFor('summaries'),
-      },
-    });
-    await analysisCtx.refreshState(folder);
-  } catch (e) {
-    console.error('refresh_chapter_summaries:', e);
-    alert('Failed to refresh chapter summaries. Please try again.');
-    return false;
-  }
+  await analysisCtx.runSummaries(folder);
 
   const s = analysisCtx.analysisState.value;
   if (s && (s.summary_missing_count > 0 || s.summary_stale_count > 0)) {
@@ -640,19 +626,20 @@ async function onRefreshSummaries(): Promise<void> {
   const folder = storiesCtx.activeFolder.value;
   if (!folder) return;
   hasRun.value = true;
-  try {
-    await invoke('refresh_chapter_summaries', {
-      request: {
-        folder,
-        provider: settings.provider.value,
-        api_key: '',
-        model: settings.modelFor('summaries'),
-      },
-    });
-    await analysisCtx.refreshState(folder);
-  } catch (e) {
-    console.error('refresh_chapter_summaries:', e);
-  }
+  analysisCtx.summaryRunActive.value = true;
+  await analysisCtx.runSummaries(folder);
+}
+
+function summaryFileStatus(file: string): string {
+  return analysisCtx.summaryFileProgress.value[file] || '';
+}
+
+function summaryFileMarker(file: string): string {
+  const status = summaryFileStatus(file);
+  if (status === 'done' || status === 'skipped') return '✓';
+  if (status === 'active') return '…';
+  if (status === 'pending') return '○';
+  return '';
 }
 </script>
 
@@ -742,17 +729,39 @@ async function onRefreshSummaries(): Promise<void> {
       >Refresh Summaries</button>
     </div>
 
-    <div v-if="summaryStatus.needsRefresh" class="summary-issues">
-      <div v-if="summaryIssueFiles.missing.length > 0">
-        <span class="summary-issues-label">Missing summaries:</span>
-        <ul class="summary-file-list">
-          <li v-for="f in summaryIssueFiles.missing" :key="`missing-${f}`">{{ f }}</li>
+    <div v-if="summaryStatus.needsRefresh || Object.keys(analysisCtx.summaryFileProgress.value).length" class="summary-issues">
+      <div v-if="summaryIssueFiles.missing.length > 0 || Object.keys(analysisCtx.summaryFileProgress.value).length">
+        <span v-if="summaryIssueFiles.missing.length > 0" class="summary-issues-label">Missing summaries:</span>
+        <ul v-if="summaryIssueFiles.missing.length > 0" class="summary-file-list">
+          <li
+            v-for="f in summaryIssueFiles.missing"
+            :key="`missing-${f}`"
+            class="summary-file-item"
+            :class="{
+              'summary-file-done': summaryFileStatus(f) === 'done' || summaryFileStatus(f) === 'skipped',
+              'summary-file-active': summaryFileStatus(f) === 'active',
+            }"
+          >
+            <span aria-hidden="true">{{ summaryFileMarker(f) }}</span>
+            {{ f }}
+          </li>
         </ul>
       </div>
       <div v-if="summaryIssueFiles.stale.length > 0" class="summary-stale-block">
         <span class="summary-issues-label">Changed since last scan:</span>
         <ul class="summary-file-list">
-          <li v-for="f in summaryIssueFiles.stale" :key="`stale-${f}`">{{ f }}</li>
+          <li
+            v-for="f in summaryIssueFiles.stale"
+            :key="`stale-${f}`"
+            class="summary-file-item"
+            :class="{
+              'summary-file-done': summaryFileStatus(f) === 'done' || summaryFileStatus(f) === 'skipped',
+              'summary-file-active': summaryFileStatus(f) === 'active',
+            }"
+          >
+            <span aria-hidden="true">{{ summaryFileMarker(f) }}</span>
+            {{ f }}
+          </li>
         </ul>
       </div>
     </div>
@@ -882,13 +891,16 @@ async function onRefreshSummaries(): Promise<void> {
     </div>
 
     <!-- Activity indicator -->
-    <div v-if="hasRun && analysisCtx.isWorking.value" class="activity-indicator">
+    <div
+      v-if="(hasRun || analysisCtx.summaryRunActive.value) && analysisCtx.isWorking.value"
+      class="activity-indicator"
+    >
       <div class="spinner"></div>
       <span class="activity-text">Working...</span>
     </div>
 
     <!-- Log output (only shown after first run) -->
-    <LogStream v-if="hasRun" />
+    <LogStream v-if="hasRun || analysisCtx.summaryRunActive.value" />
   </div>
 </template>
 
@@ -1310,7 +1322,23 @@ async function onRefreshSummaries(): Promise<void> {
 
 .summary-file-list {
   margin: 0;
-  padding-left: 1.2em;
+  padding-left: 0;
+  list-style: none;
+}
+
+.summary-file-item {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.summary-file-done {
+  color: #1a7f37;
+}
+
+.summary-file-active {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* ── Actions ───────────────────────────────────────────────────────────────── */

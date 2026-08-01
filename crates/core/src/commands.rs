@@ -693,7 +693,11 @@ pub async fn estimate_summary_refresh_cost(
     let summary_hashes = crate::db::load_chapter_summary_hashes(&app.db.pool, &request.story_id).await;
     let trunc_limit = {
         let params = crate::db::load_report_cost_params(&app.db.pool, "chapter_summaries").await;
-        if params.truncation > 0 { params.truncation } else { 2000 }
+        if params.truncation > 0 {
+            params.truncation
+        } else {
+            crate::analysis::chapters::CHAPTER_SUMMARY_WORD_LIMIT
+        }
     };
 
     let mut files_to_refresh: Vec<String> = Vec::new();

@@ -12,11 +12,7 @@ import type {
   LogLine,
   Finding,
   ModelInfo,
-} from './types';
-import type { PlatformId } from './composables/usePlatform';
-import type { ContinuityScope } from './composables/useAnalysis';
-import type { ModelAssignments, FolderStructure, ThemeMode } from './composables/useSettings';
-import type {
+  SummaryFileStatus,
   AdCampaign,
   AdCampaignDetail,
   AdCreative,
@@ -26,6 +22,9 @@ import type {
   AdAudienceNote,
   AdPlatformAccount,
 } from './types';
+import type { PlatformId } from './composables/usePlatform';
+import type { ContinuityScope } from './composables/useAnalysis';
+import type { ModelAssignments, FolderStructure, ThemeMode } from './composables/useSettings';
 
 // ── Stories ───────────────────────────────────────────────────────────────────
 
@@ -50,6 +49,8 @@ export interface AnalysisContext {
   analysisState: Ref<AnalysisState | null>;
   isWorking: Ref<boolean>;
   logLines: Ref<LogLine[]>;
+  summaryFileProgress: Ref<Record<string, SummaryFileStatus>>;
+  summaryRunActive: Ref<boolean>;
   refreshState: (folder: string) => Promise<void>;
   runAnalyze: (
     folder: string,
@@ -65,6 +66,7 @@ export interface AnalysisContext {
     seriesIdForAudits?: number,
   ) => Promise<void>;
   runMarketIntel: (folder: string) => Promise<void>;
+  runSummaries: (folder: string) => Promise<void>;
   cancelOperation: () => Promise<void>;
   clearLog: () => void;
   appendLog: (msg: string) => void;
