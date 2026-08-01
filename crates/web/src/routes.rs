@@ -26,6 +26,7 @@ use tower_http::trace::TraceLayer;
 use crate::admin;
 use crate::auth::{self, Authenticated};
 use crate::error::{json_error, json_error_status, ok_json, result_to_response};
+use crate::health;
 use crate::invoke;
 use crate::sse;
 use crate::state::AppState;
@@ -111,6 +112,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/models", get(list_models))
         .route("/settings/test-canopy", post(test_canopy))
         .route("/settings/test-dataforseo", post(test_dataforseo))
+        // Health
+        .route("/health/services", get(health::service_health))
         .nest("/admin", admin)
         // Chat / costs / suggests
         .route("/chat", post(chat))

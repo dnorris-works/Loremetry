@@ -1,6 +1,7 @@
 mod auth;
 mod admin;
 mod error;
+mod health;
 mod invoke;
 mod routes;
 mod sse;
