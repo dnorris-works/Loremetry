@@ -6,6 +6,7 @@ import {
   deleteStoryDocument,
   removeCachedChapter,
   downloadStoryZip,
+  type UploadFileStatus,
 } from '../api';
 import { storiesKey, showPanelKey, analysisKey } from '../injectionKeys';
 import type { DocumentMeta, ManuscriptKind } from '../types';
@@ -26,6 +27,13 @@ const uploadMessage = ref('');
 const importErrors = ref<string[]>([]);
 const error = ref('');
 const documents = ref<DocumentMeta[]>([]);
+
+type ImportRow = {
+  path: string;
+  status: UploadFileStatus;
+  detail?: string;
+};
+const importQueue = ref<ImportRow[]>([]);
 
 const wizardStep = ref(0);
 
@@ -102,8 +110,32 @@ async function onUpload(
   error.value = '';
   uploadMessage.value = '';
   importErrors.value = [];
+  importQueue.value = [];
   try {
-    const { uploaded, updated, skipped, errors } = await uploadDocuments(storyId, files, kind, { replace });
+    const { uploaded, updated, skipped, errors } = await uploadDocuments(
+      storyId,
+      files,
+      kind,
+      {
+        replace,
+        onProgress: (event) => {
+          const idx = importQueue.value.findIndex(r => r.path === event.path);
+          if (idx >= 0) {
+            importQueue.value[idx] = {
+              path: event.path,
+              status: event.status,
+              detail: event.detail,
+            };
+          } else {
+            importQueue.value.push({
+              path: event.path,
+              status: event.status,
+              detail: event.detail,
+            });
+          }
+        },
+      },
+    );
     const parts: string[] = [];
     if (uploaded > 0) {
       parts.push(`${uploaded} new`);
@@ -122,6 +154,16 @@ async function onUpload(
     error.value = String(e);
   } finally {
     uploading.value = false;
+  }
+}
+
+function importStatusLabel(row: ImportRow): string {
+  switch (row.status) {
+    case 'pending': return 'Waiting…';
+    case 'uploading': return 'Saving…';
+    case 'done': return row.detail === 'updated' ? 'Updated' : 'Saved';
+    case 'skipped': return 'Unchanged';
+    case 'error': return row.detail || 'Failed';
   }
 }
 
@@ -254,13 +296,43 @@ async function onDownloadZip(): Promise<void> {
           Point at the folder where your chapter files live (<code>.md</code>, <code>.docx</code>, or a <code>.zip</code> export).
           Subfolders (e.g. <code>Act-1/</code>) are kept for order. Re-upload merges changed files only.
         </p>
+
+        <div v-if="importQueue.length" class="import-progress">
+          <div class="import-progress-head">
+            <span class="import-progress-title">
+              {{ uploading ? 'Importing chapters…' : 'Last import' }}
+            </span>
+            <span class="import-progress-count">
+              {{ importQueue.filter(r => r.status === 'done' || r.status === 'skipped').length }}
+              / {{ importQueue.length }}
+            </span>
+          </div>
+          <ul class="import-queue">
+            <li
+              v-for="row in importQueue"
+              :key="row.path"
+              class="import-row"
+              :class="`import-row--${row.status}`"
+            >
+              <span class="import-marker" aria-hidden="true">
+                <template v-if="row.status === 'done' || row.status === 'skipped'">✓</template>
+                <template v-else-if="row.status === 'error'">✗</template>
+                <template v-else-if="row.status === 'uploading'">…</template>
+                <template v-else>○</template>
+              </span>
+              <span class="import-path" :title="row.path">{{ row.path }}</span>
+              <span class="import-status">{{ importStatusLabel(row) }}</span>
+            </li>
+          </ul>
+        </div>
+
         <ul v-if="chapters.length" class="doc-list">
           <li v-for="doc in chapters" :key="doc.id" class="doc-row">
             <span class="doc-name" :title="doc.path_hint">{{ chapterLabel(doc) }}</span>
             <button class="doc-delete" title="Remove" @click="onDelete(doc)">&times;</button>
           </li>
         </ul>
-        <p v-else class="section-empty">No chapters yet — upload at least one to run analysis.</p>
+        <p v-else-if="!importQueue.length" class="section-empty">No chapters yet — upload at least one to run analysis.</p>
       </section>
 
       <!-- Wizard step 2 / Manage: Bible -->
@@ -653,6 +725,108 @@ async function onDownloadZip(): Promise<void> {
   color: var(--accent);
   font-size: 12px;
   margin-top: 8px;
+}
+
+.import-progress {
+  margin: 10px 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface2, var(--surface));
+  overflow: hidden;
+}
+
+.import-progress-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.import-progress-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.import-progress-count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.import-queue {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.import-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.import-marker {
+  flex-shrink: 0;
+  width: 1em;
+  text-align: center;
+  font-weight: 700;
+}
+
+.import-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.import-status {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.import-row--pending .import-marker {
+  color: var(--text-muted);
+}
+
+.import-row--uploading {
+  color: var(--text);
+}
+
+.import-row--uploading .import-status {
+  color: var(--accent);
+}
+
+.import-row--done {
+  color: var(--text);
+}
+
+.import-row--done .import-marker,
+.import-row--done .import-path,
+.import-row--done .import-status {
+  color: #1a7f37;
+}
+
+.import-row--skipped .import-marker,
+.import-row--skipped .import-status {
+  color: #1a7f37;
+}
+
+.import-row--skipped .import-path {
+  color: var(--text-muted);
+}
+
+.import-row--error .import-marker,
+.import-row--error .import-status {
+  color: var(--danger);
 }
 
 .import-errors {

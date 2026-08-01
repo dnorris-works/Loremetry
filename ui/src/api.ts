@@ -7,7 +7,6 @@ import {
   hashText,
   putCachedChapter,
   removeCachedChapter,
-  type CachedChapter,
 } from './lib/manuscriptCache';
 
 const BYPASS_STORAGE_KEY = 'loremetry_admin_bypass';
@@ -310,51 +309,31 @@ export interface UploadResult {
   errors: string[];
 }
 
-export async function uploadDocuments(
+export type UploadFileStatus = 'pending' | 'uploading' | 'done' | 'skipped' | 'error';
+
+export type UploadProgressEvent = {
+  path: string;
+  status: UploadFileStatus;
+  detail?: string;
+};
+
+async function postDocumentUpload(
   storyId: string,
-  files: FileList | File[],
-  kind: ManuscriptKind = 'chapter',
-  options?: { replace?: boolean },
-): Promise<UploadResult> {
-  assertAppSession();
-  const prepared = prepareUploadFiles(files, kind);
-  if (prepared.length === 0) {
-    throw new Error(
-      kind === 'chapter'
-        ? 'No .md or .txt files found. Choose a folder of chapter files.'
-        : 'No files selected.',
-    );
-  }
-
-  type UploadItem = { file: File; path: string; content: string; hash: string };
-  const toUpload: UploadItem[] = [];
-  let skipped = 0;
-
-  for (const { file, path } of prepared) {
-    const content = await file.text();
-    if (kind === 'chapter') {
-      const hash = await hashText(content);
-      const cached = await getCachedChapter(storyId, path);
-      if (cached?.hash === hash) {
-        skipped += 1;
-        continue;
-      }
-      toUpload.push({ file, path, content, hash });
-    } else {
-      toUpload.push({ file, path, content, hash: await hashText(content) });
-    }
-  }
-
-  if (toUpload.length === 0) {
-    return { uploaded: 0, updated: 0, skipped, errors: [] };
-  }
-
+  items: { file: File; path: string }[],
+  kind: ManuscriptKind,
+  replace: boolean,
+): Promise<{
+  documents: { id: number; path_hint: string; title: string; action?: string }[];
+  updated: number;
+  skipped: number;
+  errors: string[];
+}> {
   const fd = new FormData();
-  for (const { file, path } of toUpload) {
+  for (const { file, path } of items) {
     fd.append('files', file, path);
   }
   const params = new URLSearchParams({ kind });
-  if (options?.replace) params.set('replace', 'true');
+  if (replace) params.set('replace', 'true');
   const headers = await buildAuthHeaders();
   const res = await fetch(
     `/api/stories/${encodeURIComponent(storyId)}/documents/upload?${params}`,
@@ -365,7 +344,6 @@ export async function uploadDocuments(
     throw new Error((data as { error?: string }).error || 'Upload failed');
   }
   const data = await res.json() as {
-    success?: boolean;
     errors?: string[];
     updated?: number;
     skipped?: number;
@@ -376,43 +354,138 @@ export async function uploadDocuments(
       action?: string;
     }[];
   };
+  return {
+    documents: data.documents ?? [],
+    updated: data.updated ?? 0,
+    skipped: data.skipped ?? 0,
+    errors: data.errors ?? [],
+  };
+}
 
-  const serverSkipped = data.skipped ?? 0;
-  const serverUpdated = data.updated ?? 0;
-  const errors = data.errors ?? [];
-  const created = (data.documents ?? []).filter(d => d.action !== 'updated').length;
-
-  if (errors.length && !data.documents?.length) {
-    throw new Error(errors.join('; '));
+export async function uploadDocuments(
+  storyId: string,
+  files: FileList | File[],
+  kind: ManuscriptKind = 'chapter',
+  options?: { replace?: boolean; onProgress?: (event: UploadProgressEvent) => void },
+): Promise<UploadResult> {
+  assertAppSession();
+  const prepared = prepareUploadFiles(files, kind);
+  if (prepared.length === 0) {
+    const total = Array.from(files).length;
+    throw new Error(
+      kind === 'chapter'
+        ? total > 0
+          ? `Found ${total} file(s) but none were .md, .txt, .docx, or .zip chapter files.`
+          : 'No .md, .txt, .docx, or .zip files found. Choose a folder of chapter files.'
+        : 'No files selected.',
+    );
   }
 
-  const docsByPath = new Map(
-    (data.documents ?? []).map(d => [d.path_hint, d]),
-  );
+  const onProgress = options?.onProgress;
+  const replace = options?.replace === true;
 
-  if (kind === 'chapter') {
-    const now = new Date().toISOString();
-    await Promise.all(toUpload.map(async (item) => {
-      const doc = docsByPath.get(item.path);
-      const entry: CachedChapter = {
+  for (const { path } of prepared) {
+    onProgress?.({ path, status: 'pending' });
+  }
+
+  // Bible / reference: one batch (usually few files).
+  if (kind !== 'chapter') {
+    for (const { path } of prepared) {
+      onProgress?.({ path, status: 'uploading' });
+    }
+    try {
+      const result = await postDocumentUpload(storyId, prepared, kind, replace);
+      if (result.errors.length && !result.documents.length) {
+        throw new Error(result.errors.join('; '));
+      }
+      const created = result.documents.filter(d => d.action !== 'updated').length;
+      for (const { path } of prepared) {
+        const doc = result.documents.find(d => d.path_hint === path);
+        onProgress?.({
+          path,
+          status: doc || result.documents.length ? 'done' : 'error',
+          detail: doc?.action === 'updated' ? 'updated' : 'saved',
+        });
+      }
+      return {
+        uploaded: created,
+        updated: result.updated,
+        skipped: result.skipped,
+        errors: result.errors,
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      for (const { path } of prepared) {
+        onProgress?.({ path, status: 'error', detail: msg });
+      }
+      throw e;
+    }
+  }
+
+  // Chapters: upload one at a time so the UI can turn each row green as it hits the DB.
+  let uploaded = 0;
+  let updated = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  for (const item of prepared) {
+    let content = '';
+    try {
+      content = await item.file.text();
+    } catch {
+      content = '';
+    }
+    const hash = await hashText(
+      content || `${item.file.size}:${item.file.name}:${item.file.lastModified}`,
+    );
+    const cached = await getCachedChapter(storyId, item.path);
+    if (cached?.hash === hash) {
+      skipped += 1;
+      onProgress?.({ path: item.path, status: 'skipped', detail: 'unchanged' });
+      continue;
+    }
+
+    onProgress?.({ path: item.path, status: 'uploading' });
+    try {
+      const result = await postDocumentUpload(storyId, [item], kind, false);
+      if (result.errors.length && !result.documents.length) {
+        throw new Error(result.errors.join('; '));
+      }
+      errors.push(...result.errors);
+      updated += result.updated;
+      skipped += result.skipped;
+      uploaded += result.documents.filter(d => d.action !== 'updated').length;
+
+      const doc = result.documents.find(d => d.path_hint === item.path) ?? result.documents[0];
+      const now = new Date().toISOString();
+      await putCachedChapter({
         storyId,
         path: item.path,
-        content: item.content,
-        hash: item.hash,
-        wordCount: countWords(item.content),
+        content,
+        hash,
+        wordCount: countWords(content),
         docId: doc?.id ?? null,
         updatedAt: now,
-      };
-      await putCachedChapter(entry);
-    }));
+      });
+
+      const detail = result.skipped > 0 && !doc
+        ? 'unchanged'
+        : doc?.action === 'updated'
+          ? 'updated'
+          : 'saved';
+      onProgress?.({
+        path: item.path,
+        status: detail === 'unchanged' ? 'skipped' : 'done',
+        detail,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      errors.push(`${item.path}: ${msg}`);
+      onProgress?.({ path: item.path, status: 'error', detail: msg });
+    }
   }
 
-  return {
-    uploaded: created,
-    updated: serverUpdated,
-    skipped: skipped + serverSkipped,
-    errors,
-  };
+  return { uploaded, updated, skipped, errors };
 }
 
 export async function saveZeigarnikReport(
