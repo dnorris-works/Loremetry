@@ -1,13 +1,16 @@
 // analysis/ai_isms.rs — AI-assisted check for AI-sounding prose habits.
 //
-// Mirrors Show Don't Tell: per-chapter LLM scan, JSON report with flagged
+// Mirrors Show Don't Tell: batched LLM scan, JSON report with flagged
 // passages + context, plus a suggest-fix command for rewrites.
 
 use super::{emit, err, GenreResult};
 use super::chapters::extract_title;
 use crate::app_ctx::AppCtx;
+use crate::batch_prompt::{self, BatchChapterItem, CachedBatchItem, CRAFT_BATCH_WORD_BUDGET};
 use crate::db;
 use crate::documents;
+use crate::manuscript_fingerprint;
+use crate::prompts::{self, BibleTier};
 
 #[derive(serde::Deserialize)]
 pub struct AiIsmsRequest {
@@ -44,8 +47,8 @@ async fn check_inner(app: AppCtx, request: AiIsmsRequest) -> GenreResult {
     if !crate::stories::story_exists(&app.db, &request.story_id).await {
         return err("Story not found.");
     }
-    if request.api_key.is_empty() || request.model.is_empty() {
-        return err("AI-isms requires an API key and model. Set them in Settings.");
+    if let Err(msg) = crate::ai::ai_ready(&request.provider, &request.api_key, &request.model) {
+        return err(&msg);
     }
 
     crate::reset_cancel();
@@ -58,16 +61,14 @@ async fn check_inner(app: AppCtx, request: AiIsmsRequest) -> GenreResult {
     };
     if chapters.is_empty() { return err("No chapter documents found. Upload manuscript chapters first."); }
 
-    let bible = crate::prompts::load_bible_for_story(&app.db, &request.story_id, &request.bible_path).await;
+    let bible = prompts::load_bible_tiered(&app.db, &request.story_id, &request.bible_path, BibleTier::Minimal).await;
 
     emit(&app, &format!("Checking {} chapter(s) for AI-isms...", chapters.len()));
 
-    let mut all_findings: Vec<serde_json::Value> = Vec::new();
-    let mut total_violations = 0usize;
+    let mut chapter_meta: Vec<(usize, String, String)> = Vec::new();
+    let mut batch_items: Vec<CachedBatchItem> = Vec::new();
 
     for (i, chapter) in chapters.iter().enumerate() {
-        if crate::is_cancelled() { return err("Cancelled."); }
-
         let content = chapter.content.trim();
         if content.is_empty() { continue; }
 
@@ -78,32 +79,60 @@ async fn check_inner(app: AppCtx, request: AiIsmsRequest) -> GenreResult {
             extract_title(content).unwrap_or_else(|| filename.clone())
         };
 
-        let processed = match crate::prompts::get_preprocessed(
-            &database.pool, &request.story_id, &filename, "ai_isms_check", &chapter.updated_at,
+        let cleaned = manuscript_fingerprint::clean_for_ai(content);
+        let source_hash = manuscript_fingerprint::chapter_source_hash(&cleaned);
+
+        let processed = match prompts::get_preprocessed(
+            &database.pool, &request.story_id, &filename, "ai_isms_check", &source_hash,
         )
         .await
         {
             Some(p) => p,
             None => {
-                let p = crate::prompts::preprocess_for_ai_isms(content);
-                let _ = crate::prompts::store_preprocessed(
-                    &database.pool, &request.story_id, &filename, "ai_isms_check", &p, &chapter.updated_at,
+                let p = prompts::preprocess_for_ai_isms(content);
+                let _ = prompts::store_preprocessed(
+                    &database.pool, &request.story_id, &filename, "ai_isms_check", &p, &source_hash,
                 )
                 .await;
                 p
             }
         };
 
-        emit(&app, &format!("[{}/{}] {} — checking...", i + 1, chapters.len(), filename));
+        chapter_meta.push((i, filename.clone(), title.clone()));
+        batch_items.push(CachedBatchItem {
+            item: BatchChapterItem { file: filename, title, text: processed },
+            source_hash,
+        });
+    }
 
-        let violations = match extract_violations(
-            &app, &request.story_id, &request.provider, &request.api_key, &request.model,
-            &filename, &processed, &bible,
-        ).await {
-            Ok(v) => v,
-            Err(e) => {
-                emit(&app, &format!("  ⚠ {}: {}", filename, e));
-                continue;
+    let results = batch_prompt::process_chapters_batched(
+        &app,
+        database,
+        &request.provider,
+        &request.api_key,
+        &request.model,
+        "ai_isms_check_batch",
+        "ai_isms_check",
+        &bible,
+        &request.story_id,
+        Some("ai_isms_check"),
+        batch_items,
+        CRAFT_BATCH_WORD_BUDGET,
+        &[],
+    )
+    .await;
+
+    let mut all_findings: Vec<serde_json::Value> = Vec::new();
+    let mut total_violations = 0usize;
+
+    for (i, filename, title) in chapter_meta {
+        if crate::is_cancelled() { return err("Cancelled."); }
+
+        let violations = match results.get(&filename) {
+            Some(value) => parse_violations(value),
+            None => {
+                emit(&app, &format!("  ⚠ {}: no response", filename));
+                Vec::new()
             }
         };
 
@@ -146,79 +175,12 @@ async fn check_inner(app: AppCtx, request: AiIsmsRequest) -> GenreResult {
     GenreResult { success: true, report: String::new(), error: String::new(), run_ts }
 }
 
-async fn extract_violations(
-    app: &AppCtx,
-    story_id: &str,
-    provider: &str, api_key: &str, model: &str,
-    filename: &str, content: &str, bible: &str,
-) -> Result<Vec<AiViolation>, String> {
-    use std::collections::HashMap;
-    use crate::prompts;
-
-    let mut vars = HashMap::new();
-    vars.insert("chapter_title", filename);
-    vars.insert("chapter_text", content);
-    vars.insert("bible", bible);
-
-    let raw = prompts::execute_prompt(
-        app,
-        "ai_isms_check",
-        provider,
-        api_key,
-        model,
-        vars,
-        Some(story_id),
-    )
-    .await?;
-
-    let clean = raw.trim()
-        .trim_start_matches("```json").trim_start_matches("```")
-        .trim_end_matches("```").trim();
-
-    let json_str = if clean.starts_with('[') {
-        clean.to_string()
-    } else if let Some(start) = clean.find('[') {
-        let bytes = clean.as_bytes();
-        let mut depth = 0i32;
-        let mut in_string = false;
-        let mut escape = false;
-        let mut end = clean.len();
-        for (i, &b) in bytes[start..].iter().enumerate() {
-            if escape { escape = false; continue; }
-            match b {
-                b'\\' if in_string => escape = true,
-                b'"' => in_string = !in_string,
-                b'[' if !in_string => depth += 1,
-                b']' if !in_string => {
-                    depth -= 1;
-                    if depth == 0 { end = start + i + 1; break; }
-                }
-                _ => {}
-            }
-        }
-        clean[start..end].to_string()
-    } else {
-        clean.to_string()
-    };
-
-    if let Ok(violations) = serde_json::from_str::<Vec<AiViolation>>(&json_str) {
-        return Ok(violations.into_iter()
-            .filter(|v| !v.telling_text.is_empty())
-            .collect());
-    }
-
-    let arr = serde_json::from_str::<Vec<serde_json::Value>>(&json_str)
-        .map_err(|e| format!("Parse error: {} | got: {}", e, &json_str[..json_str.len().min(200)]))?;
-
-    let mut good = Vec::new();
-    for item in arr {
-        if let Ok(v) = serde_json::from_value::<AiViolation>(item) {
-            if !v.telling_text.is_empty() {
-                good.push(v);
-            }
-        }
-    }
-    Ok(good)
+fn parse_violations(value: &serde_json::Value) -> Vec<AiViolation> {
+    batch_prompt::chapter_array_field(value, "findings")
+        .into_iter()
+        .filter_map(|item| serde_json::from_value::<AiViolation>(item).ok())
+        .filter(|v| !v.telling_text.is_empty())
+        .collect()
 }
 
 #[derive(serde::Deserialize)]

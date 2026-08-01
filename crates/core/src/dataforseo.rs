@@ -3,14 +3,20 @@
 // Base URL: https://api.dataforseo.com/v3/
 // Auth: HTTP Basic (login:password)
 // Endpoints used:
-//   /keywords_data/google_ads/search_volume/live     — Google search volume for keywords
-//   /dataforseo_labs/amazon/related_keywords/live    — Amazon related keywords with volume
+//   /keywords_data/google_ads/search_volume/live                    — Google search volume for keywords
+//   /keywords_data/dataforseo_trends/explore/live                   — trend series for keywords
+//   /serp/google/autocomplete/live/advanced                         — seed expansion
+//   /dataforseo_labs/amazon/related_keywords/live                   — Amazon related keywords with volume
+//   /dataforseo_labs/amazon/bulk_search_volume/live                 — Amazon volume for many keywords
+//   /dataforseo_labs/amazon/ranked_keywords/live                    — keywords a known ASIN ranks for
+//   /dataforseo_labs/amazon/product_competitors/live                — competitor ASINs for an ASIN
+//   /dataforseo_labs/amazon/product_keyword_intersections/live      — keywords shared by several ASINs
 
 use base64::Engine;
 use reqwest::Client;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use crate::app_ctx::AppCtx;
@@ -155,6 +161,55 @@ pub struct AmazonKeyword {
     pub search_volume: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct TrendSignal {
+    pub keyword: String,
+    pub trend_delta: f64,
+}
+
+/// Read a keyword + volume pair out of one of the several shapes DataForSEO Labs
+/// endpoints use (flat, `keyword_info`, or `keyword_data.keyword_info`).
+fn as_keyword_volume(item: &Value) -> Option<AmazonKeyword> {
+    let keyword = item["keyword"].as_str()
+        .or_else(|| item["keyword_data"]["keyword_info"]["keyword"].as_str())
+        .or_else(|| item["keyword_info"]["keyword"].as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if keyword.is_empty() {
+        return None;
+    }
+
+    let search_volume = item["search_volume"].as_u64()
+        .or_else(|| item["keyword_info"]["search_volume"].as_u64())
+        .or_else(|| item["keyword_data"]["keyword_info"]["search_volume"].as_u64())
+        .unwrap_or(0);
+
+    Some(AmazonKeyword { keyword, search_volume })
+}
+
+fn parse_keyword_items(result: &Value) -> Vec<AmazonKeyword> {
+    let mut out = Vec::new();
+    if let Some(items) = result["items"].as_array() {
+        for item in items {
+            if let Some(kw) = as_keyword_volume(item) {
+                out.push(kw);
+            }
+        }
+    }
+
+    if let Some(seed_info) = result["seed_keyword_data"].as_object() {
+        if let Some(ki) = seed_info.get("keyword_info") {
+            if let Some(kw) = as_keyword_volume(ki) {
+                out.push(kw);
+            }
+        }
+    }
+
+    out
+}
+
 impl DataForSeoClient {
     /// Get Amazon related keywords with search volume for a seed keyword.
     /// Returns the seed + related keywords.
@@ -254,6 +309,190 @@ impl DataForSeoClient {
         }
 
         Ok(results)
+    }
+
+    /// Get Amazon search volume for many keywords in one request.
+    pub async fn amazon_bulk_search_volume(&self, keywords: &[String]) -> Result<Vec<AmazonKeyword>, String> {
+        let keywords = normalize_keyword_list(keywords);
+        if keywords.is_empty() { return Ok(Vec::new()); }
+
+        let task = serde_json::json!({
+            "keywords": keywords,
+            "language_name": "English",
+            "location_code": 2840,
+        });
+
+        let resp = self.post("/dataforseo_labs/amazon/bulk_search_volume/live", &[task]).await?;
+        let mut results = Vec::new();
+
+        if let Some(tasks_arr) = resp["tasks"].as_array() {
+            for task in tasks_arr {
+                if let Some(result_arr) = task["result"].as_array() {
+                    for result in result_arr {
+                        results.extend(parse_keyword_items(result));
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Pull ranked Amazon keywords for a known product ASIN.
+    pub async fn amazon_ranked_keywords(&self, asin: &str, limit: u32) -> Result<Vec<AmazonKeyword>, String> {
+        let asin = asin.trim();
+        if asin.is_empty() { return Ok(Vec::new()); }
+
+        let task = serde_json::json!({
+            "asin": asin,
+            "language_name": "English",
+            "location_code": 2840,
+            "limit": limit,
+        });
+
+        let resp = self.post("/dataforseo_labs/amazon/ranked_keywords/live", &[task]).await?;
+        let mut results = Vec::new();
+
+        if let Some(tasks_arr) = resp["tasks"].as_array() {
+            for task in tasks_arr {
+                if let Some(result_arr) = task["result"].as_array() {
+                    for result in result_arr {
+                        results.extend(parse_keyword_items(result));
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Get competitor ASINs that overlap with target product in Amazon SERPs.
+    pub async fn amazon_product_competitors(&self, asin: &str, limit: u32) -> Result<Vec<String>, String> {
+        let asin = asin.trim();
+        if asin.is_empty() { return Ok(Vec::new()); }
+
+        let task = serde_json::json!({
+            "asin": asin,
+            "language_name": "English",
+            "location_code": 2840,
+            "limit": limit,
+        });
+
+        let resp = self.post("/dataforseo_labs/amazon/product_competitors/live", &[task]).await?;
+        let mut asins = Vec::new();
+        let mut seen = HashSet::new();
+
+        if let Some(tasks_arr) = resp["tasks"].as_array() {
+            for task in tasks_arr {
+                if let Some(result_arr) = task["result"].as_array() {
+                    for result in result_arr {
+                        if let Some(items) = result["items"].as_array() {
+                            for item in items {
+                                let candidate = item["asin"].as_str()
+                                    .or_else(|| item["competitor_asin"].as_str())
+                                    .unwrap_or("")
+                                    .trim();
+                                if !candidate.is_empty() && seen.insert(candidate.to_string()) {
+                                    asins.push(candidate.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(asins)
+    }
+
+    /// Get keyword intersections for multiple products.
+    pub async fn amazon_product_keyword_intersections(&self, asins: &[String], limit: u32) -> Result<Vec<AmazonKeyword>, String> {
+        let asins = normalize_keyword_list(asins);
+        if asins.len() < 2 { return Ok(Vec::new()); }
+
+        let task = serde_json::json!({
+            "asins": asins,
+            "language_name": "English",
+            "location_code": 2840,
+            "limit": limit,
+        });
+
+        let resp = self.post("/dataforseo_labs/amazon/product_keyword_intersections/live", &[task]).await?;
+        let mut results = Vec::new();
+
+        if let Some(tasks_arr) = resp["tasks"].as_array() {
+            for task in tasks_arr {
+                if let Some(result_arr) = task["result"].as_array() {
+                    for result in result_arr {
+                        results.extend(parse_keyword_items(result));
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Pull trend deltas from the DataForSEO Trends endpoint — percentage change
+    /// between the first and last point of each keyword's series.
+    pub async fn dataforseo_trends_delta(&self, keywords: &[String]) -> Result<Vec<TrendSignal>, String> {
+        let keywords = normalize_keyword_list(keywords);
+        if keywords.is_empty() { return Ok(Vec::new()); }
+
+        let task = serde_json::json!({
+            "keywords": keywords,
+            "location_code": 2840,
+        });
+
+        let resp = self.post("/keywords_data/dataforseo_trends/explore/live", &[task]).await?;
+        let mut by_keyword: HashMap<String, Vec<f64>> = HashMap::new();
+
+        if let Some(tasks_arr) = resp["tasks"].as_array() {
+            for task in tasks_arr {
+                if let Some(result_arr) = task["result"].as_array() {
+                    for result in result_arr {
+                        if let Some(items) = result["items"].as_array() {
+                            for item in items {
+                                let keyword = item["keyword"].as_str().unwrap_or("").trim().to_string();
+                                if keyword.is_empty() {
+                                    continue;
+                                }
+                                if let Some(values) = item["values"].as_array() {
+                                    let mut series = Vec::new();
+                                    for v in values {
+                                        if let Some(num) = v.as_f64() {
+                                            series.push(num);
+                                        } else if let Some(num) = v["value"].as_f64() {
+                                            series.push(num);
+                                        }
+                                    }
+                                    if series.len() >= 2 {
+                                        by_keyword.entry(keyword.clone()).or_default().extend(series);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut out = Vec::new();
+        for (keyword, series) in by_keyword {
+            if series.len() < 2 {
+                continue;
+            }
+            let first = *series.first().unwrap_or(&0.0);
+            let last = *series.last().unwrap_or(&0.0);
+            let delta = if first.abs() < f64::EPSILON {
+                0.0
+            } else {
+                ((last - first) / first) * 100.0
+            };
+            out.push(TrendSignal { keyword, trend_delta: delta });
+        }
+
+        Ok(out)
     }
 
     /// Simple connection test — try to get volume for one keyword.

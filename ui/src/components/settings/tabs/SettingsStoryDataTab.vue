@@ -94,6 +94,9 @@ watch([() => props.active, activeFolder], ([isActive]) => {
         <strong>{{ activeStoryName || 'No story selected' }}</strong>
         <p v-if="state" class="meta">
           {{ state.chapter_count }} chapter summar{{ state.chapter_count === 1 ? 'y' : 'ies' }}
+          <template v-if="state.manuscript_fingerprint">
+            · fingerprint {{ state.manuscript_fingerprint.slice(0, 12) }}…
+          </template>
         </p>
       </div>
       <div class="story-data-actions">

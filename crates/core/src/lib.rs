@@ -1,5 +1,6 @@
 //! Loremetry core library — analysis, DB, market intel.
 
+pub mod ai;
 pub mod analysis;
 pub mod batch_prompt;
 pub mod craft_report_groups;

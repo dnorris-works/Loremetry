@@ -119,8 +119,8 @@ pub async fn run_manuscript_craft_audit(
     if !crate::stories::story_exists(database, story_id).await {
         return err("Story not found.");
     }
-    if api_key.is_empty() || model.is_empty() {
-        return err("An API key and model are required. Set them in Settings.");
+    if let Err(msg) = crate::ai::ai_ready(provider, api_key, model) {
+        return err(&msg);
     }
 
     let bible = prompts::load_bible_for_story(&app.db, story_id, bible_path).await;
@@ -183,8 +183,8 @@ pub async fn run_series_craft_audit(
     if series_id <= 0 {
         return err("Select a series for this audit.");
     }
-    if api_key.is_empty() || model.is_empty() {
-        return err("An API key and model are required. Set them in Settings.");
+    if let Err(msg) = crate::ai::ai_ready(provider, api_key, model) {
+        return err(&msg);
     }
 
     let books = match db::list_series_books(&database.pool, series_id).await {

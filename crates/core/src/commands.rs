@@ -99,10 +99,8 @@ pub async fn call_llm(
     user: &str,
     max_tokens: u32,
 ) -> Result<LlmResult, String> {
-    match provider {
-        "tokenmix" => call_tokenmix(api_key, model, system, user, max_tokens, false).await,
-        _ => call_claude(api_key, model, system, user, max_tokens).await,
-    }
+    crate::ai::ai_ready(provider, api_key, model)?;
+    call_tokenmix(api_key, model, system, user, max_tokens, false).await
 }
 
 /// Same as call_llm but forces JSON mode (valid JSON guaranteed in response).
@@ -114,69 +112,8 @@ pub async fn call_llm_json(
     user: &str,
     max_tokens: u32,
 ) -> Result<LlmResult, String> {
-    match provider {
-        "tokenmix" => call_tokenmix(api_key, model, system, user, max_tokens, true).await,
-        _ => call_claude(api_key, model, system, user, max_tokens).await,
-    }
-}
-
-async fn call_claude(
-    api_key: &str,
-    model: &str,
-    system: &str,
-    user: &str,
-    max_tokens: u32,
-) -> Result<LlmResult, String> {
-    let body = json!({
-        "model": model,
-        "max_tokens": max_tokens,
-        "system": system,
-        "messages": [{"role": "user", "content": user}]
-    });
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
-
-    let resp = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Claude request failed: {}", e))?;
-
-    let json: Value = resp.json()
-        .await
-        .map_err(|e| format!("Claude response parse failed: {}", e))?;
-
-    if let Some(err) = json.get("error") {
-        return Err(format!("Claude API error: {}", err["message"].as_str().unwrap_or("unknown")));
-    }
-
-    let text = json["content"][0]["text"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| "Claude: empty response".to_string())?;
-
-    let usage = json.get("usage");
-    let input_tokens = usage
-        .and_then(|u| u["input_tokens"].as_u64())
-        .unwrap_or(0) as u32;
-    let output_tokens = usage
-        .and_then(|u| u["output_tokens"].as_u64())
-        .unwrap_or(0) as u32;
-
-    Ok(LlmResult {
-        text,
-        usage: LlmUsage {
-            input_tokens,
-            output_tokens,
-        },
-    })
+    crate::ai::ai_ready(provider, api_key, model)?;
+    call_tokenmix(api_key, model, system, user, max_tokens, true).await
 }
 
 async fn call_tokenmix(

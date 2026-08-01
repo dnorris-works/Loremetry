@@ -1584,6 +1584,61 @@ pub async fn delete_chapter_summaries(pool: &PgPool, story_id: &str) -> Result<(
     Ok(())
 }
 
+// ── Per-chapter AI result cache (batched prompt reuse across runs) ────────────────
+
+/// Cached per-chapter AI JSON, valid only while `source_hash` matches the chapter text.
+pub async fn load_chapter_ai_cache(
+    pool: &PgPool,
+    story_id: &str,
+    chapter_file: &str,
+    report_type: &str,
+    source_hash: &str,
+) -> Option<String> {
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT result_json, source_hash FROM chapter_ai_cache
+         WHERE story_id = $1 AND chapter_file = $2 AND report_type = $3",
+    )
+    .bind(story_id)
+    .bind(chapter_file)
+    .bind(report_type)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    match row {
+        Some((json, hash)) if hash == source_hash => Some(json),
+        _ => None,
+    }
+}
+
+pub async fn save_chapter_ai_cache(
+    pool: &PgPool,
+    story_id: &str,
+    chapter_file: &str,
+    report_type: &str,
+    source_hash: &str,
+    result_json: &str,
+) {
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = sqlx::query(
+        "INSERT INTO chapter_ai_cache (story_id, chapter_file, report_type, source_hash, result_json, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (story_id, chapter_file, report_type) DO UPDATE SET
+            source_hash = excluded.source_hash,
+            result_json = excluded.result_json,
+            updated_at = excluded.updated_at",
+    )
+    .bind(story_id)
+    .bind(chapter_file)
+    .bind(report_type)
+    .bind(source_hash)
+    .bind(result_json)
+    .bind(&now)
+    .execute(pool)
+    .await;
+}
+
 // ── Genre classification (industry genre + KDP paths + comps + notes) ──────────────
 
 #[derive(Clone, Debug)]
@@ -1835,6 +1890,49 @@ pub async fn replace_keyword_search_results(
     Ok(())
 }
 
+// ── Google keyword search results (wide-store SEO volume) ──
+
+pub async fn has_google_keyword_search_results(pool: &PgPool, story_id: &str) -> bool {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM google_keyword_search_results WHERE story_id = $1)",
+    )
+    .bind(story_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(false)
+}
+
+/// Replace all stored Google keyword rows for this story — one Google research
+/// run per story, so the latest run supersedes the previous one.
+pub async fn replace_google_keyword_search_results(
+    pool: &PgPool,
+    story_id: &str,
+    rows: &[(String, String, String, String)], // (keyword, searches, competition, cpc)
+) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query("DELETE FROM google_keyword_search_results WHERE story_id = $1")
+        .bind(story_id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    for (keyword, searches, competition, cpc) in rows {
+        sqlx::query(
+            "INSERT INTO google_keyword_search_results (story_id, keyword, searches, competition, cpc, generated_at)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(story_id)
+        .bind(keyword)
+        .bind(searches)
+        .bind(competition)
+        .bind(cpc)
+        .bind(&now)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 
 // ── Story documents (rendered markdown cache, read by the Reports panel) ─────
 
@@ -1893,6 +1991,128 @@ pub async fn report_freshness_status(
     match saved_fp {
         None => Freshness::Missing,
         Some(ref fp) if fp == current_fp => Freshness::Fresh,
+        _ => Freshness::Stale,
+    }
+}
+
+/// Record that `artifact_type` was built from `fingerprint`.
+pub async fn record_artifact_built(
+    pool: &PgPool,
+    story_id: &str,
+    artifact_type: &str,
+    fingerprint: &str,
+) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO story_artifact_state (story_id, artifact_type, built_from_manuscript_fingerprint, updated_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (story_id, artifact_type) DO UPDATE SET
+            built_from_manuscript_fingerprint = EXCLUDED.built_from_manuscript_fingerprint,
+            updated_at = EXCLUDED.updated_at",
+    )
+    .bind(story_id)
+    .bind(artifact_type)
+    .bind(fingerprint)
+    .bind(&now)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub async fn stored_manuscript_fingerprint(pool: &PgPool, story_id: &str) -> Option<String> {
+    sqlx::query_scalar(
+        "SELECT manuscript_fingerprint FROM story_manuscript_state WHERE story_id = $1",
+    )
+    .bind(story_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+}
+
+async fn upsert_manuscript_state(
+    pool: &PgPool,
+    story_id: &str,
+    fingerprint: &str,
+) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO story_manuscript_state (story_id, manuscript_fingerprint, updated_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (story_id) DO UPDATE SET
+            manuscript_fingerprint = EXCLUDED.manuscript_fingerprint,
+            updated_at = EXCLUDED.updated_at",
+    )
+    .bind(story_id)
+    .bind(fingerprint)
+    .bind(&now)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub async fn mark_artifacts_stale(pool: &PgPool, story_id: &str) -> Result<(), String> {
+    sqlx::query("DELETE FROM story_artifact_state WHERE story_id = $1")
+        .bind(story_id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub async fn on_manuscript_changed(
+    pool: &PgPool,
+    story_id: &str,
+    new_fingerprint: &str,
+) -> Result<(), String> {
+    archive_all_current_reports(pool, story_id, "manuscript_changed").await?;
+    mark_artifacts_stale(pool, story_id).await?;
+    upsert_manuscript_state(pool, story_id, new_fingerprint).await
+}
+
+/// Returns true when the manuscript fingerprint changed (reports were archived).
+pub async fn sync_manuscript_state(
+    pool: &PgPool,
+    story_id: &str,
+    current_fingerprint: &str,
+) -> Result<bool, String> {
+    let stored = stored_manuscript_fingerprint(pool, story_id).await;
+    match stored.as_deref() {
+        Some(s) if s == current_fingerprint => Ok(false),
+        Some(_) => {
+            on_manuscript_changed(pool, story_id, current_fingerprint).await?;
+            Ok(true)
+        }
+        None => {
+            upsert_manuscript_state(pool, story_id, current_fingerprint).await?;
+            Ok(false)
+        }
+    }
+}
+
+pub async fn artifact_status(
+    pool: &PgPool,
+    story_id: &str,
+    artifact_type: &str,
+    current_fp: &str,
+) -> Freshness {
+    let built: Option<String> = sqlx::query_scalar(
+        "SELECT built_from_manuscript_fingerprint FROM story_artifact_state
+         WHERE story_id = $1 AND artifact_type = $2",
+    )
+    .bind(story_id)
+    .bind(artifact_type)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .filter(|s: &String| !s.is_empty());
+
+    match built {
+        None => Freshness::Missing,
+        Some(ref b) if b == current_fp => Freshness::Fresh,
         _ => Freshness::Stale,
     }
 }
@@ -2117,6 +2337,52 @@ pub async fn load_lookup_string_list(pool: &PgPool, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[derive(Debug, Clone)]
+pub struct AnalysisThresholds {
+    pub category_fit_confidence_bar: u8,
+    pub max_qualifying_per_store: usize,
+    pub genre_coarse_bar: u8,
+    pub genre_shortlist_max: usize,
+}
+
+impl Default for AnalysisThresholds {
+    fn default() -> Self {
+        Self {
+            category_fit_confidence_bar: 55,
+            max_qualifying_per_store: 8,
+            genre_coarse_bar: 15,
+            genre_shortlist_max: 40,
+        }
+    }
+}
+
+/// Tunable analysis gates from lookup_config (`analysis.thresholds` JSON object).
+pub async fn load_analysis_thresholds(pool: &PgPool) -> AnalysisThresholds {
+    let mut t = AnalysisThresholds::default();
+    let raw = sqlx::query_scalar::<_, String>("SELECT value FROM lookup_config WHERE key = $1")
+        .bind("analysis.thresholds")
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+    let Some(json_str) = raw else { return t };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&json_str) else { return t };
+
+    if let Some(n) = v["category_fit_confidence_bar"].as_u64() {
+        t.category_fit_confidence_bar = n.min(100) as u8;
+    }
+    if let Some(n) = v["max_qualifying_per_store"].as_u64() {
+        t.max_qualifying_per_store = n as usize;
+    }
+    if let Some(n) = v["genre_coarse_bar"].as_u64() {
+        t.genre_coarse_bar = n.min(100) as u8;
+    }
+    if let Some(n) = v["genre_shortlist_max"].as_u64() {
+        t.genre_shortlist_max = n as usize;
+    }
+    t
+}
+
 pub async fn list_report_types_cmd(db: &Db) -> Result<Vec<ReportTypeDef>, String> {
     let rows = sqlx::query(
         "SELECT id, label, description, platforms, depends_on, model_slot, min_tier,
@@ -2322,13 +2588,14 @@ pub struct ChapterSummaryStatusRow {
     pub file:            String,
     pub title:           String,
     pub word_count:      i64,
+    pub source_hash:     String,
     pub updated_at:      String,
     pub summary_preview: String,
 }
 
 pub async fn list_chapter_summary_status(pool: &PgPool, story_id: &str) -> Vec<ChapterSummaryStatusRow> {
     sqlx::query(
-        "SELECT file, title, word_count, updated_at, signals
+        "SELECT file, title, word_count, source_hash, updated_at, signals
          FROM chapter_summaries WHERE story_id = $1 ORDER BY file",
     )
     .bind(story_id)
@@ -2338,8 +2605,8 @@ pub async fn list_chapter_summary_status(pool: &PgPool, story_id: &str) -> Vec<C
     .map(|rows| {
         rows.into_iter()
             .filter_map(|r| {
-                let signals: String = r.try_get(4).ok()?;
-                if signals.trim().is_empty() {
+                let signals: String = r.try_get(5).ok()?;
+                if !crate::analysis::chapters::is_prose_summary(&signals) {
                     return None;
                 }
                 let preview: String = signals.chars().take(160).collect();
@@ -2352,7 +2619,8 @@ pub async fn list_chapter_summary_status(pool: &PgPool, story_id: &str) -> Vec<C
                     file: r.try_get(0).ok()?,
                     title: r.try_get(1).ok()?,
                     word_count: r.try_get(2).ok()?,
-                    updated_at: r.try_get(3).ok()?,
+                    source_hash: r.try_get(3).ok()?,
+                    updated_at: r.try_get(4).ok()?,
                     summary_preview,
                 })
             })
@@ -2363,9 +2631,11 @@ pub async fn list_chapter_summary_status(pool: &PgPool, story_id: &str) -> Vec<C
 
 #[derive(serde::Serialize, Clone, Debug)]
 pub struct StoryArtifactStateResponse {
-    pub chapter_count: usize,
-    pub chapters:      Vec<ChapterSummaryStatusRow>,
-    pub artifacts:     Vec<(String, String)>,
+    pub manuscript_fingerprint: String,
+    pub fingerprint_updated_at: String,
+    pub chapter_count:          usize,
+    pub chapters:               Vec<ChapterSummaryStatusRow>,
+    pub artifacts:              Vec<(String, String)>,
 }
 
 pub async fn get_story_artifact_state(db: &Db, story_id: &str) -> Result<StoryArtifactStateResponse, String> {
@@ -2373,30 +2643,46 @@ pub async fn get_story_artifact_state(db: &Db, story_id: &str) -> Result<StoryAr
         return Err("Story not found.".into());
     }
     let pool = &db.pool;
+    let current_fp =
+        crate::manuscript_fingerprint::compute_manuscript_fingerprint_for_story(pool, story_id).await;
+    let _ = sync_manuscript_state(pool, story_id, &current_fp).await?;
+
+    let (manuscript_fingerprint, fingerprint_updated_at): (String, String) = sqlx::query_as(
+        "SELECT manuscript_fingerprint, updated_at FROM story_manuscript_state WHERE story_id = $1",
+    )
+    .bind(story_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .unwrap_or((current_fp.clone(), String::new()));
+
     let chapters = list_chapter_summary_status(pool, story_id).await;
-    let summary_count = chapter_summary_count(pool, story_id).await;
-    let artifacts = vec![
-        ("summaries".to_string(), artifact_label(summary_count > 0)),
-        ("genre_data".to_string(), artifact_label(load_genre_data(pool, story_id).await.is_some())),
-        ("genre_ranking".to_string(), artifact_label(has_genre_rankings(pool, story_id).await)),
-        ("categories".to_string(), artifact_label(has_category_results(pool, story_id).await)),
-        ("kdp_keywords".to_string(), artifact_label(load_kdp_keywords(pool, story_id).await.is_some())),
-        ("mi_search_terms".to_string(), artifact_label(!load_mi_search_terms(pool, story_id).await.is_empty())),
-        ("discovery_keywords".to_string(), artifact_label(!load_discovery_keywords(pool, story_id).await.is_empty())),
-        ("keyword_search".to_string(), artifact_label(has_keyword_search_results(pool, story_id).await)),
-        ("bisac".to_string(), artifact_label(has_bisac_classifications(pool, story_id).await)),
-        ("zeigarnik".to_string(), artifact_label(has_zeigarnik_analysis(pool, story_id).await)),
+    let artifact_types = [
+        "summaries",
+        "genre_data",
+        "genre_ranking",
+        "categories",
+        "kdp_keywords",
+        "mi_search_terms",
+        "discovery_keywords",
+        "keyword_search",
+        "google_keyword_search",
+        "bisac",
+        "zeigarnik",
     ];
+    let mut artifacts = Vec::with_capacity(artifact_types.len());
+    for t in artifact_types {
+        let status = artifact_status(pool, story_id, t, &manuscript_fingerprint).await;
+        artifacts.push((t.to_string(), status.as_str().to_string()));
+    }
 
     Ok(StoryArtifactStateResponse {
+        manuscript_fingerprint,
+        fingerprint_updated_at,
         chapter_count: chapters.len(),
         chapters,
         artifacts,
     })
-}
-
-fn artifact_label(ready: bool) -> String {
-    if ready { "ready".to_string() } else { "missing".to_string() }
 }
 
 // ── BISAC classifications ──────────────────────────────────────────────

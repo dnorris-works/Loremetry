@@ -13,7 +13,7 @@ use crate::db;
 use crate::documents;
 use crate::prompts;
 
-use super::chapters::{phase1_summaries, build_combined_context};
+use super::chapters::{build_combined_context, phase1_config_from, phase1_summaries};
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,6 +61,7 @@ pub async fn rank_genres_for_story(app: AppCtx, request: FolderRequest) -> Genre
         &request.provider,
         &request.api_key,
         &request.model,
+        &request.genre_model,
         &description,
         &master_list,
     )
@@ -135,18 +136,29 @@ pub async fn analyze_genre(app: AppCtx, request: FolderRequest) -> GenreResult {
             Err(e) => return err(&e),
         };
         if chapters.is_empty() { return err("No chapter documents found. Upload manuscript chapters first."); }
-        phase1_summaries(&app, &database, &chapters, &request.story_id, &request.provider, &request.api_key, &request.model).await;
+        let config = phase1_config_from(
+            &request.provider,
+            &request.api_key,
+            &request.model,
+            &request.summaries_model,
+            false,
+        );
+        phase1_summaries(&app, &database, &chapters, &request.story_id, &config).await;
         summaries = db::load_chapter_summaries(&database.pool, &request.story_id).await;
     }
 
     if summaries.is_empty() { return err("Could not produce any chapter summaries."); }
 
     emit(&app, &format!("Phase 2: Analyzing {} chapter summaries...", summaries.len()));
-    phase2_analyze(&app, &database, &request.story_id, &summaries, &request.provider, &request.api_key, &request.model).await
+    phase2_analyze(
+        &app, &database, &request.story_id, &summaries,
+        &request.provider, &request.api_key, &request.model, &request.genre_model,
+    ).await
 }
 
 // ── Phase 2 implementation ───────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn phase2_analyze(
     app: &AppCtx,
     database: &db::Db,
@@ -155,15 +167,24 @@ pub(crate) async fn phase2_analyze(
     provider: &str,
     api_key: &str,
     model: &str,
+    genre_model: &str,
 ) -> GenreResult {
     let combined = build_combined_context(summaries);
 
+    let genre_m = match crate::ai::resolve_slot_model(genre_model, model) {
+        Ok(m) => m,
+        Err(e) => return err(&e),
+    };
+    if let Err(e) = crate::ai::ai_ready(provider, api_key, &genre_m) {
+        return err(&e);
+    }
+
     emit(app, &format!(
         "  Sending {} summaries ({} chars) to {}...",
-        summaries.len(), combined.len(), model
+        summaries.len(), combined.len(), genre_m
     ));
 
-    match call_ai_genre_analysis(app, story_id, provider, api_key, model, &combined).await {
+    match call_ai_genre_analysis(app, story_id, provider, api_key, &genre_m, &combined).await {
         Err(e) => err(&format!("Phase 2 AI error: {}", e)),
         Ok(g) => {
             let _ = db::save_genre_data(
@@ -183,16 +204,81 @@ pub(crate) async fn phase2_analyze(
 
 // ── AI calls ─────────────────────────────────────────────────────────────────
 
+#[derive(Deserialize)]
+struct AiGenreRankCoarse {
+    genre:      String,
+    confidence: u8,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn ai_rank_genres(
     app: &AppCtx,
     story_id: &str,
     provider: &str,
     api_key: &str,
     model: &str,
+    genre_model: &str,
     description: &str,
     master_list: &[db::GenreRow],
 ) -> Result<Vec<AiGenreRank>, String> {
-    let genre_list = master_list.iter()
+    let genre_m = crate::ai::resolve_slot_model(genre_model, model)?;
+    crate::ai::ai_ready(provider, api_key, &genre_m)?;
+
+    let thresholds = db::load_analysis_thresholds(&app.db.pool).await;
+    let coarse_bar = thresholds.genre_coarse_bar;
+    let shortlist_max = thresholds.genre_shortlist_max;
+
+    let coarse_names: Vec<String> = master_list.iter().map(|g| g.name.clone()).collect();
+    let coarse_list = coarse_names
+        .iter()
+        .map(|name| format!("- {name}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut coarse_vars = HashMap::new();
+    coarse_vars.insert("genre_list", coarse_list.as_str());
+    coarse_vars.insert("description", description);
+
+    let shortlisted_names: std::collections::HashSet<String> = match prompts::execute_prompt(
+        app,
+        "genre_ranking_coarse",
+        provider,
+        api_key,
+        &genre_m,
+        coarse_vars,
+        Some(story_id),
+    )
+    .await
+    {
+        Ok(raw) => {
+            let clean = raw
+                .trim()
+                .trim_start_matches("```json")
+                .trim_start_matches("```")
+                .trim_end_matches("```")
+                .trim();
+            serde_json::from_str::<Vec<AiGenreRankCoarse>>(clean)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.confidence >= coarse_bar)
+                .take(shortlist_max)
+                .map(|r| r.genre)
+                .collect()
+        }
+        Err(_) => std::collections::HashSet::new(),
+    };
+
+    let shortlist: Vec<&db::GenreRow> = if shortlisted_names.len() >= 8 {
+        master_list
+            .iter()
+            .filter(|g| shortlisted_names.contains(&g.name))
+            .collect()
+    } else {
+        master_list.iter().collect()
+    };
+
+    let genre_list = shortlist
+        .iter()
         .map(|g| format!("- {}: {}", g.name, g.description))
         .collect::<Vec<_>>()
         .join("\n");
@@ -206,17 +292,25 @@ pub(crate) async fn ai_rank_genres(
         "genre_ranking",
         provider,
         api_key,
-        model,
+        &genre_m,
         vars,
         Some(story_id),
     )
     .await?;
-    let clean = raw.trim()
-        .trim_start_matches("```json").trim_start_matches("```")
-        .trim_end_matches("```").trim();
+    let clean = raw
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
 
-    serde_json::from_str::<Vec<AiGenreRank>>(clean)
-        .map_err(|e| format!("Parse error (genre ranking): {} | got: {}", e, &clean[..clean.len().min(300)]))
+    serde_json::from_str::<Vec<AiGenreRank>>(clean).map_err(|e| {
+        format!(
+            "Parse error (genre ranking): {} | got: {}",
+            e,
+            &clean[..clean.len().min(300)]
+        )
+    })
 }
 
 pub(crate) async fn call_ai_genre_analysis(

@@ -9,7 +9,7 @@ use crate::db;
 use crate::documents;
 use crate::models::KeywordResult;
 
-use super::chapters::{phase1_summaries, any_chapter_needs_summary};
+use super::chapters::{any_chapter_needs_summary, phase1_config_from, phase1_summaries};
 use super::genres::{RankedGenre, ai_rank_genres, phase2_analyze, render_full_report};
 use super::categories::{match_categories_by_store, rank_by_discoverability};
 use super::bisac::ai_pick_bisac;
@@ -206,7 +206,8 @@ pub async fn check_analysis_state(app: AppCtx, story_id: String) -> AnalysisStat
             && doc_is_fresh(pool, &story_id, "discovery_keywords", &current_fp).await,
         has_keyword_search_results: db::has_keyword_search_results(pool, &story_id).await
             && doc_is_fresh(pool, &story_id, "keyword_search", &current_fp).await,
-        has_google_keyword_search:  doc_is_fresh(pool, &story_id, "google_keyword_search", &current_fp).await,
+        has_google_keyword_search:  db::has_google_keyword_search_results(pool, &story_id).await
+            && doc_is_fresh(pool, &story_id, "google_keyword_search", &current_fp).await,
         has_zeigarnik:              db::has_zeigarnik_analysis(pool, &story_id).await
             && doc_is_fresh(pool, &story_id, "zeigarnik_analysis", &current_fp).await,
         has_readability:            db::get_document(pool, &story_id, "readability_analysis").await.is_some()
@@ -239,7 +240,8 @@ pub async fn run_everything(app: AppCtx, request: FolderRequest) -> GenreResult 
         emit(&app, "Step 1: No summaries found — generating now...");
         let chapters = documents::list_chapters_db(&app.db, &request.story_id).await.unwrap_or_default();
         if chapters.is_empty() { return err("No chapter documents found. Upload manuscript chapters first."); }
-        phase1_summaries(&app, &database, &chapters, &request.story_id, &request.provider, &request.api_key, &request.model).await;
+        let config = phase1_config_from(&request.provider, &request.api_key, &request.model, &request.summaries_model, false);
+        phase1_summaries(&app, &database, &chapters, &request.story_id, &config).await;
         summaries = db::load_chapter_summaries(&database.pool, &request.story_id).await;
                 if summaries.is_empty() { return err("Could not produce chapter summaries."); }
             } else {
@@ -248,7 +250,7 @@ pub async fn run_everything(app: AppCtx, request: FolderRequest) -> GenreResult 
             if crate::is_cancelled() { return err("Cancelled."); }
     // ── Step 2: Genre analysis ─────────────────────────────────────────────
     emit(&app, "Step 2: Running genre analysis...");
-    let genre_result = phase2_analyze(&app, &database, &request.story_id, &summaries, &request.provider, &request.api_key, &request.model).await;
+    let genre_result = phase2_analyze(&app, &database, &request.story_id, &summaries, &request.provider, &request.api_key, &request.model, &request.genre_model).await;
     if !genre_result.success { return genre_result; }
     if crate::is_cancelled() { return err("Cancelled."); }
 
@@ -309,7 +311,8 @@ pub async fn run_full_analysis(app: AppCtx, request: FolderRequest) -> GenreResu
         emit(&app, "Phase 1: Generating chapter summaries...");
         let chapters = documents::list_chapters_db(&app.db, &request.story_id).await.unwrap_or_default();
         if chapters.is_empty() { return err("No chapter documents found. Upload manuscript chapters first."); }
-        phase1_summaries(&app, &database, &chapters, &request.story_id, &request.provider, &request.api_key, &request.model).await;
+        let config = phase1_config_from(&request.provider, &request.api_key, &request.model, &request.summaries_model, false);
+        phase1_summaries(&app, &database, &chapters, &request.story_id, &config).await;
         summaries = db::load_chapter_summaries(&database.pool, &request.story_id).await;
             } else {
                 emit(&app, &format!("Phase 1: {} summaries already exist — skipping.", summaries.len()));
@@ -322,7 +325,7 @@ pub async fn run_full_analysis(app: AppCtx, request: FolderRequest) -> GenreResu
         d
     } else {
         emit(&app, "Phase 2: Running genre analysis...");
-        let r = phase2_analyze(&app, &database, &request.story_id, &summaries, &request.provider, &request.api_key, &request.model).await;
+        let r = phase2_analyze(&app, &database, &request.story_id, &summaries, &request.provider, &request.api_key, &request.model, &request.genre_model).await;
         if !r.success { return r; }
         match db::load_genre_data(&database.pool, &request.story_id).await {
             Some(d) => d,
@@ -367,11 +370,12 @@ async fn find_genres_and_categories_inner(app: AppCtx, request: FolderRequest) -
         if summaries.is_empty() {
             let chapters = documents::list_chapters_db(&app.db, &request.story_id).await.unwrap_or_default();
             if chapters.is_empty() { return err("No chapter documents found. Upload manuscript chapters first."); }
-            phase1_summaries(&app, &database, &chapters, &request.story_id, &request.provider, &request.api_key, &request.model).await;
+            let config = phase1_config_from(&request.provider, &request.api_key, &request.model, &request.summaries_model, false);
+            phase1_summaries(&app, &database, &chapters, &request.story_id, &config).await;
             summaries = db::load_chapter_summaries(&database.pool, &request.story_id).await;
                 }
                 if summaries.is_empty() { return err("Could not produce chapter summaries."); }
-        let r = phase2_analyze(&app, &database, &request.story_id, &summaries, &request.provider, &request.api_key, &request.model).await;
+        let r = phase2_analyze(&app, &database, &request.story_id, &summaries, &request.provider, &request.api_key, &request.model, &request.genre_model).await;
         if !r.success { return err(&r.error); }
         genre_data = db::load_genre_data(&database.pool, &request.story_id).await;
     }
@@ -397,7 +401,7 @@ async fn find_genres_and_categories_inner(app: AppCtx, request: FolderRequest) -
             genre_data.industry_ebook, genre_data.kdp_ebook.join("; "), genre_data.genre_signals
         );
 
-        let ai_ranked = match ai_rank_genres(&app, &request.story_id, &request.provider, &request.api_key, &request.model, &description, &master_list).await {
+        let ai_ranked = match ai_rank_genres(&app, &request.story_id, &request.provider, &request.api_key, &request.model, &request.genre_model, &description, &master_list).await {
             Ok(r) => r,
             Err(e) => return err(&format!("Genre ranking failed: {}", e)),
         };
@@ -805,6 +809,7 @@ async fn load_ranked_genres(database: &db::Db, story_id: &str) -> Vec<RankedGenr
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn persist_genre_ranking(
     app: &AppCtx,
     database: &db::Db,
@@ -813,6 +818,7 @@ async fn persist_genre_ranking(
     provider: &str,
     api_key: &str,
     model: &str,
+    genre_model: &str,
     run_ts: &str,
 ) -> Result<Vec<RankedGenre>, String> {
     let master_list = crate::genre_taxonomy::master_genre_list(database).await
@@ -823,7 +829,7 @@ async fn persist_genre_ranking(
         genre_data.industry_ebook, genre_data.kdp_ebook.join("; "), genre_data.genre_signals
     );
 
-    let ai_ranked = ai_rank_genres(app, story_id, provider, api_key, model, &description, &master_list).await?;
+    let ai_ranked = ai_rank_genres(app, story_id, provider, api_key, model, genre_model, &description, &master_list).await?;
 
     let mut ranked: Vec<RankedGenre> = Vec::new();
     for r in ai_ranked {
@@ -890,8 +896,9 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
 
     let database = app.db.as_ref();
     let run_ts = if request.run_time.is_empty() { chrono::Utc::now().to_rfc3339() } else { request.run_time.clone() };
-    let summaries_model = if request.summaries_model.is_empty() { &request.model } else { &request.summaries_model };
-    let genre_model = if request.genre_model.is_empty() { &request.model } else { &request.genre_model };
+    let manuscript_fp =
+        crate::manuscript_fingerprint::compute_manuscript_fingerprint_for_story(&database.pool, &request.story_id).await;
+    let _ = db::sync_manuscript_state(&database.pool, &request.story_id, &manuscript_fp).await;
 
     let needs_genre_data = should_run_genre_analysis(selected, platform)
         || should_run_kdp_categories(selected, platform, formats)
@@ -923,11 +930,15 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
             || any_chapter_needs_summary(&database.pool, &request.story_id, &chapters).await;
         if needs_refresh {
             emit(&app, "Step 1: Summarizing chapters (AI)...");
+            let config = phase1_config_from(
+                &request.provider, &request.api_key, &request.model,
+                &request.summaries_model, request.force_resummarize,
+            );
             let (done, skipped) = phase1_summaries(
-                &app, &database, &chapters, &request.story_id,
-                &request.provider, &request.api_key, summaries_model,
+                &app, &database, &chapters, &request.story_id, &config,
             ).await;
             emit(&app, &format!("  ✓ {} summarized, {} skipped.", done, skipped));
+            let _ = db::record_artifact_built(&database.pool, &request.story_id, "summaries", &manuscript_fp).await;
         } else {
             emit(&app, "Step 1: Chapter summaries up to date — skipping.");
         }
@@ -958,7 +969,7 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
         }
         let r = phase2_analyze(
             &app, &database, &request.story_id, &summaries,
-            &request.provider, &request.api_key, genre_model,
+            &request.provider, &request.api_key, &request.model, &request.genre_model,
         ).await;
         if !r.success {
             return err(&r.error);
@@ -970,10 +981,12 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
         emit(&app, "  Ranking genres against master list...");
         if let Err(e) = persist_genre_ranking(
             &app, &database, &request.story_id, &genre_data,
-            &request.provider, &request.api_key, genre_model, &run_ts,
+            &request.provider, &request.api_key, &request.model, &request.genre_model, &run_ts,
         ).await {
             return err(&format!("Genre ranking failed: {}", e));
         }
+        let _ = db::record_artifact_built(&database.pool, &request.story_id, "genre_data", &manuscript_fp).await;
+        let _ = db::record_artifact_built(&database.pool, &request.story_id, "genre_ranking", &manuscript_fp).await;
         if crate::is_cancelled() {
             return err("Cancelled.");
         }
@@ -1081,6 +1094,7 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
                 let _ = db::save_mi_search_terms(&database.pool, &request.story_id, &keywords).await;
                 let rendered = render_search_terms(&keywords);
                 let _ = db::save_document_at(&database.pool, &request.story_id, "mi_search_terms", &rendered, &run_ts).await;
+                let _ = db::record_artifact_built(&database.pool, &request.story_id, "mi_search_terms", &manuscript_fp).await;
                 emit(&app, &format!("  ✓ {} search terms saved.", keywords.len()));
             }
             Err(e) => emit(&app, &format!("  ⚠ Search terms generation failed: {}", e)),
@@ -1108,6 +1122,7 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
         ).await;
         if !bisac_section.is_empty() {
             let _ = db::save_document_at(&database.pool, &request.story_id, "bisac_classification", &bisac_section, &run_ts).await;
+            let _ = db::record_artifact_built(&database.pool, &request.story_id, "bisac", &manuscript_fp).await;
         }
         if crate::is_cancelled() { return err("Cancelled."); }
     }
@@ -1140,6 +1155,7 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
                 })).collect::<Vec<_>>(),
             }).to_string();
             let _ = db::save_document_at(&database.pool, &request.story_id, "keyword_search", &ks_json, &run_ts).await;
+            let _ = db::record_artifact_built(&database.pool, &request.story_id, "keyword_search", &manuscript_fp).await;
         }
         if crate::is_cancelled() { return err("Cancelled."); }
     }
@@ -1205,6 +1221,7 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
                     "keywords": enriched.iter().map(|e| serde_json::json!({ "phrase": e.phrase, "rationale": e.rationale })).collect::<Vec<_>>(),
                 }).to_string();
                 let _ = db::save_document_at(&database.pool, &request.story_id, "discovery_keywords", &dk_json, &run_ts).await;
+                let _ = db::record_artifact_built(&database.pool, &request.story_id, "discovery_keywords", &manuscript_fp).await;
                 emit(&app, &format!("  ✓ {} discovery keywords saved.", enriched.len()));
                 discovery_entries = enriched;
             }
@@ -1252,6 +1269,7 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
                 }).to_string();
                 google_keywords_section = ks_json.clone();
                 let _ = db::save_document_at(&database.pool, &request.story_id, "google_keyword_search", &ks_json, &run_ts).await;
+                let _ = db::record_artifact_built(&database.pool, &request.story_id, "google_keyword_search", &manuscript_fp).await;
                 emit(&app, &format!("  ✓ {} Google keywords saved.", results.len()));
             }
         }
@@ -1325,6 +1343,81 @@ async fn analyze_story_inner(app: AppCtx, request: AnalyzeStoryRequest) -> Genre
             }
         }
         if crate::is_cancelled() { return err("Cancelled."); }
+    }
+
+    // ── Step 9e: Market Intel (KDP — competition, reviews, authors) ────────
+    if platform == "kdp" && !request.canopy_api_key.is_empty() {
+        if wants_report(selected, "competition_report", platform) {
+            emit(&app, "Step 9e: Competition analysis...");
+            let result = crate::canopy::analyze_competition_canopy(
+                app.clone(),
+                crate::canopy::CompetitionCanopyRequest {
+                    story_id: request.story_id.clone(),
+                    api_key: request.api_key.clone(),
+                    model: request.model.clone(),
+                    store: "Kindle".to_string(),
+                    provider: request.provider.clone(),
+                    canopy_api_key: request.canopy_api_key.clone(),
+                },
+            ).await;
+            if result.success {
+                if let Some(content) = db::get_document(&database.pool, &request.story_id, "competition_report").await {
+                    let _ = db::save_document_at(&database.pool, &request.story_id, "competition_report", &content, &run_ts).await;
+                }
+                emit(&app, "  ✓ Competition analysis saved.");
+            } else {
+                emit(&app, &format!("  ⚠ Competition analysis failed: {}", result.error));
+            }
+        }
+        if wants_report(selected, "review_mining", platform) {
+            emit(&app, "Step 9e: Review mining...");
+            let result = crate::canopy::mine_competitor_reviews(
+                app.clone(),
+                crate::canopy::ReviewMiningRequest {
+                    story_id: request.story_id.clone(),
+                    canopy_api_key: request.canopy_api_key.clone(),
+                    api_key: request.api_key.clone(),
+                    model: request.model.clone(),
+                    provider: request.provider.clone(),
+                },
+            ).await;
+            if result.success {
+                if let Some(content) = db::get_document(&database.pool, &request.story_id, "review_mining").await {
+                    let _ = db::save_document_at(&database.pool, &request.story_id, "review_mining", &content, &run_ts).await;
+                }
+                emit(&app, "  ✓ Review mining saved.");
+            } else {
+                emit(&app, &format!("  ⚠ Review mining failed: {}", result.error));
+            }
+        }
+        if wants_report(selected, "author_analysis", platform) {
+            emit(&app, "Step 9e: Author analysis...");
+            let result = crate::canopy::analyze_comp_authors(
+                app.clone(),
+                crate::canopy::AuthorAnalysisRequest {
+                    story_id: request.story_id.clone(),
+                    canopy_api_key: request.canopy_api_key.clone(),
+                    api_key: request.api_key.clone(),
+                    model: request.model.clone(),
+                    provider: request.provider.clone(),
+                },
+            ).await;
+            if result.success {
+                if let Some(content) = db::get_document(&database.pool, &request.story_id, "author_analysis").await {
+                    let _ = db::save_document_at(&database.pool, &request.story_id, "author_analysis", &content, &run_ts).await;
+                }
+                emit(&app, "  ✓ Author analysis saved.");
+            } else {
+                emit(&app, &format!("  ⚠ Author analysis failed: {}", result.error));
+            }
+        }
+        if crate::is_cancelled() { return err("Cancelled."); }
+    } else if platform == "kdp" && (
+        wants_report(selected, "competition_report", platform)
+        || wants_report(selected, "review_mining", platform)
+        || wants_report(selected, "author_analysis", platform)
+    ) {
+        emit(&app, "  ⚠ Canopy API key required for market intel reports — add in Settings.");
     }
 
     let wants_kdp_bundle = wants_kdp_analysis_bundle(selected, platform);
@@ -1542,10 +1635,22 @@ async fn run_craft_pipeline_inner(app: AppCtx, request: CraftPipelineRequest) ->
     crate::reset_cancel();
     let database = app.db.as_ref();
     let run_ts = chrono::Utc::now().to_rfc3339();
-    let needs_ai = request.selected.iter().any(|s| s == "chapter_summaries" || s == "continuity_check");
+    let needs_ai = request.selected.iter().any(|s| {
+        s == "chapter_summaries"
+            || s == "continuity_check"
+            || s == "show_dont_tell"
+            || s == "ai_isms"
+            || super::craft_audits::is_craft_audit(s)
+            || matches!(
+                s.as_str(),
+                "ai_beta_reader" | "cliffhanger_score" | "hook_strength" | "pacing_curve" | "blurb_builder"
+            )
+    });
 
-    if needs_ai && (request.api_key.is_empty() || request.model.is_empty()) {
-        return err("An API key and model are required for the selected reports. Set them in Settings.");
+    if needs_ai {
+        if let Err(msg) = crate::ai::ai_ready(&request.provider, &request.api_key, &request.model) {
+            return err(&msg);
+        }
     }
 
     // ── Chapter Summaries ─────────────────────────────────────────────────
@@ -1554,9 +1659,12 @@ async fn run_craft_pipeline_inner(app: AppCtx, request: CraftPipelineRequest) ->
         let chapters = documents::list_chapters_db(&app.db, &request.story_id).await.unwrap_or_default();
         if chapters.is_empty() { return err("No chapter documents found. Upload manuscript chapters first."); }
 
+        let config = phase1_config_from(
+            &request.provider, &request.api_key, &request.model,
+            &request.model_summaries, false,
+        );
         let (done, skipped) = phase1_summaries(
-            &app, &database, &chapters, &request.story_id,
-            &request.provider, &request.api_key, model_summaries,
+            &app, &database, &chapters, &request.story_id, &config,
         ).await;
         emit(&app, &format!("✓ Chapter summaries complete ({} new, {} skipped).", done, skipped));
 
@@ -1572,6 +1680,9 @@ async fn run_craft_pipeline_inner(app: AppCtx, request: CraftPipelineRequest) ->
                     }).to_string();
                     let _ = db::save_document_at(&database.pool, &request.story_id, "chapter_summaries", &cs_json, &run_ts).await;
                 }
+        let manuscript_fp =
+            crate::manuscript_fingerprint::compute_manuscript_fingerprint(&chapters);
+        let _ = db::record_artifact_built(&database.pool, &request.story_id, "summaries", &manuscript_fp).await;
         if crate::is_cancelled() { return err("Cancelled."); }
     }
 
@@ -1602,6 +1713,7 @@ async fn run_craft_pipeline_inner(app: AppCtx, request: CraftPipelineRequest) ->
                     provider: request.provider.clone(),
                     api_key: request.api_key.clone(),
                     model: model_continuity.clone(),
+                    extraction_model: String::new(),
                     bible_path: request.bible_path.clone(),
                 },
             ).await;
@@ -1620,6 +1732,7 @@ async fn run_craft_pipeline_inner(app: AppCtx, request: CraftPipelineRequest) ->
                     provider: request.provider.clone(),
                     api_key: request.api_key.clone(),
                     model: model_continuity.clone(),
+                    extraction_model: String::new(),
                     bible_path: request.bible_path.clone(),
                 },
             ).await;

@@ -145,15 +145,110 @@ async fn execute_single_chapter_prompt(
 }
 
 /// Normalize a single-chapter LLM response into the standard per-chapter JSON shape.
-pub fn wrap_single_response(raw: &str) -> Result<serde_json::Value, String> {
+pub fn wrap_single_response(template_id: &str, raw: &str) -> Result<serde_json::Value, String> {
     let clean = raw
         .trim()
         .trim_start_matches("```json")
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
-    let obj = extract_json_object(clean).unwrap_or_else(|| clean.to_string());
-    serde_json::from_str(&obj).map_err(|e| format!("Parse error: {} | {}", e, &obj[..obj.len().min(200)]))
+
+    match template_id {
+        "chapter_summary" => {
+            if clean.is_empty() {
+                return Err("Empty summary returned.".into());
+            }
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(clean) {
+                if let Some(s) = crate::analysis::chapters::render_genre_signals(&v) {
+                    return Ok(serde_json::json!({ "summary": s }));
+                }
+            }
+            Ok(serde_json::json!({ "summary": clean }))
+        }
+        "sdt_check" | "ai_isms_check" => {
+            let findings = parse_json_array(clean)?;
+            Ok(serde_json::json!({ "findings": findings }))
+        }
+        "craft_prose_checks" | "craft_prose_checks_single" => {
+            let sdt = parse_json_array_field(clean, "sdt_findings");
+            let ai = parse_json_array_field(clean, "ai_isms_findings");
+            Ok(serde_json::json!({ "sdt_findings": sdt, "ai_isms_findings": ai }))
+        }
+        "continuity_extract" => {
+            let facts = parse_json_array(clean)?;
+            Ok(serde_json::json!({ "facts": facts }))
+        }
+        _ => {
+            let obj = extract_json_object(clean).unwrap_or_else(|| clean.to_string());
+            serde_json::from_str(&obj)
+                .map_err(|e| format!("Parse error: {} | {}", e, &obj[..obj.len().min(200)]))
+        }
+    }
+}
+
+fn parse_json_array_field(clean: &str, field: &str) -> Vec<serde_json::Value> {
+    if let Ok(obj) = serde_json::from_str::<serde_json::Value>(clean) {
+        if let Some(arr) = obj.get(field).and_then(|v| v.as_array()) {
+            return arr.clone();
+        }
+    }
+    if field == "sdt_findings" || field == "findings" {
+        return parse_json_array(clean).unwrap_or_default();
+    }
+    Vec::new()
+}
+
+fn parse_json_array(clean: &str) -> Result<Vec<serde_json::Value>, String> {
+    if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(clean) {
+        return Ok(arr);
+    }
+    let json_str = if clean.starts_with('[') {
+        clean.to_string()
+    } else if let Some(start) = clean.find('[') {
+        extract_bracketed_array(clean, start)
+    } else {
+        clean.to_string()
+    };
+    serde_json::from_str(&json_str).map_err(|e| {
+        format!("Array parse error: {} | {}", e, &json_str[..json_str.len().min(200)])
+    })
+}
+
+fn extract_bracketed_array(clean: &str, start: usize) -> String {
+    let bytes = clean.as_bytes();
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    let mut end = clean.len();
+    for (i, &b) in bytes[start..].iter().enumerate() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        match b {
+            b'\\' if in_string => escape = true,
+            b'"' => in_string = !in_string,
+            b'[' if !in_string => depth += 1,
+            b']' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    end = start + i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    clean[start..end].to_string()
+}
+
+/// Extract a string field from a per-chapter batch value object.
+pub fn chapter_string_field(value: &serde_json::Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// Extract a JSON array field from a per-chapter batch value object.
@@ -190,7 +285,7 @@ pub async fn process_chapters_batched(
 
     if let Some(report_type) = cache_report_type {
         for entry in items {
-            if let Some(cached) = prompts::get_preprocessed(
+            if let Some(cached) = crate::db::load_chapter_ai_cache(
                 &database.pool,
                 story_id,
                 &entry.item.file,
@@ -258,13 +353,13 @@ pub async fn process_chapters_batched(
                 .map(|e| e.source_hash.as_str())
             {
                 if let Ok(json) = serde_json::to_string(value) {
-                    prompts::store_preprocessed(
+                    crate::db::save_chapter_ai_cache(
                         &database.pool,
                         story_id,
                         file,
                         report_type,
-                        &json,
                         hash,
+                        &json,
                     )
                     .await;
                 }
@@ -425,7 +520,7 @@ async fn run_single(
         story_id,
     )
     .await?;
-    wrap_single_response(&raw)
+    wrap_single_response(single_template_id, &raw)
 }
 
 /// Parse `{"chapters": {"file.md": {...}}}` from model output.
@@ -440,4 +535,57 @@ pub fn parse_batch_chapters_map(raw: &str) -> Result<HashMap<String, serde_json:
         .ok_or_else(|| "Batch response missing \"chapters\" object.".to_string())?;
 
     Ok(chapters.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_by_word_budget_splits_heavy_chapters() {
+        let items = vec![
+            BatchChapterItem { file: "a.md".into(), title: "A".into(), text: "word ".repeat(5000) },
+            BatchChapterItem { file: "b.md".into(), title: "B".into(), text: "word ".repeat(5000) },
+            BatchChapterItem { file: "c.md".into(), title: "C".into(), text: "word ".repeat(1000) },
+        ];
+        let chunks = chunk_by_word_budget(&items, 6000);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], vec![0]);
+        assert_eq!(chunks[1], vec![1, 2]);
+    }
+
+    #[test]
+    fn parse_batch_chapters_map_reads_file_keys() {
+        let raw = r#"{"chapters":{"01.md":{"summary":"Romance"},"02.md":{"summary":"Suspense"}}}"#;
+        let map = parse_batch_chapters_map(raw).unwrap();
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            chapter_string_field(&map["01.md"], "summary").as_deref(),
+            Some("Romance")
+        );
+    }
+
+    #[test]
+    fn wrap_single_response_renders_chapter_summary_signals() {
+        let raw = r#"{"setting":"small town","tone":"warm","tropes":["forced proximity"]}"#;
+        let wrapped = wrap_single_response("chapter_summary", raw).unwrap();
+        let summary = chapter_string_field(&wrapped, "summary").unwrap();
+        assert!(summary.contains("Setting: small town"));
+        assert!(summary.contains("Tropes: forced proximity"));
+    }
+
+    #[test]
+    fn wrap_single_response_extracts_findings_array() {
+        let raw = "Here you go:\n[{\"quote\":\"a\"},{\"quote\":\"b\"}]\nDone.";
+        let wrapped = wrap_single_response("sdt_check", raw).unwrap();
+        assert_eq!(chapter_array_field(&wrapped, "findings").len(), 2);
+    }
+
+    #[test]
+    fn wrap_single_response_splits_craft_fields() {
+        let raw = r#"{"sdt_findings":[{"quote":"a"}],"ai_isms_findings":[]}"#;
+        let wrapped = wrap_single_response("craft_prose_checks_single", raw).unwrap();
+        assert_eq!(chapter_array_field(&wrapped, "sdt_findings").len(), 1);
+        assert!(chapter_array_field(&wrapped, "ai_isms_findings").is_empty());
+    }
 }

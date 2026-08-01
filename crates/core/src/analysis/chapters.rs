@@ -1,15 +1,58 @@
-//! analysis/chapters.rs — Phase 1: chapter-by-chapter summarization from DB documents.
+//! analysis/chapters.rs — Phase 1: per-chapter AI genre-signal summaries.
+//!
+//! Change detection uses source_hash only. Summaries are prose stored in
+//! chapter_summaries.signals and fed to book-level genre analysis.
+//!
+//! Chapters come from the `story_assets` manuscript slot (see `documents`),
+//! not from the filesystem, and are summarized in batched AI calls.
 
-use std::collections::HashMap;
-
-use super::{emit, err, GenreResult, FolderRequest};
+use super::chapter_stats::ChapterFingerprint;
+use super::{emit, err, FolderRequest, GenreResult};
 use crate::app_ctx::AppCtx;
+use crate::batch_prompt::{self, BatchChapterItem, CachedBatchItem, DEFAULT_WORD_BUDGET};
 use crate::db;
 use crate::documents::{self, Document};
+use crate::manuscript_fingerprint::{chapter_source_hash, clean_for_ai};
 use crate::prompts;
 
-/// Match desktop Phase 1 truncation for genre-signal summaries.
+/// Max words sent to the summary model (~full chapter for typical manuscripts).
 pub const CHAPTER_SUMMARY_WORD_LIMIT: usize = 1500;
+/// SDT / AI-isms excerpt limit (words).
+pub const CRAFT_EXCERPT_WORD_LIMIT: usize = 2500;
+/// Continuity extract excerpt limit (words).
+pub const CONTINUITY_EXCERPT_WORD_LIMIT: usize = 5000;
+
+pub struct Phase1Config<'a> {
+    pub provider:        &'a str,
+    pub api_key:         &'a str,
+    pub summaries_model: &'a str,
+    pub default_model:   &'a str,
+    pub force:           bool,
+}
+
+impl Phase1Config<'_> {
+    pub fn resolve_summaries_model(&self) -> Result<String, String> {
+        crate::ai::resolve_slot_model(self.summaries_model, self.default_model)
+    }
+}
+
+pub fn phase1_config_from<'a>(
+    provider: &'a str,
+    api_key: &'a str,
+    model: &'a str,
+    summaries_model: &'a str,
+    force: bool,
+) -> Phase1Config<'a> {
+    Phase1Config {
+        provider,
+        api_key,
+        summaries_model,
+        default_model: model,
+        force,
+    }
+}
+
+// ── Command ──────────────────────────────────────────────────────────────────
 
 pub async fn generate_summaries(app: AppCtx, request: FolderRequest) -> GenreResult {
     if !crate::stories::story_exists(&app.db, &request.story_id).await {
@@ -25,35 +68,57 @@ pub async fn generate_summaries(app: AppCtx, request: FolderRequest) -> GenreRes
         return err("No chapter documents found. Upload manuscript chapters first.");
     }
 
-    emit(
-        &app,
-        &format!("Found {} chapter(s). Starting summaries...", chapters.len()),
-    );
-
-    let database = app.db.as_ref();
-    let (done, skipped) = phase1_summaries(
-        &app,
-        database,
-        &chapters,
-        &request.story_id,
+    let config = phase1_config_from(
         &request.provider,
         &request.api_key,
         &request.model,
+        &request.summaries_model,
+        false,
+    );
+    if let Err(msg) = validate_phase1_ai(&config) {
+        return err(&msg);
+    }
+
+    emit(
+        &app,
+        &format!(
+            "Found {} chapter document(s). Summarizing genre signals...",
+            chapters.len()
+        ),
+    );
+
+    let database = app.db.as_ref();
+    let (done, skipped) =
+        phase1_summaries(&app, database, &chapters, &request.story_id, &config).await;
+
+    let run_ts = chrono::Utc::now().to_rfc3339();
+    let manuscript_fp = crate::manuscript_fingerprint::compute_manuscript_fingerprint(&chapters);
+    let _ = db::record_artifact_built(
+        &database.pool,
+        &request.story_id,
+        "summaries",
+        &manuscript_fp,
     )
     .await;
+    let _ = db::sync_manuscript_state(&database.pool, &request.story_id, &manuscript_fp).await;
 
     GenreResult {
         success: true,
-        report: format!("\u{2713} {} summarized, {} already up to date.", done, skipped),
+        report: format!(
+            "\u{2713} {} summarized, {} already up to date.",
+            done, skipped
+        ),
         error: String::new(),
-        run_ts: String::new(),
+        run_ts,
     }
 }
 
-fn emit_summary_progress(app: &AppCtx, filename: &str, status: &str) {
-    let payload = serde_json::json!({ "filename": filename, "status": status }).to_string();
-    app.emit("summary:chapter-progress", &payload);
+fn validate_phase1_ai(config: &Phase1Config<'_>) -> Result<(), String> {
+    let model = config.resolve_summaries_model()?;
+    crate::ai::ai_ready(config.provider, config.api_key, &model)
 }
+
+// ── Phase 1 implementation ───────────────────────────────────────────────────
 
 /// Whether any chapter is missing or stale relative to its current source hash.
 pub async fn any_chapter_needs_summary(
@@ -63,11 +128,11 @@ pub async fn any_chapter_needs_summary(
 ) -> bool {
     for chapter in chapters {
         let fname = documents::chapter_display_name(chapter);
-        let cleaned = crate::manuscript_fingerprint::clean_for_ai(&chapter.content);
+        let cleaned = clean_for_ai(&chapter.content);
         if cleaned.is_empty() {
             continue;
         }
-        let source_hash = crate::manuscript_fingerprint::chapter_source_hash(&cleaned);
+        let source_hash = chapter_source_hash(&cleaned);
         if !db::chapter_has_current_summary(pool, story_id, &fname, &source_hash).await {
             return true;
         }
@@ -80,15 +145,35 @@ pub(crate) async fn phase1_summaries(
     database: &db::Db,
     chapters: &[Document],
     story_id: &str,
-    provider: &str,
-    api_key: &str,
-    model: &str,
+    config: &Phase1Config<'_>,
 ) -> (usize, usize) {
     let mut done = 0usize;
     let mut skipped = 0usize;
 
+    let summaries_model = match config.resolve_summaries_model() {
+        Ok(m) => m,
+        Err(e) => {
+            emit(app, &format!("\u{26a0} {}", e));
+            return (0, 0);
+        }
+    };
+    if let Err(e) = crate::ai::ai_ready(config.provider, config.api_key, &summaries_model) {
+        emit(app, &format!("\u{26a0} {}", e));
+        return (0, 0);
+    }
+
+    struct PendingSummary {
+        item:        BatchChapterItem,
+        source_hash: String,
+        word_count:  i64,
+    }
+
+    let bible = prompts::load_bible_tiered(&app.db, story_id, "", prompts::BibleTier::Medium).await;
+    let mut pending: Vec<PendingSummary> = Vec::new();
+
     for (i, chapter) in chapters.iter().enumerate() {
         let fname = documents::chapter_display_name(chapter);
+
         let content = chapter.content.trim();
         if content.is_empty() {
             emit(
@@ -99,8 +184,8 @@ pub(crate) async fn phase1_summaries(
             continue;
         }
 
-        let cleaned = crate::manuscript_fingerprint::clean_for_ai(content);
-        if cleaned.is_empty() {
+        let cleaned_source = clean_for_ai(content);
+        if cleaned_source.is_empty() {
             emit(
                 app,
                 &format!(
@@ -114,8 +199,10 @@ pub(crate) async fn phase1_summaries(
             continue;
         }
 
-        let source_hash = crate::manuscript_fingerprint::chapter_source_hash(&cleaned);
-        if db::chapter_has_current_summary(&database.pool, story_id, &fname, &source_hash).await {
+        let source_hash = chapter_source_hash(&cleaned_source);
+        if !config.force
+            && db::chapter_has_current_summary(&database.pool, story_id, &fname, &source_hash).await
+        {
             emit(
                 app,
                 &format!(
@@ -130,60 +217,101 @@ pub(crate) async fn phase1_summaries(
             continue;
         }
 
+        let title = if !chapter.title.is_empty() {
+            chapter.title.clone()
+        } else {
+            extract_title(content)
+                .or_else(|| extract_title(&cleaned_source))
+                .unwrap_or_else(|| fname.clone())
+        };
+        let word_count = cleaned_source.split_whitespace().count() as i64;
+        let chapter_text = truncate_words(&cleaned_source, CHAPTER_SUMMARY_WORD_LIMIT);
+
+        pending.push(PendingSummary {
+            item: BatchChapterItem {
+                file:  fname,
+                title,
+                text:  chapter_text,
+            },
+            source_hash,
+            word_count,
+        });
+    }
+
+    if !pending.is_empty() {
         emit(
             app,
-            &format!("  [{}/{}] Summarizing: {}", i + 1, chapters.len(), fname),
+            &format!(
+                "  Summarizing {} chapter(s) in batched AI calls...",
+                pending.len()
+            ),
         );
-        emit_summary_progress(app, &fname, "started");
 
-        let word_count = cleaned.split_whitespace().count();
-        emit(app, &format!("    {} words", word_count));
-
-        let chapter_text = truncate_words(&cleaned, CHAPTER_SUMMARY_WORD_LIMIT);
-        match summarize_chapter(
-            app,
-            provider,
-            api_key,
-            model,
-            story_id,
-            &fname,
-            &chapter_text,
-        )
-        .await
-        {
-            Ok(signals) => {
-                let title = if !chapter.title.is_empty() {
-                    chapter.title.clone()
-                } else {
-                    extract_title(content)
-                        .or_else(|| extract_title(&cleaned))
-                        .unwrap_or_else(|| fname.clone())
-                };
-                match db::save_chapter_summary(
-                    &database.pool,
-                    story_id,
-                    &fname,
-                    &title,
-                    &signals,
-                    &source_hash,
-                    word_count as i64,
-                )
-                .await
-                {
-                    Ok(()) => {
-                        emit(app, &format!("    \u{2713} {} — summary saved", fname));
-                        emit_summary_progress(app, &fname, "done");
-                        done += 1;
-                    }
-                    Err(e) => emit(app, &format!("    \u{26a0} Save error: {}", e)),
-                }
-            }
-            Err(e) => emit(app, &format!("    \u{26a0} AI error: {}", e)),
+        for p in &pending {
+            emit_summary_progress(app, &p.item.file, "started");
         }
 
-        if crate::is_cancelled() {
-            emit(app, "\u{26a0} Cancelled.");
-            break;
+        let batch_items: Vec<CachedBatchItem> = pending
+            .iter()
+            .map(|p| CachedBatchItem {
+                item:        p.item.clone(),
+                source_hash: p.source_hash.clone(),
+            })
+            .collect();
+        let results = batch_prompt::process_chapters_batched(
+            app,
+            database,
+            config.provider,
+            config.api_key,
+            &summaries_model,
+            "chapter_summary_batch",
+            "chapter_summary",
+            &bible,
+            story_id,
+            None,
+            batch_items,
+            DEFAULT_WORD_BUDGET,
+            &[],
+        )
+        .await;
+
+        for p in pending {
+            if crate::is_cancelled() {
+                emit(app, "\u{26a0} Cancelled.");
+                break;
+            }
+
+            let Some(value) = results.get(&p.item.file) else {
+                emit(
+                    app,
+                    &format!("    \u{26a0} {} — no summary returned", p.item.file),
+                );
+                continue;
+            };
+
+            let Some(signals) = render_genre_signals_from_chapter_value(value) else {
+                emit(app, &format!("    \u{26a0} {} — empty summary", p.item.file));
+                continue;
+            };
+
+            match db::save_chapter_summary(
+                &database.pool,
+                story_id,
+                &p.item.file,
+                &p.item.title,
+                &signals,
+                &p.source_hash,
+                p.word_count,
+            )
+            .await
+            {
+                Ok(()) => {
+                    emit(app, &format!("    \u{2713} {} — summary saved", p.item.file));
+                    emit_summary_progress(app, &p.item.file, "done");
+                    done += 1;
+                }
+                Err(e) => emit(app, &format!("    \u{26a0} Save error: {}", e)),
+            }
         }
     }
 
@@ -197,70 +325,88 @@ pub(crate) async fn phase1_summaries(
     (done, skipped)
 }
 
-pub(crate) async fn summarize_chapter(
-    app: &AppCtx,
-    provider: &str,
-    api_key: &str,
-    model: &str,
-    story_id: &str,
-    filename: &str,
-    content: &str,
-) -> Result<String, String> {
-    let bible = documents::load_bible_text(&app.db.pool, story_id).await;
-    let title = extract_title(content).unwrap_or_else(|| filename.to_string());
-
-    let mut vars = HashMap::new();
-    vars.insert("chapter_title", title.as_str());
-    vars.insert("chapter_text", content);
-    vars.insert("bible", bible.as_str());
-
-    prompts::execute_prompt(
-        app,
-        "chapter_summary",
-        provider,
-        api_key,
-        model,
-        vars,
-        Some(story_id),
-    )
-    .await
+fn emit_summary_progress(app: &AppCtx, filename: &str, status: &str) {
+    let payload = serde_json::json!({ "filename": filename, "status": status }).to_string();
+    app.emit("summary:chapter-progress", &payload);
 }
 
-pub(crate) fn truncate_words(text: &str, max_words: usize) -> String {
-    let words: Vec<&str> = text.split_whitespace().collect();
-    if words.len() <= max_words {
-        return text.to_string();
-    }
-    words[..max_words].join(" ") + "\n\n[...truncated...]"
-}
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 pub(crate) fn extract_title(content: &str) -> Option<String> {
-    for line in content.lines().take(20) {
-        let t = line.trim();
-        if t.starts_with('#') {
-            return Some(t.trim_start_matches('#').trim().to_string());
-        }
-        if !t.is_empty() {
-            return Some(t.to_string());
-        }
-    }
-    None
+    content
+        .lines()
+        .take(10)
+        .find(|l| l.trim().starts_with("# "))
+        .map(|l| l.trim().trim_start_matches("# ").trim().to_string())
 }
 
-/// Combine chapter summaries into a single context string for genre analysis.
-pub(crate) fn build_combined_context(summaries: &[db::ChapterSummaryRow]) -> String {
-    summaries
-        .iter()
-        .map(|s| {
-            format!(
-                "## {} ({})\n\n{}",
-                if s.title.is_empty() { &s.file } else { &s.title },
-                s.file,
-                s.signals
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n---\n\n")
+pub(crate) fn truncate_words(text: &str, max: usize) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() <= max {
+        return text.to_string();
+    }
+    words[..max].join(" ") + "\n\n[Truncated]"
+}
+
+/// Render stored genre-signal text from a per-chapter LLM value (structured JSON or legacy prose).
+pub fn render_genre_signals_from_chapter_value(value: &serde_json::Value) -> Option<String> {
+    if let Some(summary) = value.get("summary") {
+        if let Some(s) = render_genre_signals(summary) {
+            return Some(s);
+        }
+    }
+    render_genre_signals(value)
+        .or_else(|| crate::batch_prompt::chapter_string_field(value, "summary"))
+}
+
+/// Compact one-line genre signals from structured JSON or legacy prose string.
+pub fn render_genre_signals(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => {
+            let t = s.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        }
+        serde_json::Value::Object(obj) => {
+            let mut parts: Vec<String> = Vec::new();
+            for (key, label) in [
+                ("setting", "Setting"),
+                ("tone", "Tone"),
+                ("faith_market", "Faith market"),
+                ("faith", "Faith"),
+                ("heat", "Heat"),
+                ("conflict", "Conflict"),
+                ("pacing", "Pacing"),
+                ("voice", "Voice"),
+            ] {
+                if let Some(v) = obj.get(key).and_then(|v| v.as_str()) {
+                    let t = v.trim();
+                    if !t.is_empty() {
+                        parts.push(format!("{label}: {t}"));
+                    }
+                }
+            }
+            if let Some(tropes) = obj.get("tropes").and_then(|v| v.as_array()) {
+                let list: Vec<String> = tropes
+                    .iter()
+                    .filter_map(|t| t.as_str().map(|s| s.trim()).filter(|s| !s.is_empty()))
+                    .map(String::from)
+                    .collect();
+                if !list.is_empty() {
+                    parts.push(format!("Tropes: {}", list.join(", ")));
+                }
+            }
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" | "))
+            }
+        }
+        _ => None,
+    }
 }
 
 /// True when `signals` holds AI prose, not a legacy fingerprint JSON blob.
@@ -269,8 +415,133 @@ pub fn is_prose_summary(signals: &str) -> bool {
     if s.is_empty() {
         return false;
     }
-    if super::chapter_stats::ChapterFingerprint::from_storage(s).is_some() {
+    if ChapterFingerprint::from_storage(s).is_some() {
         return false;
     }
     true
+}
+
+/// Book-level dossier from per-chapter AI genre-signal summaries.
+pub(crate) fn build_combined_context(summaries: &[db::ChapterSummaryRow]) -> String {
+    const ROLLUP_CHAPTER_THRESHOLD: usize = 10;
+    const ROLLUP_CHAR_THRESHOLD: usize = 14_000;
+    const ROLLUP_SNIPPET_CHARS: usize = 420;
+
+    let mut total_chars = 0usize;
+    for s in summaries {
+        total_chars += s.signals.len();
+    }
+
+    let use_rollup =
+        summaries.len() > ROLLUP_CHAPTER_THRESHOLD || total_chars > ROLLUP_CHAR_THRESHOLD;
+
+    let mut out = String::from(
+        "Chapter genre-signal summaries for the full manuscript.\n\
+         Use these to infer genre niche, subgenre, tone, faith vs secular content, heat level, and category fit.\n\n",
+    );
+
+    if use_rollup {
+        out.push_str(
+            "(Rollup mode: long manuscripts are condensed to key signals per chapter.)\n\n",
+        );
+    }
+
+    for (i, s) in summaries.iter().enumerate() {
+        let body = s.signals.trim();
+        if body.is_empty() {
+            continue;
+        }
+        let excerpt = if use_rollup {
+            let snippet: String = body.chars().take(ROLLUP_SNIPPET_CHARS).collect();
+            if body.chars().count() > ROLLUP_SNIPPET_CHARS {
+                format!("{snippet}…")
+            } else {
+                snippet
+            }
+        } else {
+            body.to_string()
+        };
+        out.push_str(&format!(
+            "--- Chapter {} — {} (~{} words) ---\n{}\n\n",
+            i + 1,
+            s.title,
+            s.word_count,
+            excerpt
+        ));
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_title_takes_markdown_heading() {
+        assert_eq!(
+            extract_title("# Chapter One\n\nThe night was cold."),
+            Some("Chapter One".to_string())
+        );
+        assert_eq!(extract_title("The night was cold."), None);
+    }
+
+    #[test]
+    fn truncate_words_marks_truncation() {
+        let text = "a b c d e";
+        assert_eq!(truncate_words(text, 5), text);
+        assert_eq!(truncate_words(text, 2), "a b\n\n[Truncated]");
+    }
+
+    #[test]
+    fn render_genre_signals_structured_json() {
+        let v = serde_json::json!({
+            "setting": "contemporary Seattle",
+            "tone": "romantic suspense",
+            "faith": "secular",
+            "heat": "clean",
+            "tropes": ["forced proximity", "small town"]
+        });
+        let rendered = render_genre_signals(&v).unwrap();
+        assert!(rendered.contains("Faith: secular"));
+        assert!(rendered.contains("forced proximity"));
+    }
+
+    #[test]
+    fn render_genre_signals_from_nested_summary() {
+        let v = serde_json::json!({ "summary": { "tone": "cozy mystery" } });
+        assert_eq!(
+            render_genre_signals_from_chapter_value(&v),
+            Some("Tone: cozy mystery".to_string())
+        );
+    }
+
+    #[test]
+    fn render_genre_signals_from_legacy_prose() {
+        let v = serde_json::json!({ "summary": "Romance with suspense elements." });
+        assert_eq!(
+            render_genre_signals_from_chapter_value(&v),
+            Some("Romance with suspense elements.".to_string())
+        );
+    }
+
+    #[test]
+    fn build_combined_context_uses_prose_summaries() {
+        let row = db::ChapterSummaryRow {
+            file: "01.md".into(),
+            title: "Ch1".into(),
+            signals: "Contemporary romantic suspense. No Christian or faith themes.".into(),
+            word_count: 1500,
+        };
+        let combined = build_combined_context(&[row]);
+        assert!(combined.contains("romantic suspense"));
+        assert!(combined.contains("No Christian"));
+    }
+
+    #[test]
+    fn is_prose_summary_rejects_fingerprint_json() {
+        let fp = super::super::chapter_stats::compute_chapter_fingerprint("T", "text");
+        assert!(!is_prose_summary(&fp.to_storage_json()));
+        assert!(is_prose_summary("Romance with suspense elements."));
+    }
 }

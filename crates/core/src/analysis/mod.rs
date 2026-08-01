@@ -50,6 +50,11 @@ pub struct FolderRequest {
     pub provider: String,
     #[serde(default)]
     pub canopy_api_key: String,
+    #[serde(default)]
+    pub genre_model: String,
+    /// Optional per-function model slot; falls back to `model`.
+    #[serde(default)]
+    pub summaries_model: String,
 }
 
 #[derive(Deserialize, serde::Serialize)]

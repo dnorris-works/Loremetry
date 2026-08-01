@@ -22,6 +22,7 @@ pub async fn clear_chapter_summaries(app: AppCtx, story_id: String) -> Result<()
         return Err("Story not found.".into());
     }
     db::delete_chapter_summaries(&app.db.pool, &story_id).await?;
+    db::mark_artifacts_stale(&app.db.pool, &story_id).await?;
     db::archive_all_current_reports(&app.db.pool, &story_id, "summaries_cleared").await?;
     Ok(())
 }

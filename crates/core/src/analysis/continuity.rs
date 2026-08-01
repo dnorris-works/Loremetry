@@ -6,9 +6,9 @@
 // *means*, not just how it's shaped. So this module uses the LLM for two
 // distinct passes:
 //
-//   1. Extraction — one call per chapter, pulling out continuity-relevant
-//      facts (who/what/where/when) as structured data. Cheap, deterministic
-//      in shape even if not in content.
+//   1. Extraction — batched calls across chapters, pulling out
+//      continuity-relevant facts (who/what/where/when) as structured data.
+//      Cheap, deterministic in shape even if not in content.
 //   2. Judgment — after cheap, non-AI pre-filtering narrows facts down to
 //      only entity+attribute groups with more than one distinct recorded
 //      value, the LLM judges each surviving group: genuine contradiction,
@@ -20,10 +20,13 @@
 use std::collections::HashMap;
 
 use super::{emit, err, GenreResult};
-use super::chapters::{extract_title, truncate_words};
+use super::chapters::{extract_title, truncate_words, CONTINUITY_EXCERPT_WORD_LIMIT};
 use crate::app_ctx::AppCtx;
+use crate::batch_prompt::{self, BatchChapterItem, CachedBatchItem, DEFAULT_WORD_BUDGET};
 use crate::db;
 use crate::documents;
+use crate::manuscript_fingerprint;
+use crate::prompts::BibleTier;
 
 // ── Requests ─────────────────────────────────────────────────────────────────
 
@@ -35,6 +38,8 @@ pub struct ContinuityRequest {
     pub api_key:  String,
     pub model:    String,
     #[serde(default)]
+    pub extraction_model: String,
+    #[serde(default)]
     pub bible_path: String,
 }
 
@@ -44,6 +49,8 @@ pub struct SeriesContinuityRequest {
     pub provider:  String,
     pub api_key:   String,
     pub model:     String,
+    #[serde(default)]
+    pub extraction_model: String,
     #[serde(default)]
     pub bible_path: String,
 }
@@ -85,6 +92,9 @@ pub async fn check_continuity_for_story(app: AppCtx, request: ContinuityRequest)
     if !crate::stories::story_exists(&app.db, &request.story_id).await {
         return err("Story not found.");
     }
+    if let Err(msg) = crate::ai::ai_ready(&request.provider, &request.api_key, &request.model) {
+        return err(&msg);
+    }
     crate::reset_cancel();
 
     let database = app.db.as_ref();
@@ -95,9 +105,11 @@ pub async fn check_continuity_for_story(app: AppCtx, request: ContinuityRequest)
         .ok()
         .flatten()
         .unwrap_or_else(|| request.story_id.clone());
-    let bible = crate::prompts::load_bible_for_story(&app.db, &request.story_id, &request.bible_path).await;
+    let bible = crate::prompts::load_bible_tiered(&app.db, &request.story_id, &request.bible_path, BibleTier::Medium).await;
+    let extraction_model = crate::ai::resolve_slot_model(&request.extraction_model, &request.model)
+        .unwrap_or_else(|_| request.model.clone());
 
-    let book = match extract_book_facts(&app, &database, &request.story_id, &story_name, &request.provider, &request.api_key, &request.model, &bible).await {
+    let book = match extract_book_facts(&app, &database, &request.story_id, &story_name, &request.provider, &request.api_key, &extraction_model, &bible).await {
         Ok(b) => b,
         Err(e) => return err(&e),
     };
@@ -124,6 +136,9 @@ pub async fn check_continuity_for_story(app: AppCtx, request: ContinuityRequest)
 // ── Series-scope command ────────────────────────────────────────────────────
 
 pub async fn check_continuity_for_series(app: AppCtx, request: SeriesContinuityRequest) -> GenreResult {
+    if let Err(msg) = crate::ai::ai_ready(&request.provider, &request.api_key, &request.model) {
+        return err(&msg);
+    }
     crate::reset_cancel();
     let database = app.db.as_ref();
 
@@ -139,15 +154,17 @@ pub async fn check_continuity_for_series(app: AppCtx, request: SeriesContinuityR
         crate::prompts::load_bible(&request.bible_path)
     } else {
         let first_story = &books_meta[0].story_id;
-        crate::prompts::discover_bible(&app.db, first_story).await
+        crate::prompts::load_bible_tiered(&app.db, first_story, "", BibleTier::Medium).await
     };
+    let extraction_model = crate::ai::resolve_slot_model(&request.extraction_model, &request.model)
+        .unwrap_or_else(|_| request.model.clone());
 
     emit(&app, &format!("Series has {} book(s) in reading order.", books_meta.len()));
 
     let mut books: Vec<Book> = Vec::new();
     for meta in &books_meta {
         emit(&app, &format!("— {} —", meta.story_name));
-        let book = match extract_book_facts(&app, &database, &meta.story_id, &meta.story_name, &request.provider, &request.api_key, &request.model, &bible).await {
+        let book = match extract_book_facts(&app, &database, &meta.story_id, &meta.story_name, &request.provider, &request.api_key, &extraction_model, &bible).await {
             Ok(b) => b,
             Err(e) => { emit(&app, &format!("  ⚠ Skipping {}: {}", meta.story_name, e)); continue; }
         };
@@ -199,7 +216,9 @@ async fn extract_book_facts(
 
     emit(app, &format!("  Extracting continuity facts from {} chapter(s)...", chapters_docs.len()));
 
-    let mut chapters = Vec::with_capacity(chapters_docs.len());
+    let mut chapter_meta: Vec<(usize, String, String)> = Vec::new();
+    let mut batch_items: Vec<CachedBatchItem> = Vec::new();
+
     for (i, chapter) in chapters_docs.iter().enumerate() {
         let fname = documents::chapter_display_name(chapter);
         let raw = chapter.content.trim();
@@ -210,68 +229,55 @@ async fn extract_book_facts(
             extract_title(raw).unwrap_or_else(|| fname.clone())
         };
 
-        let facts = match extract_facts_for_chapter(app, story_id, provider, api_key, model, &fname, &truncate_words(raw, 6000), bible).await {
-            Ok(f) => f,
-            Err(e) => { emit(app, &format!("    ⚠ {}: {}", fname, e)); Vec::new() }
-        };
+        let cleaned = manuscript_fingerprint::clean_for_ai(raw);
+        chapter_meta.push((i, fname.clone(), title.clone()));
+        batch_items.push(CachedBatchItem {
+            item: BatchChapterItem {
+                file: fname,
+                title,
+                text: truncate_words(raw, CONTINUITY_EXCERPT_WORD_LIMIT),
+            },
+            source_hash: manuscript_fingerprint::chapter_source_hash(&cleaned),
+        });
+    }
 
+    let results = batch_prompt::process_chapters_batched(
+        app,
+        db,
+        provider,
+        api_key,
+        model,
+        "continuity_extract_batch",
+        "continuity_extract",
+        bible,
+        story_id,
+        Some("continuity_extract"),
+        batch_items,
+        DEFAULT_WORD_BUDGET,
+        &[],
+    )
+    .await;
+
+    let mut chapters = Vec::with_capacity(chapter_meta.len());
+    for (i, fname, title) in chapter_meta {
+        let facts = match results.get(&fname) {
+            Some(value) => parse_facts(value),
+            None => Vec::new(),
+        };
         emit(app, &format!("    [{}/{}] {} — {} fact(s)", i + 1, chapters_docs.len(), fname, facts.len()));
         chapters.push(ChapterFacts { chapter_index: i, file: fname, title, facts });
-
         if crate::is_cancelled() { break; }
     }
 
     Ok(Book { story_id: story_id.to_string(), story_name: story_name.to_string(), chapters })
 }
 
-async fn extract_facts_for_chapter(
-    app: &AppCtx,
-    story_id: &str,
-    provider: &str,
-    api_key: &str,
-    model: &str,
-    filename: &str,
-    content: &str,
-    bible: &str,
-) -> Result<Vec<AiFact>, String> {
-    use std::collections::HashMap;
-
-    let mut vars = HashMap::new();
-    vars.insert("chapter_title", filename);
-    vars.insert("chapter_text", content);
-    vars.insert("bible", bible);
-
-    let raw = crate::prompts::execute_prompt(
-        app,
-        "continuity_extract",
-        provider,
-        api_key,
-        model,
-        vars,
-        Some(story_id),
-    )
-    .await?;
-
-    let clean = raw.trim()
-        .trim_start_matches("```json").trim_start_matches("```")
-        .trim_end_matches("```").trim();
-
-    serde_json::from_str::<Vec<AiFact>>(clean)
-        .map(|facts| facts.into_iter().filter(|f| !f.entity.is_empty() && !f.attribute.is_empty() && !f.value.is_empty()).collect())
-        .or_else(|_| {
-            // Fallback: parse as array of Value and extract valid items individually
-            let arr = serde_json::from_str::<Vec<serde_json::Value>>(clean)
-                .map_err(|e| format!("Parse error (facts): {} | got: {}", e, &clean[..clean.len().min(200)]))?;
-            let mut good = Vec::new();
-            for item in arr {
-                if let Ok(f) = serde_json::from_value::<AiFact>(item) {
-                    if !f.entity.is_empty() && !f.attribute.is_empty() && !f.value.is_empty() {
-                        good.push(f);
-                    }
-                }
-            }
-            Ok(good)
-        })
+fn parse_facts(value: &serde_json::Value) -> Vec<AiFact> {
+    batch_prompt::chapter_array_field(value, "facts")
+        .into_iter()
+        .filter_map(|item| serde_json::from_value::<AiFact>(item).ok())
+        .filter(|f| !f.entity.is_empty() && !f.attribute.is_empty() && !f.value.is_empty())
+        .collect()
 }
 
 fn flatten_facts(book: &Book) -> Vec<db::ContinuityFactRow> {

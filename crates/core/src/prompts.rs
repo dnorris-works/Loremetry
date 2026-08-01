@@ -38,8 +38,62 @@ pub async fn load_template(pool: &PgPool, template_id: &str) -> Result<PromptTem
     })
 }
 
+/// How much story bible context to attach to a prompt (desktop parity).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BibleTier {
+    /// Full bible + characters + locations (up to 8k words).
+    Full,
+    /// Characters + locations only (up to 2k words) — summaries, continuity.
+    Medium,
+    /// No bible — mechanical checks (pacing, cliffhanger, SDT).
+    Minimal,
+}
+
+const BIBLE_FULL_WORD_LIMIT: usize = 8000;
+const BIBLE_MEDIUM_WORD_LIMIT: usize = 2000;
+
+/// Load bible text for a story at the requested detail tier.
+pub async fn load_bible_tiered(
+    db: &Db,
+    story_id: &str,
+    explicit_bible_path: &str,
+    tier: BibleTier,
+) -> String {
+    match tier {
+        BibleTier::Minimal => String::new(),
+        BibleTier::Medium => discover_bible_medium(db, story_id).await,
+        BibleTier::Full => load_bible_for_story(db, story_id, explicit_bible_path).await,
+    }
+}
+
+async fn discover_bible_medium(db: &Db, story_id: &str) -> String {
+    let mut parts = Vec::new();
+    for slot in [crate::assets::SLOT_CHARACTER, crate::assets::SLOT_LOCATION] {
+        if let Ok(rows) = crate::assets::list_assets_by_slot(&db.pool, story_id, slot).await {
+            for asset in rows {
+                if asset.content.trim().is_empty() {
+                    continue;
+                }
+                parts.push(format!("## {}\n\n{}", asset.title, asset.content));
+            }
+        }
+    }
+    truncate_words_joined(&parts.join("\n\n---\n\n"), BIBLE_MEDIUM_WORD_LIMIT)
+}
+
+fn truncate_words_joined(text: &str, max_words: usize) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() <= max_words {
+        return text.to_string();
+    }
+    words[..max_words].join(" ") + "\n[Bible truncated]"
+}
+
 pub async fn discover_bible(db: &Db, story_id: &str) -> String {
-    truncate_bible(&documents::load_bible_text(&db.pool, story_id).await)
+    truncate_words_joined(
+        &documents::load_bible_text(&db.pool, story_id).await,
+        BIBLE_FULL_WORD_LIMIT,
+    )
 }
 
 pub async fn load_bible_for_story(db: &Db, story_id: &str, explicit_bible_path: &str) -> String {
@@ -59,17 +113,8 @@ pub fn load_bible(bible_path: &str) -> String {
         return String::new();
     }
     match std::fs::read_to_string(path) {
-        Ok(text) => truncate_bible(&text),
+        Ok(text) => truncate_words_joined(&text, BIBLE_FULL_WORD_LIMIT),
         Err(_) => String::new(),
-    }
-}
-
-fn truncate_bible(text: &str) -> String {
-    let words: Vec<&str> = text.split_whitespace().collect();
-    if words.len() > 8000 {
-        words[..8000].join(" ") + "\n[Bible truncated]"
-    } else {
-        text.to_string()
     }
 }
 
@@ -223,15 +268,15 @@ pub async fn execute_prompt_db(
 
 #[allow(dead_code)]
 pub fn preprocess_for_continuity(content: &str) -> String {
-    truncate_words(content, 4000)
+    truncate_words(content, crate::analysis::chapters::CONTINUITY_EXCERPT_WORD_LIMIT)
 }
 
 pub fn preprocess_for_sdt(content: &str) -> String {
-    truncate_words(content, 4000)
+    truncate_words(content, crate::analysis::chapters::CRAFT_EXCERPT_WORD_LIMIT)
 }
 
 pub fn preprocess_for_ai_isms(content: &str) -> String {
-    truncate_words(content, 4000)
+    truncate_words(content, crate::analysis::chapters::CRAFT_EXCERPT_WORD_LIMIT)
 }
 
 #[allow(dead_code)]

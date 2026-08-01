@@ -50,14 +50,17 @@ pub(crate) struct StoreMatchResult {
 struct CatalogMatch { index: usize, confidence: u8, reason: String }
 
 #[derive(Deserialize)]
+struct BatchGenreCatalogMatch {
+    #[serde(default)]
+    picks: Vec<CatalogMatch>,
+}
+
+#[derive(Deserialize)]
 pub struct VerifyMappedRequest {
     #[serde(alias = "folder")]
     pub story_id: String,
     pub store:  String,
 }
-
-const FIT_CONFIDENCE_BAR: u8 = 55;
-const MAX_QUALIFYING_PER_STORE: usize = 8;
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
 
@@ -298,10 +301,15 @@ pub(crate) async fn match_categories_by_store(
     base_description: &str, genre_terms: &[(String, u8)],
     provider: &str, api_key: &str, model: &str,
 ) -> StoreMatchResult {
+    let thresholds = db::load_analysis_thresholds(&database.pool).await;
+    let fit_bar = thresholds.category_fit_confidence_bar;
+    let max_qualifying = thresholds.max_qualifying_per_store;
+
     let mut per_genre: Vec<(String, u8, Vec<(String, u8, String)>)> = Vec::new();
     let mut path_genres: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
     let mut path_conf: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
 
+    let mut genre_candidates: Vec<(String, u8, Vec<(String, String)>)> = Vec::new();
     for (genre_name, genre_conf) in genre_terms {
         emit(app, &format!("  → {} ({}%)", genre_name, genre_conf));
 
@@ -314,19 +322,50 @@ pub(crate) async fn match_categories_by_store(
             continue;
         }
         emit(app, &format!("      {} candidates found.", candidates.len()));
+        genre_candidates.push((genre_name.clone(), *genre_conf, candidates));
+    }
 
-        let desc = format!("{}\n\nScore specifically against this one genre: {}", base_description, genre_name);
-        let picks = match ai_match_from_catalog(app, folder, provider, api_key, model, &desc, &candidates, 2).await {
-            Ok(p) => p,
-            Err(e) => { emit(app, &format!("      ⚠ AI error for this genre: {}", e)); Vec::new() }
+    let batch_picks = if genre_candidates.len() > 1 {
+        match ai_match_genres_batch(
+            app,
+            folder,
+            provider,
+            api_key,
+            model,
+            base_description,
+            &genre_candidates,
+            2,
+        )
+        .await
+        {
+            Ok(map) => map,
+            Err(e) => {
+                emit(app, &format!("      ⚠ Batch AI error: {} — falling back per genre.", e));
+                HashMap::new()
+            }
+        }
+    } else {
+        HashMap::new()
+    };
+
+    for (genre_name, genre_conf, candidates) in genre_candidates {
+        let picks = if let Some(batch) = batch_picks.get(&genre_name) {
+            batch.clone()
+        } else {
+            let desc = format!("{}\n\nScore specifically against this one genre: {}", base_description, genre_name);
+            match ai_match_from_catalog(app, folder, provider, api_key, model, &desc, &candidates, 2).await {
+                Ok(p) => p,
+                Err(e) => { emit(app, &format!("      ⚠ AI error for this genre: {}", e)); Vec::new() }
+            }
         };
+
         if picks.is_empty() { emit(app, "      no confident match for this genre."); }
         for (path, conf, _reason) in &picks {
             emit(app, &format!("      {}% — {}", conf, path));
             path_genres.entry(path.clone()).or_default().push(genre_name.clone());
             path_conf.entry(path.clone()).or_insert(*conf);
         }
-        per_genre.push((genre_name.clone(), *genre_conf, picks));
+        per_genre.push((genre_name, genre_conf, picks));
     }
 
     let mut ranked_paths: Vec<String> = path_genres.keys().cloned().collect();
@@ -347,13 +386,13 @@ pub(crate) async fn match_categories_by_store(
     }
     emit(app, &format!(
         "  Fit gate (confidence ≥{}%, or 2+ genres agree): {} of {} candidates qualify for a discoverability check.",
-        FIT_CONFIDENCE_BAR, ranked_paths.iter().filter(|p| path_conf[*p] >= FIT_CONFIDENCE_BAR || path_genres[*p].len() >= 2).count(),
+        fit_bar, ranked_paths.iter().filter(|p| path_conf[*p] >= fit_bar || path_genres[*p].len() >= 2).count(),
         ranked_paths.len()
     ));
 
     let qualifying: Vec<(String, u8, Vec<String>)> = ranked_paths.into_iter()
-        .filter(|p| path_conf[p] >= FIT_CONFIDENCE_BAR || path_genres[p].len() >= 2)
-        .take(MAX_QUALIFYING_PER_STORE)
+        .filter(|p| path_conf[p] >= fit_bar || path_genres[p].len() >= 2)
+        .take(max_qualifying)
         .map(|path| {
             let conf = path_conf[&path];
             let genres = path_genres[&path].clone();
@@ -440,4 +479,87 @@ pub(crate) async fn ai_match_from_catalog(
     Ok(matches.into_iter().filter_map(|m| {
         candidates.get(m.index.checked_sub(1)?).map(|(path, _)| (path.clone(), m.confidence, m.reason))
     }).collect())
+}
+
+/// Score every ranked genre's candidate list in a single AI call.
+/// Returns picks keyed by genre name; genres absent from the response fall back
+/// to a per-genre call at the call site.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn ai_match_genres_batch(
+    app: &AppCtx,
+    story_id: &str,
+    provider: &str,
+    api_key: &str,
+    model: &str,
+    base_description: &str,
+    genre_candidates: &[(String, u8, Vec<(String, String)>)],
+    max_picks: usize,
+) -> Result<HashMap<String, Vec<(String, u8, String)>>, String> {
+    let max_picks_str = max_picks.to_string();
+    let mut genre_blocks = String::new();
+    for (genre_name, genre_conf, candidates) in genre_candidates {
+        let list = candidates
+            .iter()
+            .enumerate()
+            .map(|(i, (path, _))| format!("{}. {}", i + 1, path))
+            .collect::<Vec<_>>()
+            .join("\n");
+        genre_blocks.push_str(&format!(
+            "GENRE: {genre_name} ({genre_conf}%)\nCandidates:\n{list}\n\n"
+        ));
+    }
+
+    let mut vars = HashMap::new();
+    vars.insert("max_picks", max_picks_str.as_str());
+    vars.insert("genre_blocks", genre_blocks.as_str());
+    vars.insert("description", base_description);
+
+    let raw = prompts::execute_prompt(
+        app,
+        "kdp_category_match_batch",
+        provider,
+        api_key,
+        model,
+        vars,
+        Some(story_id),
+    )
+    .await?;
+    let clean = raw.trim()
+        .trim_start_matches("```json").trim_start_matches("```")
+        .trim_end_matches("```").trim();
+
+    let root: serde_json::Value = serde_json::from_str(clean)
+        .map_err(|e| format!("Parse error (batch catalog match): {} | got: {}", e, &clean[..clean.len().min(300)]))?;
+
+    let genres_obj = root
+        .get("genres")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| "Batch catalog response missing \"genres\" object.".to_string())?;
+
+    let mut out: HashMap<String, Vec<(String, u8, String)>> = HashMap::new();
+    for (genre_name, _genre_conf, candidates) in genre_candidates {
+        let Some(value) = genres_obj.get(genre_name) else {
+            continue;
+        };
+        let picks: Vec<CatalogMatch> = if let Ok(arr) = serde_json::from_value::<Vec<CatalogMatch>>(value.clone()) {
+            arr
+        } else if let Ok(wrapped) = serde_json::from_value::<BatchGenreCatalogMatch>(value.clone()) {
+            wrapped.picks
+        } else {
+            continue;
+        };
+        let mapped: Vec<(String, u8, String)> = picks
+            .into_iter()
+            .filter_map(|m| {
+                candidates
+                    .get(m.index.checked_sub(1)?)
+                    .map(|(path, _)| (path.clone(), m.confidence, m.reason))
+            })
+            .collect();
+        if !mapped.is_empty() {
+            out.insert(genre_name.clone(), mapped);
+        }
+    }
+
+    Ok(out)
 }
