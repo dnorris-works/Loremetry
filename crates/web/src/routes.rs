@@ -1,10 +1,13 @@
+use axum::body::Body;
+use axum::http::{header, StatusCode};
 use axum::middleware;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::extract::{Path, Query};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
 use axum::{Json, Router};
 use loremetry_core::analysis::pipeline;
+use loremetry_core::asset_export;
 use loremetry_core::canopy::{self, MarketIntelRequest};
 use loremetry_core::commands;
 use loremetry_core::dataforseo;
@@ -73,6 +76,7 @@ pub fn build_router(state: AppState) -> Router {
             "/stories/{story_id}/documents/upload",
             post(upload::upload_chapters),
         )
+        .route("/stories/{story_id}/export.zip", get(export_story_zip))
         .route(
             "/stories/{story_id}/files",
             get(list_manuscript_files),
@@ -282,6 +286,34 @@ async fn delete_document(
     };
     match documents::delete_document(&state.ctx.db.pool, &story_id, id).await {
         Ok(()) => ok_json(json!({ "success": true })),
+        Err(e) => json_error(e),
+    }
+}
+
+async fn export_story_zip(
+    State(state): State<AppState>,
+    Path(story_id): Path<String>,
+) -> impl IntoResponse {
+    let story_name = sqlx::query_scalar::<_, String>(
+        "SELECT name FROM stories WHERE id = $1",
+    )
+    .bind(&story_id)
+    .fetch_optional(&state.ctx.db.pool)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| story_id.clone());
+
+    match asset_export::export_story_zip(&state.ctx.db, &story_id, &story_name).await {
+        Ok(exp) => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/zip")
+            .header(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}\"", exp.filename),
+            )
+            .body(Body::from(exp.bytes))
+            .unwrap_or_else(|_| json_error("Could not build zip response")),
         Err(e) => json_error(e),
     }
 }

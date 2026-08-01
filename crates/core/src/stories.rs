@@ -172,10 +172,7 @@ pub async fn delete_story(app: AppCtx, id: String) -> StoriesResult {
         .bind(&id)
         .execute(&app.db.pool)
         .await;
-    let _ = sqlx::query("DELETE FROM manuscripts WHERE story_id = $1")
-        .bind(&id)
-        .execute(&app.db.pool)
-        .await;
+    let _ = crate::assets::delete_all_assets(&app.db.pool, &id).await;
     let owner = app.user_id();
     match load_all(&app.db.pool, owner).await {
         Ok(stories) => StoriesResult {

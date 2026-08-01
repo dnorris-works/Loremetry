@@ -17,7 +17,7 @@ RUN cargo build --release -p loremetry-web \
     && cp target/release/loremetry-web /build/loremetry-web
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 pandoc \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=rust /build/loremetry-web /app/loremetry-web

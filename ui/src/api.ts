@@ -246,12 +246,19 @@ export function disconnectAnalysisLogStream(): void {
   analysisLogUnsubs = null;
 }
 
+export interface UploadResult {
+  uploaded: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+}
+
 export async function uploadDocuments(
   storyId: string,
   files: FileList | File[],
   kind: ManuscriptKind = 'chapter',
   options?: { replace?: boolean },
-): Promise<{ uploaded: number; skipped: number }> {
+): Promise<UploadResult> {
   assertAppSession();
   const prepared = prepareUploadFiles(files, kind);
   if (prepared.length === 0) {
@@ -282,7 +289,7 @@ export async function uploadDocuments(
   }
 
   if (toUpload.length === 0) {
-    return { uploaded: 0, skipped };
+    return { uploaded: 0, updated: 0, skipped, errors: [] };
   }
 
   const fd = new FormData();
@@ -303,14 +310,23 @@ export async function uploadDocuments(
   const data = await res.json() as {
     success?: boolean;
     errors?: string[];
+    updated?: number;
+    skipped?: number;
     documents?: {
       id: number;
       path_hint: string;
       title: string;
+      action?: string;
     }[];
   };
-  if (data.errors?.length) {
-    throw new Error(data.errors.join('; '));
+
+  const serverSkipped = data.skipped ?? 0;
+  const serverUpdated = data.updated ?? 0;
+  const errors = data.errors ?? [];
+  const created = (data.documents ?? []).filter(d => d.action !== 'updated').length;
+
+  if (errors.length && !data.documents?.length) {
+    throw new Error(errors.join('; '));
   }
 
   const docsByPath = new Map(
@@ -334,7 +350,12 @@ export async function uploadDocuments(
     }));
   }
 
-  return { uploaded: data.documents?.length ?? toUpload.length, skipped };
+  return {
+    uploaded: created,
+    updated: serverUpdated,
+    skipped: skipped + serverSkipped,
+    errors,
+  };
 }
 
 export async function saveZeigarnikReport(
@@ -377,7 +398,8 @@ async function saveClientReport(
 
 export { removeCachedChapter };
 
-const MANUSCRIPT_EXT = /\.(md|markdown|txt)$/i;
+const MANUSCRIPT_EXT = /\.(md|markdown|txt|docx)$/i;
+const ZIP_EXT = /\.zip$/i;
 
 function relativeUploadPath(file: File): string {
   const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
@@ -387,7 +409,7 @@ function relativeUploadPath(file: File): string {
 
 function isManuscriptPath(path: string): boolean {
   const base = path.split('/').pop() || path;
-  return MANUSCRIPT_EXT.test(base);
+  return MANUSCRIPT_EXT.test(base) || ZIP_EXT.test(base);
 }
 
 /** Strip the common top-level folder name from a folder upload, keep act subfolders. */
@@ -420,6 +442,27 @@ function prepareUploadFiles(
 /** @deprecated Use uploadDocuments with kind 'chapter' */
 export async function uploadChapters(storyId: string, files: FileList | File[]): Promise<{ uploaded: number; skipped: number }> {
   return uploadDocuments(storyId, files, 'chapter');
+}
+
+export async function downloadStoryZip(storyId: string, storyName?: string): Promise<void> {
+  assertAppSession();
+  const headers = await buildAuthHeaders();
+  const res = await fetch(
+    `/api/stories/${encodeURIComponent(storyId)}/export.zip`,
+    { headers },
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { error?: string }).error || 'Export failed');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const safe = (storyName || storyId).replace(/[^\w.-]+/g, '_');
+  a.download = `${safe}.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function listStoryDocuments(storyId: string): Promise<DocumentMeta[]> {

@@ -5,6 +5,7 @@ import {
   listStoryDocuments,
   deleteStoryDocument,
   removeCachedChapter,
+  downloadStoryZip,
 } from '../api';
 import { storiesKey, showPanelKey, analysisKey } from '../injectionKeys';
 import type { DocumentMeta, ManuscriptKind } from '../types';
@@ -22,6 +23,7 @@ const bumpFileTree = inject<() => void>('bumpFileTree', () => {});
 const loading = ref(false);
 const uploading = ref(false);
 const uploadMessage = ref('');
+const importErrors = ref<string[]>([]);
 const error = ref('');
 const documents = ref<DocumentMeta[]>([]);
 
@@ -99,16 +101,21 @@ async function onUpload(
   uploading.value = true;
   error.value = '';
   uploadMessage.value = '';
+  importErrors.value = [];
   try {
-    const { uploaded, skipped } = await uploadDocuments(storyId, files, kind, { replace });
+    const { uploaded, updated, skipped, errors } = await uploadDocuments(storyId, files, kind, { replace });
     const parts: string[] = [];
     if (uploaded > 0) {
-      parts.push(`Uploaded ${uploaded} file${uploaded === 1 ? '' : 's'}`);
+      parts.push(`${uploaded} new`);
+    }
+    if (updated > 0) {
+      parts.push(`${updated} updated`);
     }
     if (skipped > 0) {
-      parts.push(`${skipped} unchanged (skipped)`);
+      parts.push(`${skipped} unchanged`);
     }
-    uploadMessage.value = parts.length ? `${parts.join('; ')}.` : 'No changes to upload.';
+    uploadMessage.value = parts.length ? `Import: ${parts.join(', ')}.` : 'No changes to upload.';
+    importErrors.value = errors;
     await refresh();
     bumpFileTree();
   } catch (e) {
@@ -152,6 +159,18 @@ function wizardBack(): void {
 function finishWizard(): void {
   showPanel('analyzer');
 }
+
+async function onDownloadZip(): Promise<void> {
+  const storyId = storiesCtx.activeFolder.value;
+  const story = storiesCtx.activeStory.value;
+  if (!storyId) return;
+  error.value = '';
+  try {
+    await downloadStoryZip(storyId, story?.name);
+  } catch (e) {
+    error.value = String(e);
+  }
+}
 </script>
 
 <template>
@@ -177,6 +196,9 @@ function finishWizard(): void {
         <span :class="{ ok: hasChapters }">{{ chapters.length }} chapters</span>
         <span>{{ bibles.length }} bible</span>
         <span>{{ referenceCount }} reference</span>
+        <button type="button" class="btn btn-secondary btn-sm" :disabled="!hasChapters" @click="onDownloadZip">
+          Download zip
+        </button>
       </div>
     </header>
 
@@ -207,7 +229,7 @@ function finishWizard(): void {
               {{ uploading ? 'Uploading…' : 'Choose folder' }}
               <input
                 type="file"
-                accept=".md,.txt,text/markdown,text/plain"
+                accept=".md,.txt,.docx,.zip,text/markdown,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/zip"
                 webkitdirectory
                 multiple
                 hidden
@@ -219,7 +241,7 @@ function finishWizard(): void {
               Add files
               <input
                 type="file"
-                accept=".md,.txt,text/markdown,text/plain"
+                accept=".md,.txt,.docx,.zip,text/markdown,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/zip"
                 multiple
                 hidden
                 :disabled="uploading"
@@ -229,9 +251,8 @@ function finishWizard(): void {
           </div>
         </div>
         <p class="section-hint">
-          Point at the folder where your chapter <code>.md</code> / <code>.txt</code> files live.
-          Subfolders (e.g. <code>Act-1/</code>, <code>Act-2/</code>) are kept for order.
-          One file = one chapter.
+          Point at the folder where your chapter files live (<code>.md</code>, <code>.docx</code>, or a <code>.zip</code> export).
+          Subfolders (e.g. <code>Act-1/</code>) are kept for order. Re-upload merges changed files only.
         </p>
         <ul v-if="chapters.length" class="doc-list">
           <li v-for="doc in chapters" :key="doc.id" class="doc-row">
@@ -254,7 +275,7 @@ function finishWizard(): void {
               {{ bibles.length ? 'Replace bible' : 'Upload bible' }}
               <input
                 type="file"
-                accept=".md,.txt,text/markdown,text/plain"
+                accept=".md,.txt,.docx,.zip,text/markdown,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/zip"
                 hidden
                 :disabled="uploading"
                 @change="onUpload($event, 'bible', true)"
@@ -264,7 +285,7 @@ function finishWizard(): void {
               Add another
               <input
                 type="file"
-                accept=".md,.txt,text/markdown,text/plain"
+                accept=".md,.txt,.docx,.zip,text/markdown,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/zip"
                 hidden
                 :disabled="uploading"
                 @change="onUpload($event, 'bible')"
@@ -305,7 +326,7 @@ function finishWizard(): void {
               Add files
               <input
                 type="file"
-                accept=".md,.txt,text/markdown,text/plain"
+                accept=".md,.txt,.docx,.zip,text/markdown,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/zip"
                 multiple
                 hidden
                 :disabled="uploading"
@@ -329,7 +350,7 @@ function finishWizard(): void {
               Add files
               <input
                 type="file"
-                accept=".md,.txt,text/markdown,text/plain"
+                accept=".md,.txt,.docx,.zip,text/markdown,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/zip"
                 multiple
                 hidden
                 :disabled="uploading"
@@ -349,6 +370,9 @@ function finishWizard(): void {
     </div>
 
     <div v-if="uploadMessage" class="upload-message">{{ uploadMessage }}</div>
+    <ul v-if="importErrors.length" class="import-errors">
+      <li v-for="(msg, i) in importErrors" :key="i">{{ msg }}</li>
+    </ul>
     <div v-if="error" class="form-error">{{ error }}</div>
 
     <footer class="sources-footer">
@@ -629,6 +653,16 @@ function finishWizard(): void {
   color: var(--accent);
   font-size: 12px;
   margin-top: 8px;
+}
+
+.import-errors {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--danger);
+  list-style: disc inside;
 }
 
 .form-error {

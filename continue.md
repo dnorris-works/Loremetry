@@ -228,9 +228,9 @@ Provider API keys, Clerk issuer/publishable key, bootstrap admin → **Postgres*
 | Repo + Docker + Postgres migrations | **Done** | `crates/core/migrations/` |
 | Auth + users | **Done** | Clerk + operator bypass; per-user secrets |
 | Stories CRUD | **Done** | `lore.stories` |
-| Asset upload (slots/kinds) | **Partial** | MD + `kind` param; no DOCX, hash merge, import report |
-| Asset list / edit / delete UI | **Partial** | documents API + invoke paths |
-| Zip download + manifest | **Not done** | |
+| Asset upload (slots/kinds) | **Done** | MD + DOCX via `story_assets`; hash merge; zip import/export |
+| Asset list / edit / delete UI | **Done** | documents API + Story sources panel |
+| Zip download + manifest | **Done** | `GET /api/stories/{id}/export.zip` |
 | Report types metadata | **Partial** | `lore.report_types` seeded; craft groups copied |
 | Analysis E2E | **Partial** | KDP/Wide + craft/publish subset in core; synchronous in API |
 | Analyzer UI parity | **Mostly done** | Platform tabs, craft groups, saved panel; no help/spend footer |
@@ -252,7 +252,7 @@ Full parity is **not** a v1 blocker. When porting, follow this order:
 2. **Craft pipeline** — ~~`craft_audits.rs`, groups, `run_craft_pipeline`~~ **done**
 3. **Publish tab** — ~~finish `publish_audits.rs` (4 remaining) + renderer schemas + `batch_prompt`~~ **done**
 4. **Settings (user)** — ~~AI model slots, Canopy/DataForSEO tests, story data / summary refresh, archived reports~~ **done**
-5. **Content ops** — `story_assets` migration, DOCX ingest, hash-merge upload, zip round-trip
+5. **Content ops** — ~~`story_assets` migration, DOCX ingest, hash-merge upload, zip round-trip~~ **done**
 6. **Worker split** — long jobs off the API process
 7. **Marketing mode** — optional later unless product asks
 

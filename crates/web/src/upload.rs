@@ -1,6 +1,8 @@
 use axum::extract::{Multipart, Path, Query, State};
 use axum::response::IntoResponse;
-use loremetry_core::documents::{self, UpsertDocumentRequest};
+use loremetry_core::assets::{self, MergeAction};
+use loremetry_core::asset_export::{read_zip_entries, read_zip_manifest};
+use loremetry_core::docx::{convert_docx_to_markdown, docx_to_md_filename};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -9,79 +11,182 @@ use crate::state::AppState;
 
 #[derive(Deserialize, Default)]
 pub struct UploadQuery {
-    /// chapter | bible | character | location
+    /// chapter | bible | character | location (maps to story_assets slots)
     #[serde(default)]
     pub kind: String,
-    /// When true, delete existing documents of this kind before uploading (bible only).
+    /// When true, delete existing bible slot assets before uploading.
     #[serde(default)]
     pub replace: bool,
 }
 
-fn normalize_kind(kind: &str) -> &'static str {
-    let k = kind.trim().to_lowercase();
-    match k.as_str() {
-        "bible" => "bible",
-        "character" | "characters" => "character",
-        "location" | "locations" => "location",
-        _ => "chapter",
-    }
+fn default_slot(kind: &str) -> &'static str {
+    assets::slot_from_kind(kind)
 }
 
-fn path_hint_for_kind(kind: &str, filename: &str) -> String {
-    let normalized = filename.replace('\\', "/");
-    let name = if normalized.is_empty() {
-        "untitled.md".to_string()
-    } else {
-        normalized
+fn infer_slot_from_zip_path(path: &str, default: &str) -> (String, String) {
+    let normalized = path.replace('\\', "/");
+    let parts: Vec<&str> = normalized.split('/').filter(|p| !p.is_empty()).collect();
+    if parts.is_empty() {
+        return (default.to_string(), "untitled.md".to_string());
+    }
+    let folder = parts[0].to_lowercase();
+    let filename = parts.last().map_or("untitled.md", |s| *s).to_string();
+    let slot = match folder.as_str() {
+        "manuscript" => assets::SLOT_MANUSCRIPT,
+        "bible" => assets::SLOT_BIBLE,
+        "characters" | "character" => assets::SLOT_CHARACTER,
+        "locations" | "location" => assets::SLOT_LOCATION,
+        "reports" => return (String::new(), filename), // skip reports on re-import
+        _ => default,
     };
-    match kind {
-        "bible" => {
-            let base = basename(&name);
-            format!("Bible/{base}")
-        }
-        "character" => {
-            let base = basename(&name);
-            format!("Characters/{base}")
-        }
-        "location" => {
-            let base = basename(&name);
-            format!("Locations/{base}")
-        }
-        _ => name,
+    (slot.to_string(), filename)
+}
+
+struct ProcessedFile {
+    slot: String,
+    filename: String,
+    title: String,
+    content: String,
+    source_format: String,
+}
+
+fn process_bytes(
+    raw_path: &str,
+    bytes: &[u8],
+    slot: &str,
+) -> Result<ProcessedFile, String> {
+    let filename = assets::sanitize_filename(raw_path);
+    let lower = filename.to_lowercase();
+
+    if lower.ends_with(".docx") {
+        let content = convert_docx_to_markdown(bytes)?;
+        let md_name = docx_to_md_filename(&filename);
+        let title = assets::title_from_filename(&md_name);
+        return Ok(ProcessedFile {
+            slot: slot.to_string(),
+            filename: md_name,
+            title,
+            content,
+            source_format: "docx".to_string(),
+        });
     }
-}
 
-fn basename(path: &str) -> String {
-    path.rsplit('/')
-        .next()
-        .filter(|s| !s.is_empty())
-        .unwrap_or(path)
-        .to_string()
-}
-
-fn title_from_path(path: &str) -> String {
-    let base = basename(path);
-    base.trim_end_matches(".md")
-        .trim_end_matches(".txt")
-        .trim_end_matches(".markdown")
-        .to_string()
-}
-
-fn is_manuscript_filename(path: &str) -> bool {
-    let lower = basename(path).to_lowercase();
-    lower.ends_with(".md") || lower.ends_with(".txt") || lower.ends_with(".markdown")
-}
-
-async fn maybe_replace_kind(pool: &sqlx::PgPool, story_id: &str, kind: &str, replace: bool) {
-    if replace && kind == "bible" {
-        let _ = sqlx::query("DELETE FROM manuscripts WHERE story_id = $1 AND kind = 'bible'")
-            .bind(story_id)
-            .execute(pool)
-            .await;
+    if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".txt") {
+        let content = String::from_utf8_lossy(bytes).to_string();
+        let md_name = if lower.ends_with(".txt") {
+            format!("{}.md", filename.trim_end_matches(".txt"))
+        } else {
+            filename.clone()
+        };
+        let title = assets::title_from_filename(&md_name);
+        return Ok(ProcessedFile {
+            slot: slot.to_string(),
+            filename: md_name,
+            title,
+            content,
+            source_format: "md".to_string(),
+        });
     }
+
+    Err(format!("{filename}: unsupported format (use .md or .docx)"))
 }
 
-/// POST /api/stories/:story_id/documents/upload — multipart files → story documents.
+async fn process_zip_upload(
+    pool: &sqlx::PgPool,
+    story_id: &str,
+    bytes: &[u8],
+    default_slot: &str,
+    replace_bible: bool,
+) -> (Vec<serde_json::Value>, Vec<String>, usize, usize) {
+    let mut created = Vec::new();
+    let mut errors = Vec::new();
+    let mut updated = 0usize;
+    let mut skipped = 0usize;
+
+    if replace_bible {
+        let _ = assets::delete_assets_by_slot(pool, story_id, assets::SLOT_BIBLE).await;
+    }
+
+    let manifest = read_zip_manifest(bytes);
+    let manifest_map: std::collections::HashMap<String, (String, i32)> = manifest
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| (e.filename.to_lowercase(), (e.slot, e.sort_order)))
+        .collect();
+
+    let entries = match read_zip_entries(bytes) {
+        Ok(e) => e,
+        Err(e) => {
+            errors.push(e);
+            return (created, errors, updated, skipped);
+        }
+    };
+
+    for (path, data) in entries {
+        let (slot, filename) = if let Some((slot, order)) = manifest_map.get(&assets::sanitize_filename(&path).to_lowercase()) {
+            (slot.clone(), assets::sanitize_filename(&path))
+        } else {
+            infer_slot_from_zip_path(&path, default_slot)
+        };
+        if slot.is_empty() {
+            continue; // Reports/ etc.
+        }
+        if !assets::is_allowed_upload_filename(&filename) {
+            errors.push(format!("{path}: unsupported format"));
+            continue;
+        }
+        match process_bytes(&filename, &data, &slot) {
+            Ok(pf) => {
+                let order = manifest_map
+                    .get(&pf.filename.to_lowercase())
+                    .map(|(_, o)| *o);
+                match assets::merge_asset(
+                    pool,
+                    story_id,
+                    &pf.slot,
+                    &pf.filename,
+                    &pf.title,
+                    &pf.content,
+                    &pf.source_format,
+                    order,
+                )
+                .await
+                {
+                    Ok((asset, action)) => {
+                        match action {
+                            MergeAction::Created => {
+                                created.push(json!({
+                                    "id": asset.id,
+                                    "kind": assets::kind_from_slot(&asset.slot),
+                                    "path_hint": assets::path_hint_for(&asset.slot, &asset.filename),
+                                    "title": asset.title,
+                                    "action": "created",
+                                }));
+                            }
+                            MergeAction::Updated => {
+                                updated += 1;
+                                created.push(json!({
+                                    "id": asset.id,
+                                    "kind": assets::kind_from_slot(&asset.slot),
+                                    "path_hint": assets::path_hint_for(&asset.slot, &asset.filename),
+                                    "title": asset.title,
+                                    "action": "updated",
+                                }));
+                            }
+                            MergeAction::Skipped => skipped += 1,
+                        }
+                    }
+                    Err(e) => errors.push(format!("{path}: {e}")),
+                }
+            }
+            Err(e) => errors.push(e),
+        }
+    }
+
+    (created, errors, updated, skipped)
+}
+
+/// POST /api/stories/:story_id/documents/upload — multipart files → story_assets (merge by hash).
 pub async fn upload_chapters(
     State(state): State<AppState>,
     Path(story_id): Path<String>,
@@ -92,11 +197,15 @@ pub async fn upload_chapters(
         return json_error(format!("Story not found: {story_id}"));
     }
 
-    let kind = normalize_kind(&query.kind);
-    maybe_replace_kind(&state.ctx.db.pool, &story_id, kind, query.replace).await;
+    let default_slot = default_slot(&query.kind);
+    if query.replace && default_slot == assets::SLOT_BIBLE {
+        let _ = assets::delete_assets_by_slot(&state.ctx.db.pool, &story_id, assets::SLOT_BIBLE).await;
+    }
 
-    let mut created = Vec::new();
+    let mut documents = Vec::new();
     let mut errors = Vec::new();
+    let mut updated = 0usize;
+    let mut skipped = 0usize;
 
     loop {
         let field = match multipart.next_field().await {
@@ -110,10 +219,6 @@ pub async fn upload_chapters(
             .map(|s| s.to_string())
             .unwrap_or_else(|| "untitled.md".into());
 
-        if kind == "chapter" && !is_manuscript_filename(&filename) {
-            continue;
-        }
-
         let bytes = match field.bytes().await {
             Ok(b) => b,
             Err(e) => {
@@ -121,35 +226,77 @@ pub async fn upload_chapters(
                 continue;
             }
         };
-        let content = String::from_utf8_lossy(&bytes).to_string();
-        let title = title_from_path(&filename);
 
-        let req = UpsertDocumentRequest {
-            story_id: story_id.clone(),
-            kind: kind.to_string(),
-            title: title.clone(),
-            path_hint: path_hint_for_kind(kind, &filename),
-            content,
-            id: None,
-        };
+        if assets::is_zip_filename(&filename) {
+            let (zip_docs, zip_errors, zip_updated, zip_skipped) = process_zip_upload(
+                &state.ctx.db.pool,
+                &story_id,
+                &bytes,
+                default_slot,
+                false,
+            )
+            .await;
+            documents.extend(zip_docs);
+            errors.extend(zip_errors);
+            updated += zip_updated;
+            skipped += zip_skipped;
+            continue;
+        }
 
-        match documents::upsert_document(&state.ctx.db.pool, &req).await {
-            Ok(doc) => {
-                created.push(json!({
-                    "id": doc.id,
-                    "kind": doc.kind,
-                    "path": format!("doc:{}", doc.id),
-                    "title": doc.title,
-                    "path_hint": doc.path_hint,
-                }));
+        if !assets::is_allowed_upload_filename(&filename) {
+            errors.push(format!("{filename}: unsupported format (use .md, .txt, or .docx)"));
+            continue;
+        }
+
+        let slot = default_slot;
+        match process_bytes(&filename, &bytes, slot) {
+            Ok(pf) => {
+                match assets::merge_asset(
+                    &state.ctx.db.pool,
+                    &story_id,
+                    &pf.slot,
+                    &pf.filename,
+                    &pf.title,
+                    &pf.content,
+                    &pf.source_format,
+                    None,
+                )
+                .await
+                {
+                    Ok((asset, action)) => match action {
+                        MergeAction::Created => {
+                            documents.push(json!({
+                                "id": asset.id,
+                                "kind": assets::kind_from_slot(&asset.slot),
+                                "path_hint": assets::path_hint_for(&asset.slot, &asset.filename),
+                                "title": asset.title,
+                                "action": "created",
+                            }));
+                        }
+                        MergeAction::Updated => {
+                            updated += 1;
+                            documents.push(json!({
+                                "id": asset.id,
+                                "kind": assets::kind_from_slot(&asset.slot),
+                                "path_hint": assets::path_hint_for(&asset.slot, &asset.filename),
+                                "title": asset.title,
+                                "action": "updated",
+                            }));
+                        }
+                        MergeAction::Skipped => skipped += 1,
+                    },
+                    Err(e) => errors.push(format!("{filename}: {e}")),
+                }
             }
-            Err(e) => errors.push(format!("{filename}: {e}")),
+            Err(e) => errors.push(e),
         }
     }
 
     ok_json(json!({
         "success": errors.is_empty(),
-        "documents": created,
+        "documents": documents,
+        "updated": updated,
+        "skipped": skipped,
         "errors": errors,
     }))
 }

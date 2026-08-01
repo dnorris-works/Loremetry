@@ -19,7 +19,9 @@ thiserror = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 aes-gcm = "0.10"
 rand = "0.8"
+sha2 = "0.10"
 subtle = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 proptest = "1"
