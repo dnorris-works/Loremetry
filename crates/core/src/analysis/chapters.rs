@@ -162,6 +162,8 @@ pub(crate) async fn phase1_summaries(
         return (0, 0);
     }
 
+    emit(app, &format!("  Using model: {} (provider: {})", summaries_model, config.provider));
+
     struct PendingSummary {
         item:        BatchChapterItem,
         source_hash: String,

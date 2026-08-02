@@ -257,9 +257,7 @@ async fn fetch_tokenmix_models(api_key: &str) -> ModelsResult {
         .unwrap_or(&Vec::new())
         .iter()
         .filter_map(|m| {
-            let id = m["model_id"].as_str()
-                .or_else(|| m["id"].as_str())
-                .unwrap_or("");
+            let id = m["id"].as_str().unwrap_or("");
             if id.is_empty() { return None; }
 
             // Pricing: pass through raw values from API
