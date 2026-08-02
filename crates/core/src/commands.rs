@@ -210,7 +210,7 @@ pub async fn list_models(
     api_key: String,
 ) -> Result<ModelsResult, String> {
     Ok(match provider.as_str() {
-        "tokenmix" => fetch_tokenmix_models(&api_key).await,
+        "tokenmix" => fetch_tokenmix_models(&api_key, db).await,
         "claude" => fetch_claude_models(db).await,
         _ => ModelsResult {
             success: false, models: Vec::new(),
@@ -219,7 +219,7 @@ pub async fn list_models(
     })
 }
 
-async fn fetch_tokenmix_models(api_key: &str) -> ModelsResult {
+async fn fetch_tokenmix_models(api_key: &str, db: &crate::db::Db) -> ModelsResult {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
@@ -228,81 +228,7 @@ async fn fetch_tokenmix_models(api_key: &str) -> ModelsResult {
         Err(e) => return ModelsResult { success: false, models: Vec::new(), error: format!("Client error: {}", e) },
     };
 
-    // Fetch from the primary endpoint (has type=llm filter)
-    let primary_models = fetch_from_aihubmix(&client, api_key).await;
-
-    // If primary returned models with pricing, use them
-    if !primary_models.is_empty() && primary_models.iter().any(|m| m.input_price.is_some()) {
-        return ModelsResult { success: true, models: primary_models, error: String::new() };
-    }
-
-    // If primary has models but no pricing, get pricing from legacy endpoint and merge
-    if !primary_models.is_empty() {
-        let legacy_models = fetch_from_legacy(&client, api_key).await;
-        let merged = merge_pricing(primary_models, &legacy_models);
-        return ModelsResult { success: true, models: merged, error: String::new() };
-    }
-
-    // Primary failed entirely, use legacy
-    let legacy_models = fetch_from_legacy(&client, api_key).await;
-    if legacy_models.is_empty() {
-        return ModelsResult { success: false, models: Vec::new(), error: "No models returned from either endpoint.".into() };
-    }
-    ModelsResult { success: true, models: legacy_models, error: String::new() }
-}
-
-async fn fetch_from_aihubmix(client: &reqwest::Client, api_key: &str) -> Vec<ModelInfo> {
-    let resp = match client
-        .get("https://aihubmix.com/api/v1/models?type=llm")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(_) => return Vec::new(),
-    };
-
-    let json: Value = match resp.json().await {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-
-    if json.get("error").is_some() {
-        return Vec::new();
-    }
-
-    json["data"]
-        .as_array()
-        .unwrap_or(&Vec::new())
-        .iter()
-        .filter_map(|m| {
-            let id = m["id"].as_str().unwrap_or("");
-            if id.is_empty() { return None; }
-
-            // Try multiple pricing paths
-            let input_price = m["pricing"]["input"].as_f64()
-                .or_else(|| m["pricing"]["prompt"].as_f64())
-                .or_else(|| m["input_price"].as_f64())
-                .or_else(|| m["pricing"]["input_cost_per_token"].as_f64());
-            let output_price = m["pricing"]["output"].as_f64()
-                .or_else(|| m["pricing"]["completion"].as_f64())
-                .or_else(|| m["output_price"].as_f64())
-                .or_else(|| m["pricing"]["output_cost_per_token"].as_f64());
-
-            Some(ModelInfo {
-                id: id.to_string(),
-                owned_by: m["owned_by"].as_str()
-                    .or_else(|| m["desc"].as_str().map(|d| &d[..d.len().min(40)]))
-                    .unwrap_or("")
-                    .to_string(),
-                input_price,
-                output_price,
-            })
-        })
-        .collect()
-}
-
-async fn fetch_from_legacy(client: &reqwest::Client, api_key: &str) -> Vec<ModelInfo> {
+    // Get available model IDs from the API
     let resp = match client
         .get("https://api.tokenmix.ai/v1/models")
         .header("Authorization", format!("Bearer {}", api_key))
@@ -310,61 +236,67 @@ async fn fetch_from_legacy(client: &reqwest::Client, api_key: &str) -> Vec<Model
         .await
     {
         Ok(r) => r,
-        Err(_) => return Vec::new(),
+        Err(e) => return ModelsResult { success: false, models: Vec::new(), error: format!("Request failed: {}", e) },
     };
 
     let json: Value = match resp.json().await {
         Ok(v) => v,
-        Err(_) => return Vec::new(),
+        Err(e) => return ModelsResult { success: false, models: Vec::new(), error: format!("Parse failed: {}", e) },
     };
 
-    if json.get("error").is_some() {
-        return Vec::new();
+    if let Some(err) = json.get("error") {
+        let msg = err["message"].as_str().unwrap_or("unknown");
+        return ModelsResult { success: false, models: Vec::new(), error: format!("API error: {}", msg) };
     }
 
-    json["data"]
+    let api_models: Vec<(String, String)> = json["data"]
         .as_array()
         .unwrap_or(&Vec::new())
         .iter()
         .filter_map(|m| {
             let id = m["id"].as_str().unwrap_or("");
             if id.is_empty() { return None; }
-
-            let input_price = m["pricing"]["input"].as_f64()
-                .or_else(|| m["pricing"]["prompt"].as_f64());
-            let output_price = m["pricing"]["output"].as_f64()
-                .or_else(|| m["pricing"]["completion"].as_f64());
-
-            Some(ModelInfo {
-                id: id.to_string(),
-                owned_by: m["owned_by"].as_str().unwrap_or("").to_string(),
-                input_price,
-                output_price,
-            })
+            let owned_by = m["owned_by"].as_str().unwrap_or("").to_string();
+            Some((id.to_string(), owned_by))
         })
-        .collect()
-}
-
-/// Merge pricing from legacy models into primary models (matched by id).
-fn merge_pricing(mut primary: Vec<ModelInfo>, legacy: &[ModelInfo]) -> Vec<ModelInfo> {
-    let pricing_map: HashMap<&str, (&Option<f64>, &Option<f64>)> = legacy
-        .iter()
-        .map(|m| (m.id.as_str(), (&m.input_price, &m.output_price)))
         .collect();
 
-    for model in &mut primary {
-        if model.input_price.is_none() || model.output_price.is_none() {
-            if let Some((input, output)) = pricing_map.get(model.id.as_str()) {
-                if model.input_price.is_none() {
-                    model.input_price = **input;
-                }
-                if model.output_price.is_none() {
-                    model.output_price = **output;
-                }
-            }
-        }
+    if api_models.is_empty() {
+        return ModelsResult { success: false, models: Vec::new(), error: "No models returned from API.".into() };
     }
-    primary
+
+    // Get pricing from our DB (provider_models table, seeded from provider-models.json)
+    let db_models = crate::db::list_provider_models(&db.pool, "tokenmix").await;
+    let pricing_map: HashMap<&str, (Option<f64>, Option<f64>)> = db_models
+        .iter()
+        .map(|m| (m.id.as_str(), (m.input_price, m.output_price)))
+        .collect();
+
+    // Also check "claude" provider entries since TokenMix proxies those same model IDs
+    let claude_models = crate::db::list_provider_models(&db.pool, "claude").await;
+    let claude_pricing: HashMap<&str, (Option<f64>, Option<f64>)> = claude_models
+        .iter()
+        .map(|m| (m.id.as_str(), (m.input_price, m.output_price)))
+        .collect();
+
+    let models: Vec<ModelInfo> = api_models
+        .into_iter()
+        .map(|(id, owned_by)| {
+            let (input_price, output_price) = pricing_map.get(id.as_str())
+                .or_else(|| claude_pricing.get(id.as_str()))
+                .copied()
+                .unwrap_or((None, None));
+            ModelInfo { id, owned_by, input_price, output_price }
+        })
+        .collect();
+
+    // Debug: log first model to verify IDs match
+    if let Some(first) = models.first() {
+        log::info!("TokenMix models loaded: {} total, first: {} (pricing: {:?}/{:?})", 
+            models.len(), first.id, first.input_price, first.output_price);
+    }
+
+    ModelsResult { success: true, models, error: String::new() }
 }
 
 async fn fetch_claude_models(db: &crate::db::Db) -> ModelsResult {

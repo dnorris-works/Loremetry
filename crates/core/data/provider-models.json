@@ -3,5 +3,12 @@
   {"id": "claude-sonnet-4-20250514", "provider": "claude", "owned_by": "anthropic", "input_price": 3.0, "output_price": 15.0, "sort_order": 2},
   {"id": "claude-haiku-4-5-20251001", "provider": "claude", "owned_by": "anthropic", "input_price": 1.0, "output_price": 5.0, "sort_order": 3},
   {"id": "claude-3-5-sonnet-20241022", "provider": "claude", "owned_by": "anthropic", "input_price": 3.0, "output_price": 15.0, "sort_order": 4},
-  {"id": "claude-3-5-haiku-20241022", "provider": "claude", "owned_by": "anthropic", "input_price": 0.8, "output_price": 4.0, "sort_order": 5}
+  {"id": "claude-3-5-haiku-20241022", "provider": "claude", "owned_by": "anthropic", "input_price": 0.8, "output_price": 4.0, "sort_order": 5},
+  {"id": "gpt-4o-mini", "provider": "tokenmix", "owned_by": "openai", "input_price": 0.15, "output_price": 0.6, "sort_order": 10},
+  {"id": "gpt-4o", "provider": "tokenmix", "owned_by": "openai", "input_price": 2.5, "output_price": 10.0, "sort_order": 11},
+  {"id": "gpt-4.1-mini", "provider": "tokenmix", "owned_by": "openai", "input_price": 0.4, "output_price": 1.6, "sort_order": 12},
+  {"id": "gpt-4.1", "provider": "tokenmix", "owned_by": "openai", "input_price": 2.0, "output_price": 8.0, "sort_order": 13},
+  {"id": "claude-sonnet-4-20250514", "provider": "tokenmix", "owned_by": "anthropic", "input_price": 3.0, "output_price": 15.0, "sort_order": 14},
+  {"id": "claude-haiku-4-5-20251001", "provider": "tokenmix", "owned_by": "anthropic", "input_price": 1.0, "output_price": 5.0, "sort_order": 15},
+  {"id": "claude-3-5-sonnet-20241022", "provider": "tokenmix", "owned_by": "anthropic", "input_price": 3.0, "output_price": 15.0, "sort_order": 16}
 ]
