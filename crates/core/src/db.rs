@@ -137,6 +137,14 @@ async fn run_migrations(pool: &PgPool) -> Result<(), String> {
                     .map_err(|e| format!("while executing migrations: {e}"))?;
                 return Ok(());
             }
+            if is_migration_15_checksum_mismatch(&msg) {
+                repair_stale_migration_15_record(pool).await?;
+                migrator
+                    .run(pool)
+                    .await
+                    .map_err(|e| format!("while executing migrations: {e}"))?;
+                return Ok(());
+            }
             Err(format!("while executing migrations: {e}"))
         }
     }
@@ -166,6 +174,23 @@ async fn repair_stale_migration_2_record(pool: &PgPool) -> Result<(), String> {
             "migration 2 checksum mismatch but no version=2 row in public._sqlx_migrations".into(),
         );
     }
+    Ok(())
+}
+
+fn is_migration_15_checksum_mismatch(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    (m.contains("migration 15") || m.contains("version 15"))
+        && m.contains("has been modified")
+}
+
+async fn repair_stale_migration_15_record(pool: &PgPool) -> Result<(), String> {
+    log::warn!(
+        "Migration 015 checksum mismatch — removing stale record and re-applying (idempotent DROP TABLE IF EXISTS)"
+    );
+    sqlx::query("DELETE FROM public._sqlx_migrations WHERE version = 15")
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
