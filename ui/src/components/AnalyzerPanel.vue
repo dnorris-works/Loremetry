@@ -729,6 +729,18 @@ function summaryFileMarker(file: string): string {
       >Refresh Summaries</button>
     </div>
 
+    <!-- Activity indicator -->
+    <div
+      v-if="(hasRun || analysisCtx.summaryRunActive.value) && analysisCtx.isWorking.value"
+      class="activity-indicator"
+    >
+      <div class="spinner"></div>
+      <span class="activity-text">Working...</span>
+    </div>
+
+    <!-- Log output (only shown after first run) -->
+    <LogStream v-if="hasRun || analysisCtx.summaryRunActive.value" />
+
     <div v-if="summaryStatus.needsRefresh || Object.keys(analysisCtx.summaryFileProgress.value).length" class="summary-issues">
       <div v-if="summaryIssueFiles.missing.length > 0 || Object.keys(analysisCtx.summaryFileProgress.value).length">
         <span v-if="summaryIssueFiles.missing.length > 0" class="summary-issues-label">Missing summaries:</span>
@@ -890,17 +902,6 @@ function summaryFileMarker(file: string): string {
       </template>
     </div>
 
-    <!-- Activity indicator -->
-    <div
-      v-if="(hasRun || analysisCtx.summaryRunActive.value) && analysisCtx.isWorking.value"
-      class="activity-indicator"
-    >
-      <div class="spinner"></div>
-      <span class="activity-text">Working...</span>
-    </div>
-
-    <!-- Log output (only shown after first run) -->
-    <LogStream v-if="hasRun || analysisCtx.summaryRunActive.value" />
   </div>
 </template>
 
@@ -1307,8 +1308,13 @@ function summaryFileMarker(file: string): string {
 
 .summary-issues {
   margin-bottom: 12px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
+  max-height: 120px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
 }
 
 .summary-issues-label {
@@ -1328,8 +1334,9 @@ function summaryFileMarker(file: string): string {
 
 .summary-file-item {
   display: flex;
-  gap: 6px;
-  padding: 2px 0;
+  gap: 4px;
+  padding: 1px 0;
+  line-height: 1.4;
 }
 
 .summary-file-done {
