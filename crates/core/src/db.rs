@@ -129,69 +129,62 @@ async fn run_migrations(pool: &PgPool) -> Result<(), String> {
         Ok(()) => Ok(()),
         Err(e) => {
             let msg = e.to_string();
-            if is_migration_2_checksum_mismatch(&msg) {
-                repair_stale_migration_2_record(pool).await?;
-                migrator
-                    .run(pool)
-                    .await
-                    .map_err(|e| format!("while executing migrations: {e}"))?;
-                return Ok(());
-            }
-            if is_migration_15_checksum_mismatch(&msg) {
-                repair_stale_migration_15_record(pool).await?;
-                migrator
-                    .run(pool)
-                    .await
-                    .map_err(|e| format!("while executing migrations: {e}"))?;
-                return Ok(());
+            log::error!("Migration error (raw): {msg}");
+            
+            // Detect any "previously applied but has been modified" error
+            if msg.contains("has been modified") || msg.contains("previously applied") {
+                if let Some(version) = extract_modified_migration_version(&msg) {
+                    log::warn!(
+                        "Migration {version} checksum mismatch — auto-repairing by removing stale record"
+                    );
+                    match sqlx::query("DELETE FROM public._sqlx_migrations WHERE version = $1")
+                        .bind(version)
+                        .execute(pool)
+                        .await
+                    {
+                        Ok(r) => log::info!("Deleted {} row(s) from _sqlx_migrations for version {version}", r.rows_affected()),
+                        Err(del_err) => {
+                            log::error!("Failed to delete migration record: {del_err}");
+                            return Err(format!("while executing migrations: {msg} (repair failed: {del_err})"));
+                        }
+                    }
+                    migrator
+                        .run(pool)
+                        .await
+                        .map_err(|e| format!("while executing migrations (after repair): {e}"))?;
+                    return Ok(());
+                } else {
+                    log::error!("Could not extract migration version from: {msg}");
+                }
             }
             Err(format!("while executing migrations: {e}"))
         }
     }
 }
 
-fn is_migration_2_checksum_mismatch(msg: &str) -> bool {
-    let m = msg.to_lowercase();
-    (m.contains("migration 2") || m.contains("version 2"))
-        && m.contains("has been modified")
-}
-
-/// Migration 002 was edited after first deploy (search_path / idempotent fixes).
-/// Re-run idempotent 002 by dropping the stale ledger row.
-async fn repair_stale_migration_2_record(pool: &PgPool) -> Result<(), String> {
-    log::warn!(
-        "Migration 002 checksum mismatch — removing stale public._sqlx_migrations row and re-applying idempotent migration 002"
-    );
-    eprintln!(
-        "NOTICE: Migration 002 checksum mismatch — re-applying idempotent migration 002 (one-time repair)"
-    );
-    let result = sqlx::query("DELETE FROM public._sqlx_migrations WHERE version = 2")
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    if result.rows_affected() == 0 {
-        return Err(
-            "migration 2 checksum mismatch but no version=2 row in public._sqlx_migrations".into(),
-        );
+/// Extract the migration version number from an error like "migration 15 was previously applied but has been modified"
+fn extract_modified_migration_version(msg: &str) -> Option<i64> {
+    let lower = msg.to_lowercase();
+    
+    // Pattern 1: "migration 15 was previously applied"
+    if let Some(idx) = lower.find("migration ") {
+        let after = &lower[idx + "migration ".len()..];
+        let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(v) = num_str.parse::<i64>() {
+            return Some(v);
+        }
     }
-    Ok(())
-}
-
-fn is_migration_15_checksum_mismatch(msg: &str) -> bool {
-    let m = msg.to_lowercase();
-    (m.contains("migration 15") || m.contains("version 15"))
-        && m.contains("has been modified")
-}
-
-async fn repair_stale_migration_15_record(pool: &PgPool) -> Result<(), String> {
-    log::warn!(
-        "Migration 015 checksum mismatch — removing stale record and re-applying (idempotent DROP TABLE IF EXISTS)"
-    );
-    sqlx::query("DELETE FROM public._sqlx_migrations WHERE version = 15")
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    
+    // Pattern 2: "version 15 " somewhere in the message  
+    if let Some(idx) = lower.find("version ") {
+        let after = &lower[idx + "version ".len()..];
+        let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(v) = num_str.parse::<i64>() {
+            return Some(v);
+        }
+    }
+    
+    None
 }
 
 /// Connect to PostgreSQL, apply migrations, seed on first run.
