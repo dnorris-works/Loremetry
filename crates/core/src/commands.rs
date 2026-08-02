@@ -228,7 +228,30 @@ async fn fetch_tokenmix_models(api_key: &str) -> ModelsResult {
         Err(e) => return ModelsResult { success: false, models: Vec::new(), error: format!("Client error: {}", e) },
     };
 
-    // Use the new API endpoint with type=llm filter to get only chat models with pricing
+    // Fetch from the primary endpoint (has type=llm filter)
+    let primary_models = fetch_from_aihubmix(&client, api_key).await;
+
+    // If primary returned models with pricing, use them
+    if !primary_models.is_empty() && primary_models.iter().any(|m| m.input_price.is_some()) {
+        return ModelsResult { success: true, models: primary_models, error: String::new() };
+    }
+
+    // If primary has models but no pricing, get pricing from legacy endpoint and merge
+    if !primary_models.is_empty() {
+        let legacy_models = fetch_from_legacy(&client, api_key).await;
+        let merged = merge_pricing(primary_models, &legacy_models);
+        return ModelsResult { success: true, models: merged, error: String::new() };
+    }
+
+    // Primary failed entirely, use legacy
+    let legacy_models = fetch_from_legacy(&client, api_key).await;
+    if legacy_models.is_empty() {
+        return ModelsResult { success: false, models: Vec::new(), error: "No models returned from either endpoint.".into() };
+    }
+    ModelsResult { success: true, models: legacy_models, error: String::new() }
+}
+
+async fn fetch_from_aihubmix(client: &reqwest::Client, api_key: &str) -> Vec<ModelInfo> {
     let resp = match client
         .get("https://aihubmix.com/api/v1/models?type=llm")
         .header("Authorization", format!("Bearer {}", api_key))
@@ -236,26 +259,19 @@ async fn fetch_tokenmix_models(api_key: &str) -> ModelsResult {
         .await
     {
         Ok(r) => r,
-        Err(_) => {
-            // Fallback to legacy endpoint if new API fails
-            return fetch_tokenmix_models_legacy(&client, api_key).await;
-        }
+        Err(_) => return Vec::new(),
     };
 
     let json: Value = match resp.json().await {
         Ok(v) => v,
-        Err(_) => return fetch_tokenmix_models_legacy(&client, api_key).await,
+        Err(_) => return Vec::new(),
     };
 
-    if let Some(err) = json.get("error") {
-        let msg = err["message"].as_str().unwrap_or("unknown");
-        return ModelsResult {
-            success: false, models: Vec::new(),
-            error: format!("API error: {}", msg),
-        };
+    if json.get("error").is_some() {
+        return Vec::new();
     }
 
-    let models: Vec<ModelInfo> = json["data"]
+    json["data"]
         .as_array()
         .unwrap_or(&Vec::new())
         .iter()
@@ -263,9 +279,15 @@ async fn fetch_tokenmix_models(api_key: &str) -> ModelsResult {
             let id = m["id"].as_str().unwrap_or("");
             if id.is_empty() { return None; }
 
-            // Pricing: pass through raw values from API
-            let input_price = m["pricing"]["input"].as_f64();
-            let output_price = m["pricing"]["output"].as_f64();
+            // Try multiple pricing paths
+            let input_price = m["pricing"]["input"].as_f64()
+                .or_else(|| m["pricing"]["prompt"].as_f64())
+                .or_else(|| m["input_price"].as_f64())
+                .or_else(|| m["pricing"]["input_cost_per_token"].as_f64());
+            let output_price = m["pricing"]["output"].as_f64()
+                .or_else(|| m["pricing"]["completion"].as_f64())
+                .or_else(|| m["output_price"].as_f64())
+                .or_else(|| m["pricing"]["output_cost_per_token"].as_f64());
 
             Some(ModelInfo {
                 id: id.to_string(),
@@ -277,17 +299,10 @@ async fn fetch_tokenmix_models(api_key: &str) -> ModelsResult {
                 output_price,
             })
         })
-        .collect();
-
-    if models.is_empty() {
-        return fetch_tokenmix_models_legacy(&client, api_key).await;
-    }
-
-    ModelsResult { success: true, models, error: String::new() }
+        .collect()
 }
 
-/// Legacy /v1/models endpoint fallback (no pricing, no type filter)
-async fn fetch_tokenmix_models_legacy(client: &reqwest::Client, api_key: &str) -> ModelsResult {
+async fn fetch_from_legacy(client: &reqwest::Client, api_key: &str) -> Vec<ModelInfo> {
     let resp = match client
         .get("https://api.tokenmix.ai/v1/models")
         .header("Authorization", format!("Bearer {}", api_key))
@@ -295,48 +310,61 @@ async fn fetch_tokenmix_models_legacy(client: &reqwest::Client, api_key: &str) -
         .await
     {
         Ok(r) => r,
-        Err(e) => return ModelsResult {
-            success: false, models: Vec::new(),
-            error: format!("Request failed: {}", e),
-        },
+        Err(_) => return Vec::new(),
     };
 
     let json: Value = match resp.json().await {
         Ok(v) => v,
-        Err(e) => return ModelsResult {
-            success: false, models: Vec::new(),
-            error: format!("Parse failed: {}", e),
-        },
+        Err(_) => return Vec::new(),
     };
 
-    if let Some(err) = json.get("error") {
-        let msg = err["message"].as_str().unwrap_or("unknown");
-        return ModelsResult {
-            success: false, models: Vec::new(),
-            error: format!("API error: {}", msg),
-        };
+    if json.get("error").is_some() {
+        return Vec::new();
     }
 
-    let models: Vec<ModelInfo> = json["data"]
+    json["data"]
         .as_array()
         .unwrap_or(&Vec::new())
         .iter()
-        .map(|m| {
+        .filter_map(|m| {
+            let id = m["id"].as_str().unwrap_or("");
+            if id.is_empty() { return None; }
+
             let input_price = m["pricing"]["input"].as_f64()
                 .or_else(|| m["pricing"]["prompt"].as_f64());
             let output_price = m["pricing"]["output"].as_f64()
                 .or_else(|| m["pricing"]["completion"].as_f64());
-            ModelInfo {
-                id: m["id"].as_str().unwrap_or("").to_string(),
+
+            Some(ModelInfo {
+                id: id.to_string(),
                 owned_by: m["owned_by"].as_str().unwrap_or("").to_string(),
                 input_price,
                 output_price,
-            }
+            })
         })
-        .filter(|m| !m.id.is_empty())
+        .collect()
+}
+
+/// Merge pricing from legacy models into primary models (matched by id).
+fn merge_pricing(mut primary: Vec<ModelInfo>, legacy: &[ModelInfo]) -> Vec<ModelInfo> {
+    let pricing_map: HashMap<&str, (&Option<f64>, &Option<f64>)> = legacy
+        .iter()
+        .map(|m| (m.id.as_str(), (&m.input_price, &m.output_price)))
         .collect();
 
-    ModelsResult { success: true, models, error: String::new() }
+    for model in &mut primary {
+        if model.input_price.is_none() || model.output_price.is_none() {
+            if let Some((input, output)) = pricing_map.get(model.id.as_str()) {
+                if model.input_price.is_none() {
+                    model.input_price = **input;
+                }
+                if model.output_price.is_none() {
+                    model.output_price = **output;
+                }
+            }
+        }
+    }
+    primary
 }
 
 async fn fetch_claude_models(db: &crate::db::Db) -> ModelsResult {
