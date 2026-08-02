@@ -437,16 +437,17 @@ async fn seed_prompt_templates(pool: &PgPool) -> Result<(), String> {
     let templates: Vec<SeedPrompt> = serde_json::from_str(SEED_PROMPT_TEMPLATES_JSON)
         .map_err(|e| format!("Cannot parse seed prompt-templates.json: {}", e))?;
 
-    // Dev app: always refresh from seed so prompt edits ship with the build.
-    sqlx::query("DELETE FROM prompt_templates")
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-
     for t in &templates {
         sqlx::query(
             "INSERT INTO prompt_templates (id, label, system_prompt, user_template, max_tokens, json_mode, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'))",
+             VALUES ($1, $2, $3, $4, $5, $6, to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'))
+             ON CONFLICT (id) DO UPDATE SET
+                 label = EXCLUDED.label,
+                 system_prompt = EXCLUDED.system_prompt,
+                 user_template = EXCLUDED.user_template,
+                 max_tokens = EXCLUDED.max_tokens,
+                 json_mode = EXCLUDED.json_mode,
+                 updated_at = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')",
         )
         .bind(&t.id)
         .bind(&t.label)
@@ -476,15 +477,16 @@ async fn seed_provider_models(pool: &PgPool) -> Result<(), String> {
     let models: Vec<SeedModel> = serde_json::from_str(SEED_PROVIDER_MODELS_JSON)
         .map_err(|e| format!("Cannot parse seed provider-models.json: {}", e))?;
 
-    sqlx::query("DELETE FROM provider_models")
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-
     for m in &models {
         sqlx::query(
             "INSERT INTO provider_models (id, provider, owned_by, input_price, output_price, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6)",
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (id) DO UPDATE SET
+                 provider = EXCLUDED.provider,
+                 owned_by = EXCLUDED.owned_by,
+                 input_price = EXCLUDED.input_price,
+                 output_price = EXCLUDED.output_price,
+                 sort_order = EXCLUDED.sort_order",
         )
         .bind(&m.id)
         .bind(&m.provider)
@@ -505,18 +507,17 @@ async fn seed_lookup_config(pool: &PgPool) -> Result<(), String> {
         .map_err(|e| format!("Cannot parse seed lookup-config.json: {}", e))?;
     let obj = parsed.as_object().ok_or("lookup-config.json must be a JSON object")?;
 
-    sqlx::query("DELETE FROM lookup_config")
+    for (key, value) in obj {
+        sqlx::query(
+            "INSERT INTO lookup_config (key, value) VALUES ($1, $2)
+             ON CONFLICT (key) DO UPDATE SET
+                 value = EXCLUDED.value",
+        )
+        .bind(key)
+        .bind(value.to_string())
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?;
-
-    for (key, value) in obj {
-        sqlx::query("INSERT INTO lookup_config (key, value) VALUES ($1, $2)")
-            .bind(key)
-            .bind(value.to_string())
-            .execute(pool)
-            .await
-            .map_err(|e| e.to_string())?;
     }
 
     Ok(())
