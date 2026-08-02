@@ -13,8 +13,11 @@ use crate::prompts;
 pub struct CraftProseChecksRequest {
     #[serde(alias = "folder")]
     pub story_id:   String,
+    #[serde(default)]
     pub provider:   String,
+    #[serde(default)]
     pub api_key:    String,
+    #[serde(default)]
     pub model:      String,
     #[serde(default)]
     pub bible_path: String,

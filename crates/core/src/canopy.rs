@@ -578,10 +578,15 @@ use crate::competition_analyzer::{CompetitorBook, CompetitionResult, Competition
 pub struct CompetitionCanopyRequest {
     #[serde(alias = "folder")]
     pub story_id:         String,
+    #[serde(default)]
     pub api_key:        String,
+    #[serde(default)]
     pub model:          String,
+    #[serde(default)]
     pub store:          String,
+    #[serde(default)]
     pub provider:       String,
+    #[serde(default)]
     pub canopy_api_key: String,
 }
 
@@ -850,9 +855,13 @@ pub async fn search_keywords_canopy(app: AppCtx, request: KeywordSearchCanopyReq
 pub struct ReviewMiningRequest {
     #[serde(alias = "folder")]
     pub story_id:         String,
+    #[serde(default)]
     pub canopy_api_key: String,
+    #[serde(default)]
     pub api_key:        String,
+    #[serde(default)]
     pub model:          String,
+    #[serde(default)]
     pub provider:       String,
 }
 
@@ -986,9 +995,13 @@ pub async fn mine_competitor_reviews(app: AppCtx, request: ReviewMiningRequest) 
 pub struct AuthorAnalysisRequest {
     #[serde(alias = "folder")]
     pub story_id:         String,
+    #[serde(default)]
     pub canopy_api_key: String,
+    #[serde(default)]
     pub api_key:        String,
+    #[serde(default)]
     pub model:          String,
+    #[serde(default)]
     pub provider:       String,
 }
 
@@ -1262,9 +1275,13 @@ use crate::analysis::GenreResult;
 pub struct MarketIntelRequest {
     #[serde(alias = "folder")]
     pub story_id:         String,
+    #[serde(default)]
     pub provider:       String,
+    #[serde(default)]
     pub api_key:        String,
+    #[serde(default)]
     pub model:          String,
+    #[serde(default)]
     pub canopy_api_key: String,
 }
 

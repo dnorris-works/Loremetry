@@ -732,7 +732,7 @@ fn inject_resolved_models(obj: &mut Value, assignments: &Value, server_default: 
         .unwrap_or("")
         .trim()
         .to_string();
-    if model_val.is_empty() && map.contains_key("model") {
+    if model_val.is_empty() {
         let resolved =
             loremetry_core::users::resolve_model_for_slot(assignments, "default", server_default);
         map.insert("model".into(), Value::String(resolved));

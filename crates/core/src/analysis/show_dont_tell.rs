@@ -22,8 +22,11 @@ use crate::prompts::{self, BibleTier};
 pub struct ShowDontTellRequest {
     #[serde(alias = "folder")]
     pub story_id:   String,
+    #[serde(default)]
     pub provider: String,
+    #[serde(default)]
     pub api_key:  String,
+    #[serde(default)]
     pub model:    String,
     #[serde(default)]
     pub bible_path: String,
@@ -201,8 +204,11 @@ fn parse_violations(value: &serde_json::Value) -> Vec<AiViolation> {
 
 #[derive(serde::Deserialize)]
 pub struct SuggestSdtFixRequest {
+    #[serde(default)]
     pub provider:      String,
+    #[serde(default)]
     pub api_key:       String,
+    #[serde(default)]
     pub model:         String,
     pub telling_text:  String,
     pub context:       String,

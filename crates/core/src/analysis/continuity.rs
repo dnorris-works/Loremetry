@@ -34,8 +34,11 @@ use crate::prompts::BibleTier;
 pub struct ContinuityRequest {
     #[serde(alias = "folder")]
     pub story_id:   String,
+    #[serde(default)]
     pub provider: String,
+    #[serde(default)]
     pub api_key:  String,
+    #[serde(default)]
     pub model:    String,
     #[serde(default)]
     pub extraction_model: String,
@@ -46,8 +49,11 @@ pub struct ContinuityRequest {
 #[derive(serde::Deserialize)]
 pub struct SeriesContinuityRequest {
     pub series_id: i64,
+    #[serde(default)]
     pub provider:  String,
+    #[serde(default)]
     pub api_key:   String,
+    #[serde(default)]
     pub model:     String,
     #[serde(default)]
     pub extraction_model: String,
@@ -602,8 +608,11 @@ fn render_findings_json(findings: &[db::ContinuityFindingRow], scope: &str, scop
 
 #[derive(serde::Deserialize)]
 pub struct SuggestFixRequest {
+    #[serde(default)]
     pub provider:   String,
+    #[serde(default)]
     pub api_key:    String,
+    #[serde(default)]
     pub model:      String,
     pub entity:     String,
     pub attribute:  String,

@@ -1588,8 +1588,11 @@ pub struct CraftPipelineRequest {
     #[serde(alias = "folder")]
     pub story_id:           String,
     pub selected:         Vec<String>,
+    #[serde(default)]
     pub provider:         String,
+    #[serde(default)]
     pub api_key:          String,
+    #[serde(default)]
     pub model:            String,           // default fallback
     #[serde(default)]
     pub model_summaries:  String,           // override for chapter summaries

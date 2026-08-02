@@ -53,8 +53,11 @@ pub struct AnalyzerResult {
 pub struct CsvRequest {
     pub keyword: String,
     pub csv_content: String,
+    #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
     pub model: String,
+    #[serde(default)]
     pub provider: String,
 }
 
@@ -696,9 +699,11 @@ pub struct ChatMessage {
 
 #[derive(Deserialize)]
 pub struct ChatRequest {
+    #[serde(default)]
     pub provider:       String,
     #[serde(default)]
     pub api_key:        String,
+    #[serde(default)]
     pub model:          String,
     pub message:        String,
     pub chapter_text:   String,

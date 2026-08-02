@@ -45,8 +45,11 @@ pub struct GenreResult {
 pub struct FolderRequest {
     #[serde(alias = "folder")]
     pub story_id: String,
+    #[serde(default)]
     pub api_key:  String,
+    #[serde(default)]
     pub model:    String,
+    #[serde(default)]
     pub provider: String,
     #[serde(default)]
     pub canopy_api_key: String,
@@ -61,9 +64,13 @@ pub struct FolderRequest {
 pub struct AnalyzeStoryRequest {
     #[serde(alias = "folder")]
     pub story_id:            String,
+    #[serde(default)]
     pub provider:          String,
+    #[serde(default)]
     pub api_key:           String,
+    #[serde(default)]
     pub model:             String,
+    #[serde(default)]
     pub force_resummarize: bool,
     #[serde(default)]
     pub canopy_api_key:    String,
