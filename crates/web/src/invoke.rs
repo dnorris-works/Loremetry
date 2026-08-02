@@ -294,7 +294,7 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, arg
             let result = commands::list_models(&db, provider, api_key).await?;
             let mut default_model = state.default_model.read().await.clone();
 
-            // If background task hasn't selected yet, pick cheapest now
+            // If background task hasn't selected yet, pick cheapest capable model now
             if default_model.is_empty() && result.success {
                 let mut priced: Vec<_> = result.models.iter()
                     .filter(|m| m.input_price.is_some())
@@ -303,7 +303,15 @@ async fn dispatch(state: &AppState, app: &loremetry_core::AppCtx, cmd: &str, arg
                     a.input_price.unwrap().partial_cmp(&b.input_price.unwrap())
                         .unwrap_or(std::cmp::Ordering::Equal)
                 });
-                if let Some(cheapest) = priced.first() {
+
+                // Prefer the cheapest "capable" model (input_price >= $0.0001/1K tokens).
+                // Ultra-cheap models often can't handle structured extraction prompts.
+                let capable: Vec<_> = priced.iter()
+                    .filter(|m| m.input_price.unwrap_or(0.0) >= 0.0001)
+                    .collect();
+                let selected = capable.first().copied().or(priced.first());
+
+                if let Some(cheapest) = selected {
                     default_model = cheapest.id.clone();
                     // Also store it for future requests
                     let mut lock = state.default_model.write().await;

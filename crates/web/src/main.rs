@@ -106,7 +106,15 @@ async fn main() {
                     priced.sort_by(|a, b| {
                         a.input_price.unwrap().partial_cmp(&b.input_price.unwrap()).unwrap_or(std::cmp::Ordering::Equal)
                     });
-                    if let Some(cheapest) = priced.first() {
+
+                    // Prefer the cheapest "capable" model (input_price >= $0.0001/1K tokens).
+                    // Ultra-cheap models often can't handle structured extraction prompts.
+                    let capable: Vec<_> = priced.iter()
+                        .filter(|m| m.input_price.unwrap_or(0.0) >= 0.0001)
+                        .collect();
+                    let selected = capable.first().copied().or(priced.first());
+
+                    if let Some(cheapest) = selected {
                         let mut lock = dm.write().await;
                         *lock = cheapest.id.clone();
                         tracing::info!("Auto-selected default model: {} (input_price: {:?})", cheapest.id, cheapest.input_price);
