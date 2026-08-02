@@ -20,7 +20,7 @@ pub struct PromptTemplate {
 }
 
 pub async fn load_template(pool: &PgPool, template_id: &str) -> Result<PromptTemplate, String> {
-    let row: (String, String, String, i64, i64) = sqlx::query_as(
+    let row: (String, String, String, i32, i32) = sqlx::query_as(
         "SELECT id, system_prompt, user_template, max_tokens, json_mode FROM prompt_templates WHERE id = $1",
     )
     .bind(template_id)
