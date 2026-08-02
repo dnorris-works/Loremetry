@@ -65,7 +65,7 @@ const lines = computed(() => analysisCtx.logLines.value);
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 200px;
   margin-top: 14px;
 }
 
@@ -106,7 +106,7 @@ const lines = computed(() => analysisCtx.logLines.value);
   border-radius: var(--radius);
   overflow-y: auto;
   padding: 12px;
-  min-height: 0;
+  min-height: 160px;
 }
 
 .log-stream {
