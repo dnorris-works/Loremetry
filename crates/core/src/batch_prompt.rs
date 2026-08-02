@@ -325,7 +325,10 @@ pub async fn process_chapters_batched(
         .await
         {
             Ok(v) => HashMap::from([(entry.item.file.clone(), v)]),
-            Err(_) => HashMap::new(),
+            Err(e) => {
+                crate::analysis::emit(app, &format!("    ⚠ {} — AI call failed: {}", entry.item.file, e));
+                HashMap::new()
+            }
         }
     } else {
         run_batches(
@@ -431,26 +434,32 @@ async fn run_batches(
                 for entry in &chunk {
                     if let Some(value) = map.get(&entry.item.file) {
                         results.insert(entry.item.file.clone(), value.clone());
-                    } else if let Ok(value) = run_single(
-                        app,
-                        provider,
-                        api_key,
-                        model,
-                        single_template_id,
-                        bible,
-                        &entry.item,
-                        single_extra,
-                        story_id,
-                    )
-                    .await
-                    {
-                        results.insert(entry.item.file.clone(), value);
+                    } else {
+                        match run_single(
+                            app,
+                            provider,
+                            api_key,
+                            model,
+                            single_template_id,
+                            bible,
+                            &entry.item,
+                            single_extra,
+                            story_id,
+                        )
+                        .await
+                        {
+                            Ok(value) => { results.insert(entry.item.file.clone(), value); }
+                            Err(e) => {
+                                crate::analysis::emit(app, &format!("    ⚠ {} — AI call failed: {}", entry.item.file, e));
+                            }
+                        }
                     }
                 }
             }
-            Err(_) => {
+            Err(batch_err) => {
+                crate::analysis::emit(app, &format!("  ⚠ Batch call failed: {} — falling back to single calls", batch_err));
                 for entry in &chunk {
-                    if let Ok(value) = run_single(
+                    match run_single(
                         app,
                         provider,
                         api_key,
@@ -463,7 +472,10 @@ async fn run_batches(
                     )
                     .await
                     {
-                        results.insert(entry.item.file.clone(), value);
+                        Ok(value) => { results.insert(entry.item.file.clone(), value); }
+                        Err(e) => {
+                            crate::analysis::emit(app, &format!("    ⚠ {} — AI call failed: {}", entry.item.file, e));
+                        }
                     }
                 }
             }
